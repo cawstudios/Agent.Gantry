@@ -457,22 +457,43 @@ export async function runGenericAgentTask(
     }
 
     if (parsed.action !== 'call_tool') {
+      const unsupportedAction = parsed.action || 'empty_action';
       const message = `Unsupported agent action: ${parsed.action}`;
+      const repeatKey = `unsupported_action:${unsupportedAction}`;
+      const repeatCount = (repeatedFailures.get(repeatKey) ?? 0) + 1;
+      repeatedFailures.set(repeatKey, repeatCount);
+      state.recoveryHint = {
+        repeatKey,
+        repeatCount,
+        error: 'unsupported_agent_action',
+        unsupportedAction,
+        instruction:
+          'The previous model response did not choose a valid action. Continue with a valid action: call_tool, final, or needs_input. If the latest browser action filled/changed the page, call browser_inspect before any further browser action.',
+      };
       recordAgentMemoryObservation(state, {
         step,
-        toolName: parsed.action,
+        toolName: unsupportedAction,
         actionInput: null,
-        observation: { status: 'failed', error: message },
+        observation: {
+          status: 'failed',
+          error: message,
+          recoveryHint: state.recoveryHint,
+        },
         status: 'failed',
         error: message,
       });
       await recordStep({
         step,
-        actionType: parsed.action,
+        actionType: unsupportedAction,
         status: 'failed',
         startedAt: stepStartedIso,
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - stepStartedAt,
+        observation: {
+          status: 'failed',
+          error: message,
+          recoveryHint: state.recoveryHint,
+        },
         error: message,
         promptMetrics,
         auditNote: parsed.auditNote,
@@ -486,6 +507,7 @@ export async function runGenericAgentTask(
         fallbackIfWrong: parsed.fallbackIfWrong,
         ...progressTrace,
       });
+      if (repeatCount < 2 && step < maxSteps) continue;
       return await finish(
         'failed',
         { status: 'failed', error: message },

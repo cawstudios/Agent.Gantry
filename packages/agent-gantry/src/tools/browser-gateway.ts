@@ -7,6 +7,7 @@ import type {
   GantryBrowserGatewayInspectRequest,
   GantryBrowserGatewayOpenRequest,
   GantryBrowserGatewayRequest,
+  GantryBrowserGatewayStateRequest,
   GantryBrowserGatewayToolName,
   GantryBrowserGatewayToolProvider,
   GantryBrowserGatewayVerifyDocumentActionRequest,
@@ -58,6 +59,28 @@ export function createGantryBrowserGatewayAgentTools(
       return result;
     }
   };
+
+  const makeStateRequest = (
+    toolName: GantryBrowserGatewayToolName,
+    input: Record<string, unknown>,
+    context: GantryAgentToolContext,
+  ): GantryBrowserGatewayStateRequest => ({
+    ...makeRequest(toolName, input, context),
+    snapshotId: readString(input, 'snapshotId'),
+    stateRef: readString(input, 'stateRef'),
+    family: readString(input, 'family'),
+    cursor: readString(input, 'cursor') ?? readNumber(input, 'cursor'),
+    limit: readNumber(input, 'limit'),
+    query: readString(input, 'query'),
+    families: readStringArray(input.families),
+    tableId: readString(input, 'tableId') ?? readNumber(input, 'tableId'),
+    rowCursor: readString(input, 'rowCursor') ?? readNumber(input, 'rowCursor'),
+    elementId: readString(input, 'elementId'),
+    ref: readString(input, 'ref'),
+    selector: readString(input, 'selector'),
+    queryOrCursor: readString(input, 'queryOrCursor'),
+    tabId: readString(input, 'tabId'),
+  });
 
   const tools: GantryAgentTool[] = [
     {
@@ -220,6 +243,267 @@ export function createGantryBrowserGatewayAgentTools(
           },
         ]
       : []),
+    ...(provider.listStateSections
+      ? [
+          {
+            name: 'browser_list_state_sections',
+            description:
+              'List the stored browser state sections for a snapshot: counts, stateRef, cursors, and unresolved families. Use this when the overview says more controls/tables/text exist.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool(
+                'browser_list_state_sections',
+                input,
+                context,
+                () =>
+                  (
+                    provider.listStateSections as NonNullable<
+                      GantryBrowserGatewayToolProvider['listStateSections']
+                    >
+                  )(
+                    makeStateRequest(
+                      'browser_list_state_sections',
+                      input,
+                      context,
+                    ),
+                  ),
+              ),
+          },
+        ]
+      : []),
+    ...(provider.readControls
+      ? [
+          {
+            name: 'browser_read_controls',
+            description:
+              'Read a bounded cursor window from stored browser controls. family can be controls, route, detail, document, pagination, form, modal, table, or text.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                family: { type: 'string' },
+                cursor: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                limit: { type: 'number' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool('browser_read_controls', input, context, () =>
+                (
+                  provider.readControls as NonNullable<
+                    GantryBrowserGatewayToolProvider['readControls']
+                  >
+                )(makeStateRequest('browser_read_controls', input, context)),
+              ),
+          },
+        ]
+      : []),
+    ...(provider.readTable
+      ? [
+          {
+            name: 'browser_read_table',
+            description:
+              'Read a stored table summary and a bounded row window by tableId/tableIndex. Use this instead of assuming the first sampled rows are the whole listing.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                tableId: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                rowCursor: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                cursor: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                limit: { type: 'number' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool('browser_read_table', input, context, () =>
+                (
+                  provider.readTable as NonNullable<
+                    GantryBrowserGatewayToolProvider['readTable']
+                  >
+                )(makeStateRequest('browser_read_table', input, context)),
+              ),
+          },
+        ]
+      : []),
+    ...(provider.searchState
+      ? [
+          {
+            name: 'browser_search_state',
+            description:
+              'Search stored browser state across controls, route/detail/document/pagination/form/modal/table/text families without sending the full DOM to the model.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                query: { type: 'string' },
+                families: { type: 'array', items: { type: 'string' } },
+                cursor: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                limit: { type: 'number' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool('browser_search_state', input, context, () =>
+                (
+                  provider.searchState as NonNullable<
+                    GantryBrowserGatewayToolProvider['searchState']
+                  >
+                )(makeStateRequest('browser_search_state', input, context)),
+              ),
+          },
+        ]
+      : []),
+    ...(provider.readElement
+      ? [
+          {
+            name: 'browser_read_element',
+            description:
+              'Read exact stored details for one elementId, ref, or selector from the current snapshot store.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                elementId: { type: 'string' },
+                ref: { type: 'string' },
+                selector: { type: 'string' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool('browser_read_element', input, context, () =>
+                (
+                  provider.readElement as NonNullable<
+                    GantryBrowserGatewayToolProvider['readElement']
+                  >
+                )(makeStateRequest('browser_read_element', input, context)),
+              ),
+          },
+        ]
+      : []),
+    ...(provider.readTextChunks
+      ? [
+          {
+            name: 'browser_read_text_chunks',
+            description:
+              'Read/search stored page text chunks for the snapshot. This is how the agent inspects text beyond the overview preview.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                queryOrCursor: { type: 'string' },
+                query: { type: 'string' },
+                cursor: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                limit: { type: 'number' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool(
+                'browser_read_text_chunks',
+                input,
+                context,
+                () =>
+                  (
+                    provider.readTextChunks as NonNullable<
+                      GantryBrowserGatewayToolProvider['readTextChunks']
+                    >
+                  )(
+                    makeStateRequest(
+                      'browser_read_text_chunks',
+                      input,
+                      context,
+                    ),
+                  ),
+              ),
+          },
+        ]
+      : []),
+    ...(provider.scrollToStateElement
+      ? [
+          {
+            name: 'browser_scroll_to_state_element',
+            description:
+              'Scroll the browser to a stored elementId/ref/selector from the snapshot store, then inspect again before consequential action.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                snapshotId: { type: 'string' },
+                stateRef: { type: 'string' },
+                elementId: { type: 'string' },
+                ref: { type: 'string' },
+                selector: { type: 'string' },
+                tabId: { type: 'string' },
+                timeoutMs: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
+            execute: async (
+              input: Record<string, unknown>,
+              context: GantryAgentToolContext,
+            ) =>
+              executeBrowserTool(
+                'browser_scroll_to_state_element',
+                input,
+                context,
+                () =>
+                  (
+                    provider.scrollToStateElement as NonNullable<
+                      GantryBrowserGatewayToolProvider['scrollToStateElement']
+                    >
+                  )(
+                    makeStateRequest(
+                      'browser_scroll_to_state_element',
+                      input,
+                      context,
+                    ),
+                  ),
+              ),
+          },
+        ]
+      : []),
     {
       name: 'browser_close',
       description:
@@ -329,6 +613,17 @@ function buildCurrentBrowserState(input: {
   const snapshot = asRecord(input.observation.snapshot);
   const selectorEvidence = asRecord(input.observation.selectorEvidence);
   const pageTransition = asRecord(input.observation.pageTransition);
+  const stateOverview =
+    asRecord(input.observation.stateOverview) ??
+    asRecord(snapshot?.stateOverview) ??
+    asRecord(selectorEvidence?.stateOverview) ??
+    asRecord(input.previousState?.stateOverview);
+  const candidateInventory =
+    asRecord(input.observation.candidateInventory) ??
+    asRecord(snapshot?.candidateInventory) ??
+    asRecord(selectorEvidence?.candidateInventory) ??
+    asRecord(input.previousState?.candidateInventory);
+  const lastStateWindow = buildLastStateWindow(input.observation);
   const observedScreenshotRef = input.observedScreenshotRefs[0] ?? null;
   const previousScreenshotRef =
     asNonEmptyString(input.previousState?.screenshotRef) ??
@@ -368,12 +663,21 @@ function buildCurrentBrowserState(input: {
       readString(input.observation, 'snapshotId') ??
       readString(snapshot, 'snapshotId') ??
       readString(input.previousState, 'snapshotId'),
+    stateRef:
+      readString(input.observation, 'stateRef') ??
+      readString(snapshot, 'stateRef') ??
+      readString(selectorEvidence, 'stateRef') ??
+      readString(input.previousState, 'stateRef'),
     screenshotRef,
     visualFreshness,
     openSurfaces,
     activeSurface: openSurfaces[0] ?? null,
     blockingOverlay,
     selectedAction: asRecord(pageTransition?.selectedAction) ?? null,
+    stateOverview,
+    candidateInventory,
+    lastStateWindow:
+      lastStateWindow ?? asRecord(input.previousState?.lastStateWindow) ?? null,
     actionCandidates,
     lastActionResult: compactRecord({
       status: readString(input.observation, 'status'),
@@ -388,6 +692,40 @@ function buildCurrentBrowserState(input: {
           })
         : null,
     }),
+  });
+}
+
+function buildLastStateWindow(
+  observation: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const mode = readString(observation, 'mode');
+  if (!mode || !mode.startsWith('state_')) return null;
+  const rowWindow = asRecord(observation.rowWindow);
+  return compactRecord({
+    mode,
+    snapshotId: readString(observation, 'snapshotId'),
+    stateRef: readString(observation, 'stateRef'),
+    family: readString(observation, 'family'),
+    query: readString(observation, 'query'),
+    tableId:
+      readString(asRecord(observation.table), 'tableId') ??
+      readString(observation, 'tableId'),
+    status: readString(observation, 'status'),
+    totalCount:
+      readNumber(observation, 'totalCount') ??
+      readNumber(rowWindow, 'totalCount'),
+    returnedCount:
+      readNumber(observation, 'returnedCount') ??
+      readNumber(rowWindow, 'returnedCount'),
+    nextCursor:
+      readString(observation, 'nextCursor') ??
+      readString(rowWindow, 'nextCursor'),
+    hasMore:
+      typeof observation.hasMore === 'boolean'
+        ? observation.hasMore
+        : typeof rowWindow?.hasMore === 'boolean'
+          ? rowWindow.hasMore
+          : null,
   });
 }
 
@@ -426,6 +764,47 @@ function collectBrowserActionCandidates(
       return;
     candidates.push(compacted);
   };
+
+  for (const windowItem of readRecordArray(observation.items).slice(0, 80)) {
+    const item = asRecord(windowItem.item) ?? windowItem;
+    const signal = [
+      readString(windowItem, 'family'),
+      candidateText(item),
+      readString(item, 'selector'),
+      readString(item, 'onclick'),
+      readString(item, 'ngClick'),
+      readString(item, 'className'),
+      readString(item, 'href'),
+    ]
+      .filter(Boolean)
+      .join(' ');
+    push({
+      type: isDocumentSignal(signal)
+        ? 'document_action'
+        : isPaginationSignal(signal)
+          ? 'pagination_action'
+          : /\b(view|detail|preview|open|more|tender)\b/i.test(signal)
+            ? 'detail_action'
+            : /\b(search|submit|apply|captcha|filter)\b/i.test(signal)
+              ? 'form_action'
+              : (readString(windowItem, 'family') ?? 'state_item'),
+      family: readString(windowItem, 'family'),
+      elementId:
+        readString(item, 'elementId') ?? readString(windowItem, 'elementId'),
+      ref: readString(item, 'ref') ?? readString(windowItem, 'ref'),
+      snapshotId:
+        readString(item, 'snapshotId') ??
+        readString(observation, 'snapshotId') ??
+        readString(snapshot, 'snapshotId'),
+      selector:
+        readString(item, 'selector') ?? readString(windowItem, 'selector'),
+      text: candidateText(item),
+      href: readString(item, 'href'),
+      onclick: readString(item, 'onclick'),
+      ngClick: readString(item, 'ngClick'),
+      className: readString(item, 'className'),
+    });
+  }
 
   for (const table of readRecordArray(snapshot?.tables).slice(0, 6)) {
     const tableIndex = readNumberLike(table.tableIndex);

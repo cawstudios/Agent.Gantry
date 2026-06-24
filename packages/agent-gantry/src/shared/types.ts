@@ -159,6 +159,7 @@ export interface GantryAgentCurrentBrowserState {
   readonly url?: string | null;
   readonly title?: string | null;
   readonly snapshotId?: string | null;
+  readonly stateRef?: string | null;
   readonly screenshotRef?: string | null;
   readonly visualFreshness: GantryAgentBrowserVisualFreshness;
   readonly openSurfaces?: readonly Record<string, unknown>[];
@@ -166,6 +167,9 @@ export interface GantryAgentCurrentBrowserState {
   readonly blockingOverlay?: Record<string, unknown> | null;
   readonly selectedAction?: Record<string, unknown> | null;
   readonly lastActionResult?: Record<string, unknown> | null;
+  readonly stateOverview?: Record<string, unknown> | null;
+  readonly candidateInventory?: Record<string, unknown> | null;
+  readonly lastStateWindow?: Record<string, unknown> | null;
   readonly actionCandidates?: readonly Record<string, unknown>[];
 }
 
@@ -269,6 +273,13 @@ export type GantryBrowserGatewayToolName =
   | 'browser_inspect'
   | 'browser_act'
   | 'browser_verify_document_action'
+  | 'browser_list_state_sections'
+  | 'browser_read_controls'
+  | 'browser_read_table'
+  | 'browser_search_state'
+  | 'browser_read_element'
+  | 'browser_read_text_chunks'
+  | 'browser_scroll_to_state_element'
   | 'browser_close';
 
 export type GantryBrowserGatewayInspectMode =
@@ -332,6 +343,23 @@ export interface GantryBrowserGatewayVerifyDocumentActionRequest extends GantryB
   readonly reason?: string | null;
 }
 
+export interface GantryBrowserGatewayStateRequest extends GantryBrowserGatewayRequest {
+  readonly snapshotId?: string | null;
+  readonly stateRef?: string | null;
+  readonly family?: string | null;
+  readonly cursor?: string | number | null;
+  readonly limit?: number | null;
+  readonly query?: string | null;
+  readonly families?: readonly string[];
+  readonly tableId?: string | number | null;
+  readonly rowCursor?: string | number | null;
+  readonly elementId?: string | null;
+  readonly ref?: string | null;
+  readonly selector?: string | null;
+  readonly queryOrCursor?: string | null;
+  readonly tabId?: string | null;
+}
+
 export interface GantryBrowserGatewayToolProvider {
   status(
     input: GantryBrowserGatewayRequest,
@@ -347,6 +375,27 @@ export interface GantryBrowserGatewayToolProvider {
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
   verifyDocumentAction?(
     input: GantryBrowserGatewayVerifyDocumentActionRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  listStateSections?(
+    input: GantryBrowserGatewayStateRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  readControls?(
+    input: GantryBrowserGatewayStateRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  readTable?(
+    input: GantryBrowserGatewayStateRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  searchState?(
+    input: GantryBrowserGatewayStateRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  readElement?(
+    input: GantryBrowserGatewayStateRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  readTextChunks?(
+    input: GantryBrowserGatewayStateRequest,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  scrollToStateElement?(
+    input: GantryBrowserGatewayStateRequest,
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
   close(
     input: GantryBrowserGatewayRequest,

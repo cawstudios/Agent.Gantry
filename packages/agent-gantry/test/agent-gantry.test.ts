@@ -1998,6 +1998,78 @@ describe('@cawstudios/agent-gantry', () => {
       }),
     });
   });
+
+  it('continues with recovery context after one empty model action', async () => {
+    const modelStates: Array<Record<string, unknown>> = [];
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async (input) => {
+          modelStates.push(input.input as Record<string, unknown>);
+          if (modelStates.length === 1) {
+            return {
+              action: '',
+              previousGoalEvaluation: {
+                goal: 'solve captcha',
+                status: 'partial',
+                evidenceRefs: [],
+                reason: 'The captcha input was filled.',
+              },
+              memoryUpdate: {},
+              nextGoal: {
+                goal: 'inspect after fill',
+                requiredEvidence: ['current browser state'],
+                recommendedTool: 'browser_inspect',
+              },
+            };
+          }
+          expect((input.input as Record<string, unknown>).state).toMatchObject({
+            recoveryHint: expect.objectContaining({
+              error: 'unsupported_agent_action',
+              unsupportedAction: 'empty_action',
+            }),
+          });
+          return {
+            action: 'final',
+            output: {
+              status: 'needs_review',
+              reason: 'recovered from empty action',
+            },
+            previousGoalEvaluation: {
+              goal: 'inspect after fill',
+              status: 'not_evaluated',
+              evidenceRefs: [],
+              reason: 'Recovered from invalid action.',
+            },
+            memoryUpdate: {},
+            nextGoal: {
+              goal: 'continue',
+              requiredEvidence: [],
+              recommendedTool: null,
+            },
+          };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'generic.empty-action-recovery',
+      instructions: 'Recover from invalid model actions.',
+      input: {},
+      tools: [],
+      maxSteps: 2,
+    });
+
+    expect(result).toMatchObject({
+      status: 'needs_review',
+      output: {
+        reason: 'recovered from empty action',
+      },
+    });
+    expect(result?.steps[0]).toMatchObject({
+      actionType: 'empty_action',
+      status: 'failed',
+    });
+  });
 });
 
 function cryptoSign(secret: string, payload: string): string {
