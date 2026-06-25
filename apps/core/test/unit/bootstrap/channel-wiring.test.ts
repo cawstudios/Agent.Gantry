@@ -1807,6 +1807,39 @@ describe('createChannelWiring', () => {
     ).resolves.toBe(false);
   });
 
+  it('flushes host terminal todo status over the latest model-rendered card', async () => {
+    const renderAgentTodo = vi.fn(async () => true);
+    const render = createAgentTodoRenderer({
+      findBoundChannel: () => makeChannel({ renderAgentTodo }),
+      asAgentTodoSurface: (channel) => channel,
+      logger: { error: vi.fn() },
+    });
+
+    await render('tg:group', {
+      summary: 'Plan done',
+      status: 'done',
+      threadId: 'thread-1',
+      items: [{ id: '1', title: 'Work', status: 'completed' }],
+    });
+
+    await expect(
+      render.finalize('tg:group', {
+        threadId: 'thread-1',
+        status: 'failed',
+      }),
+    ).resolves.toBe(true);
+
+    expect(renderAgentTodo).toHaveBeenLastCalledWith(
+      'tg:group',
+      expect.objectContaining({
+        summary: 'Plan done',
+        status: 'failed',
+        flush: true,
+        items: [{ id: '1', title: 'Work', status: 'completed' }],
+      }),
+    );
+  });
+
   it('does not emit user-question receipts through progress or direct sends', async () => {
     const app = makeApp({
       'tg:group': { name: 'Group', folder: 'group' },

@@ -7,8 +7,10 @@ function makeModule(overrides?: {
   thread?: Record<string, unknown> | null;
   ops?: Record<string, unknown>;
   runtimeEvents?: Record<string, unknown>;
+  messageReactions?: Record<string, unknown>;
   routable?: boolean;
   liveAdmissionAppId?: string | null;
+  createId?: () => string;
 }) {
   const conversations = {
     getConversation: vi.fn(async () =>
@@ -56,6 +58,7 @@ function makeModule(overrides?: {
     conversations: conversations as never,
     ops: ops as never,
     runtimeEvents,
+    messageReactions: overrides?.messageReactions as never,
     liveAdmissionAppId: overrides?.liveAdmissionAppId,
     isConversationRoutable: vi.fn(() => overrides?.routable ?? true),
     providerForConversationJid: (jid) =>
@@ -63,7 +66,7 @@ function makeModule(overrides?: {
     makeQueueKey: (jid, threadId) =>
       threadId ? `${jid}::thread:${threadId}` : jid,
     now: () => '2026-04-24T00:00:00.000Z',
-    createId: () => 'message-1',
+    createId: overrides?.createId ?? (() => 'message-1'),
   });
   return { module, conversations, ops, runtimeEvents };
 }
@@ -118,6 +121,60 @@ describe('ConversationMessageIngressModule', () => {
           direction: 'inbound',
           deliveryStatus: 'accepted',
         }),
+      }),
+    );
+  });
+
+  it('adds a seen reaction when ingress provides a native message ref', async () => {
+    const addReaction = vi.fn(async () => undefined);
+    const { module, ops } = makeModule({
+      messageReactions: { addReaction },
+    });
+
+    await module.acceptMessage({
+      appId: 'app-one',
+      invocationId: 'invocation-1',
+      conversationId: 'conversation:tg:-100',
+      message: 'Run this',
+      messageRef: '12345',
+    });
+
+    expect(addReaction).toHaveBeenCalledWith('tg:-100', '12345', 'seen');
+    expect(ops.storeMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^external-ingress:/),
+        external_message_id: '12345',
+      }),
+    );
+  });
+
+  it('uses a stable internal id for native message ref redelivery', async () => {
+    let nextId = 0;
+    const { module, ops } = makeModule({
+      createId: () => `message-${(nextId += 1)}`,
+    });
+
+    const first = await module.acceptMessage({
+      appId: 'app-one',
+      invocationId: 'invocation-1',
+      conversationId: 'conversation:tg:-100',
+      message: 'Run this',
+      messageRef: '12345',
+    });
+    const second = await module.acceptMessage({
+      appId: 'app-one',
+      invocationId: 'invocation-2',
+      conversationId: 'conversation:tg:-100',
+      message: 'Run this',
+      messageRef: '12345',
+    });
+
+    expect(first.messageId).toBe(second.messageId);
+    expect(ops.storeMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        id: first.messageId,
+        external_message_id: '12345',
       }),
     );
   });

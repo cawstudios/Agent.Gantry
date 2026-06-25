@@ -42,12 +42,6 @@ function recoveryActionAffordances(input: {
 }): MessageActionAffordance[] {
   return [
     {
-      kind: 'scheduler_run_now',
-      label: 'Retry now',
-      jobId: input.job.id,
-      runId: input.runId,
-    },
-    {
       kind: 'scheduler_pause_job',
       label: 'Pause job',
       jobId: input.job.id,
@@ -66,14 +60,7 @@ function runAgainActionAffordances(input: {
   job: Job;
   runId: string;
 }): MessageActionAffordance[] {
-  return [
-    {
-      kind: 'scheduler_run_now',
-      label: 'Run again',
-      jobId: input.job.id,
-      runId: input.runId,
-    },
-  ];
+  return [];
 }
 
 export function logMemoryDreamJobFailure(input: {

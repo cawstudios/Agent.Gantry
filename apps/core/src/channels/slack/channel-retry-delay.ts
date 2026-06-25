@@ -1,11 +1,22 @@
 const SLACK_RETRY_DELAY_FALLBACK_MS = 1000;
 const SLACK_RETRY_DELAY_MAX_MS = 5000;
+const SLACK_RETRY_JITTER_MAX_MS = 250;
 
 export function clampSlackRetryDelayMs(delayMs: number): number {
   if (!Number.isFinite(delayMs) || delayMs <= 0) {
     return SLACK_RETRY_DELAY_FALLBACK_MS;
   }
   return Math.min(SLACK_RETRY_DELAY_MAX_MS, Math.max(1, Math.round(delayMs)));
+}
+
+function withSlackRetryJitterMs(delayMs: number): number {
+  const baseMs = clampSlackRetryDelayMs(delayMs);
+  // ponytail: keep jitter local and bounded; no seeded backoff machinery.
+  const jitterMs = Math.floor(
+    Math.random() *
+      Math.min(SLACK_RETRY_JITTER_MAX_MS, Math.max(1, baseMs / 5)),
+  );
+  return clampSlackRetryDelayMs(baseMs + jitterMs);
 }
 
 export function slackRateLimitRetryDelayMs(input: unknown): number | null {
@@ -29,12 +40,12 @@ export function slackRateLimitRetryDelayMs(input: unknown): number | null {
   ];
   for (const value of values) {
     if (typeof value === 'number' && value > 0) {
-      return clampSlackRetryDelayMs(value * 1000);
+      return withSlackRetryJitterMs(value * 1000);
     }
     if (typeof value === 'string') {
       const parsed = Number.parseFloat(value);
       if (Number.isFinite(parsed) && parsed > 0) {
-        return clampSlackRetryDelayMs(parsed * 1000);
+        return withSlackRetryJitterMs(parsed * 1000);
       }
     }
   }
@@ -44,7 +55,7 @@ export function slackRateLimitRetryDelayMs(input: unknown): number | null {
     candidate.code === 429 ||
     candidate.error === 'ratelimited'
   ) {
-    return SLACK_RETRY_DELAY_FALLBACK_MS;
+    return withSlackRetryJitterMs(SLACK_RETRY_DELAY_FALLBACK_MS);
   }
   return null;
 }

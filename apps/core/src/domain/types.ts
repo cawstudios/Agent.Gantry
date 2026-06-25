@@ -517,13 +517,22 @@ export type MessageActionAffordance =
       actionToken: string;
     };
 
-export interface MessageActionCallbackInput {
-  kind: 'live_turn_stop';
-  conversationJid: string;
-  threadId?: string;
-  userId?: string;
-  actionToken?: string;
-}
+export type MessageActionCallbackInput =
+  | {
+      kind: 'live_turn_stop';
+      conversationJid: string;
+      threadId?: string;
+      userId?: string;
+      actionToken?: string;
+    }
+  | {
+      kind: 'scheduler_run_now';
+      conversationJid: string;
+      threadId?: string;
+      userId?: string;
+      jobId: string;
+      runId?: string | null;
+    };
 
 export type OnMessageAction = (
   input: MessageActionCallbackInput,
@@ -596,6 +605,10 @@ export interface MessageSink {
     text: string,
     options?: MessageSendOptions,
   ): Promise<void | MessageDeliveryResult>;
+}
+
+export interface MessageReactionSink {
+  addReaction(jid: string, messageRef: string, emoji: string): Promise<void>;
 }
 
 export interface TypingSink {

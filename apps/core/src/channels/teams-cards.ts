@@ -45,6 +45,13 @@ export interface TeamsAdaptiveCardAction {
         actionToken: string;
         targetJid: string;
         threadId?: string;
+      }
+    | {
+        action: 'message_action';
+        kind: 'scheduler_run_now';
+        jobId: string;
+        targetJid: string;
+        threadId?: string;
       };
 }
 
@@ -214,19 +221,37 @@ export function buildTeamsMessageCard(options: {
 }): TeamsAdaptiveCardPayload {
   const actions = (options.actionAffordances ?? [])
     .map((action): TeamsAdaptiveCardAction | null => {
-      if (action.kind !== 'live_turn_stop' || !action.label.trim()) return null;
-      return {
-        type: 'Action.Execute',
-        title: action.label.trim(),
-        verb: 'gantry.live.stop',
-        data: {
-          action: 'message_action',
-          kind: 'live_turn_stop',
-          actionToken: action.actionToken,
-          targetJid: options.targetJid,
-          ...(options.threadId ? { threadId: options.threadId } : {}),
-        },
-      };
+      if (!action.label.trim()) return null;
+      if (action.kind === 'live_turn_stop') {
+        return {
+          type: 'Action.Execute',
+          title: action.label.trim(),
+          verb: 'gantry.live.stop',
+          data: {
+            action: 'message_action',
+            kind: 'live_turn_stop',
+            actionToken: action.actionToken,
+            targetJid: options.targetJid,
+            ...(options.threadId ? { threadId: options.threadId } : {}),
+          },
+        };
+      }
+      if (action.kind === 'scheduler_run_now' && action.jobId.trim()) {
+        // ponytail: only scheduler_run_now is wired here; add pause/open when they share a callback path.
+        return {
+          type: 'Action.Execute',
+          title: action.label.trim(),
+          verb: 'gantry.scheduler.run_now',
+          data: {
+            action: 'message_action',
+            kind: 'scheduler_run_now',
+            jobId: action.jobId,
+            targetJid: options.targetJid,
+            ...(options.threadId ? { threadId: options.threadId } : {}),
+          },
+        };
+      }
+      return null;
     })
     .filter((action): action is TeamsAdaptiveCardAction => action !== null);
   return {

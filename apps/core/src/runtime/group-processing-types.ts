@@ -47,6 +47,10 @@ export interface GroupProcessor {
       existingRunLeaseFencingVersion?: number;
       finalRetry?: boolean;
       onRunResult?: (result: 'success' | 'error' | 'stopped') => void;
+      onFirstProgress?: (input: {
+        jid: string;
+        messageRef: string;
+      }) => Promise<void> | void;
     },
   ) => Promise<boolean>;
 }

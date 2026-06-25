@@ -3,6 +3,7 @@ import {
   ChannelOwnershipPort,
   GroupDiscoverySource,
   InteractionSurface,
+  MessageReactionSink,
   MessageSink,
   OnInboundMessage,
   OnChatMetadata,
@@ -20,6 +21,13 @@ import type { RuntimeSettings } from '../config/settings/runtime-settings.js';
 import type { RuntimeLeasePort } from '../domain/ports/runtime-lease.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
 import type { AgentTodoSink } from '../domain/ports/task-lifecycle.js';
+
+export const CHANNEL_STREAM_UPDATE_INTERVAL_MS = {
+  slack: 550,
+  telegram: 950,
+  teams: 1800,
+  discord: 1200,
+} as const;
 
 export interface ChannelOpts {
   onMessage: OnInboundMessage;
@@ -52,6 +60,7 @@ export type ChannelAdapter = ChannelLifecyclePort &
       StreamingStateSink &
       TypingSink &
       ProgressSink &
+      MessageReactionSink &
       GroupDiscoverySource &
       InteractionSurface &
       PlanReviewSurface &

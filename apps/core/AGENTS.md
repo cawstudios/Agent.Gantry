@@ -121,6 +121,7 @@
 - Persistent permission approvals for scheduler blockers must re-run setup readiness for matching `Setup required` paused jobs, reactivate and queue only after shared readiness passes, and send a receipt that names queued or still-blocked jobs.
 - Permission approval timeout must stay human-scale by default (300000ms), resolve `PERMISSION_APPROVAL_TIMEOUT_MS` before `GANTRY_PERMISSION_TIMEOUT_MS`, and preserve runtime `.env` fallback for shared timeout consumers.
 - Permission approval prompts and receipts must stay scan-readable and auditable: format tool inputs with typed sections, show long commands with head/tail truncation, keep persistent rules in Details/audit using safe rule summaries, and keep receipts tied to the exact approved action.
+- If a native permission prompt hides full command/diff/settings details behind a channel action, persist the redacted full-view payload with the durable pending interaction or keep a visible inline fallback; approvers must not be able to approve after restart without inspectable evidence.
 - Keep the architecture simple, do not over complicate
 - MCP source inventory, requestable semantic capabilities, and selected
   `capability:<id>` authority must stay separate in runner projections.
@@ -152,7 +153,9 @@
 - `ChannelWiring.sendProviderMessage` is recovery-only: recovery paths must mint a channel-wiring opaque permit bound to the claimed outbound item/destination before dispatch, and non-recovery files must not call `createRecoveryDispatchPermit` or `sendProviderMessage`.
 - Runtime provider-visible text streaming may send live deltas only after passing through the stateful user-visible stream sanitizer. Never send raw provider deltas directly; final streaming calls close the generation and flush sanitizer carry.
 - Runtime progress/status/receipt dispatch may use provider progress sinks, but progress text must stay host-authored status only. Do not send model/provider deltas, provider session handles, or arbitrary assistant text through progress updates.
+- Live message reaction acks are best-effort channel delivery hints. Use native provider message refs only, keep them out of durable authority, and fire running reactions from first provider-visible progress rather than live-turn claim.
 - Runtime progress handles are turn-scoped by generation. Permission waits must pause active elapsed time and heartbeat updates, resume the same generation on prompt approval, and allocate a fresh generation only after background demotion or a new user turn.
+- Channel streaming sinks must gate chunks by generation, clear old stream state on generation rollover, and seal the latest generation on reset/done so stale provider chunks cannot recreate visible output after `/new` or continuation.
 - Channel progress adapters with persisted handles must let newer replace-only progress generations take over the existing handle while still dropping older generations; otherwise a restarted or multi-turn run can silently lose `Working`/`Waiting` updates.
 - Runtime progress generation must stay separate from streaming-chunk generation. SDK success markers may advance streaming generations within a turn, but final progress such as `Done in N` must keep the active progress handle generation so follow-up receipts can be replaced.
 - Runtime final progress such as `Done in N` must not be replace-only. Fast streaming can cancel the delayed initial progress before a handle exists, and terminal progress must still be allowed to create a final status.

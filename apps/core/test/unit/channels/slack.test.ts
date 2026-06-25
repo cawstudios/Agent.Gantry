@@ -82,6 +82,9 @@ vi.mock('@slack/bolt', () => ({
           .fn()
           .mockResolvedValue({ ok: true, message_ts: '1710000000.100201' }),
       },
+      reactions: {
+        add: vi.fn().mockResolvedValue({ ok: true }),
+      },
       apiCall: vi.fn().mockResolvedValue({ ok: false }),
       views: {
         publish: vi.fn().mockResolvedValue({ ok: true }),
@@ -127,6 +130,8 @@ vi.mock('@slack/bolt', () => ({
 }));
 
 import { createSlackChannel, SlackChannel } from '@core/channels/slack.js';
+import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
+import { slackRateLimitRetryDelayMs } from '@core/channels/slack/channel-retry-delay.js';
 import {
   buildPermissionPromptContentBlocks,
   buildPermissionReceiptBlocks,
@@ -223,6 +228,7 @@ describe('Slack channel', () => {
   afterEach(() => {
     if (savedGantryHome === undefined) delete process.env.GANTRY_HOME;
     else process.env.GANTRY_HOME = savedGantryHome;
+    configurePendingInteractionDurability(null);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -254,6 +260,25 @@ describe('Slack channel', () => {
       if (savedApp !== undefined) process.env.SLACK_APP_TOKEN = savedApp;
       else delete process.env.SLACK_APP_TOKEN;
     }
+  });
+
+  it('adds Slack reactions idempotently', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+    await channel.connect({ inbound: false });
+
+    await channel.addReaction('sl:C1234567890', '1710000000.000100', 'seen');
+    await channel.addReaction('sl:C1234567890', '1710000000.000100', 'seen');
+
+    expect(appRef.current.client.reactions.add).toHaveBeenCalledTimes(1);
+    expect(appRef.current.client.reactions.add).toHaveBeenCalledWith({
+      channel: 'C1234567890',
+      timestamp: '1710000000.000100',
+      name: 'eyes',
+    });
   });
 
   it('records metadata only for unregistered Slack conversations', async () => {
@@ -800,12 +825,12 @@ describe('Slack channel', () => {
     );
   });
 
-  it('fails closed when Slack scheduler action buttons are clicked', async () => {
-    const channel = new SlackChannel(
-      'xoxb-token',
-      'xapp-token',
-      createOptsWithApproverHook(['U_APPROVER']) as any,
-    );
+  it('routes Slack scheduler run-now action buttons through the message action callback', async () => {
+    const opts = {
+      ...createOptsWithApproverHook(['U_APPROVER']),
+      onMessageAction: vi.fn(),
+    };
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
     await channel.connect();
 
     const actionHandler = appRef.current.actionHandlers.get(
@@ -822,16 +847,23 @@ describe('Slack channel', () => {
           runId: 'run-1',
         }),
       },
-      body: { channel: { id: 'C1234567890' }, user: { id: 'U_APPROVER' } },
+      body: {
+        channel: { id: 'C1234567890' },
+        user: { id: 'U_APPROVER' },
+        message: { thread_ts: '1710000000.000111' },
+      },
     });
 
     expect(ack).toHaveBeenCalled();
-    expect(appRef.current.client.chat.postEphemeral).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C1234567890',
-        user: 'U_APPROVER',
-      }),
-    );
+    expect(opts.onMessageAction).toHaveBeenCalledWith({
+      kind: 'scheduler_run_now',
+      conversationJid: 'sl:C1234567890',
+      threadId: '1710000000.000111',
+      userId: 'U_APPROVER',
+      jobId: 'job-1',
+      runId: 'run-1',
+    });
+    expect(appRef.current.client.chat.postEphemeral).not.toHaveBeenCalled();
   });
 
   it('routes Slack live stop action buttons through the message action callback', async () => {
@@ -980,6 +1012,15 @@ describe('Slack channel', () => {
         warnings: ['slack.rate_limited_retry'],
       }),
     );
+  });
+
+  it('adds bounded jitter to Slack rate-limit retry delays', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999);
+
+    const retryDelayMs = slackRateLimitRetryDelayMs({ status: 429 });
+
+    expect(retryDelayMs).toBeGreaterThan(1000);
+    expect(retryDelayMs).toBeLessThanOrEqual(1250);
   });
 
   it('clamps Slack outbound retry_after waits to a bounded maximum', async () => {
@@ -1414,7 +1455,9 @@ describe('Slack channel', () => {
     expect(postCall?.text).toContain(
       'Approval applies to the parent conversation.',
     );
-    expect(postCall?.text).toContain('Command:\n```\ngit status --short\n```');
+    expect(JSON.stringify(postCall?.blocks || [])).not.toContain(
+      'git status --short',
+    );
     const actionsBlock = postCall?.blocks?.find(
       (block: any) => block.type === 'actions',
     ) as { elements?: Array<{ action_id?: string }> } | undefined;
@@ -1422,11 +1465,43 @@ describe('Slack channel', () => {
       (element) => element.action_id,
     );
     expect(new Set(actionIds).size).toBe(actionIds.length);
+    expect(actionIds).toContain('gantry_perm_full_view');
     expect(actionIds).toContain('gantry_perm_decision_allow_once');
 
     for (const actionId of SLACK_PERMISSION_DECISION_ACTION_IDS) {
       expect(appRef.current.actionHandlers.has(actionId)).toBe(true);
     }
+    const fullViewHandler = appRef.current.actionHandlers.get(
+      'gantry_perm_full_view',
+    );
+    await fullViewHandler?.({
+      ack: vi.fn().mockResolvedValue(undefined),
+      body: {
+        channel: { id: 'C123' },
+        trigger_id: 'trigger-full-view',
+        user: { id: 'U_APPROVER' },
+      },
+      action: {
+        value: JSON.stringify({
+          requestId: 'perm-cmd',
+        }),
+      },
+    });
+    expect(appRef.current.client.views.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger_id: 'trigger-full-view',
+        view: expect.objectContaining({
+          callback_id: 'gantry_perm_full_view_modal',
+          blocks: expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.objectContaining({
+                text: expect.stringContaining('git status --short'),
+              }),
+            }),
+          ]),
+        }),
+      }),
+    );
     const actionHandler = appRef.current.actionHandlers.get(
       'gantry_perm_decision_allow_once',
     );
@@ -1443,6 +1518,79 @@ describe('Slack channel', () => {
 
     await expect(approvalPromise).resolves.toEqual(
       expect.objectContaining({ approved: true }),
+    );
+  });
+
+  it('opens durable Slack permission full-view payloads after channel restart', async () => {
+    configurePendingInteractionDurability({
+      repository: {
+        listPendingInteractions: vi.fn(async () => [
+          {
+            id: 'pending-slack-full-view',
+            appId: 'default',
+            runId: 'run-1',
+            kind: 'permission',
+            status: 'pending',
+            payload: {
+              requestId: 'perm-durable-full-view',
+              sourceAgentFolder: 'slack_main',
+              conversationId: 'sl:C123',
+              decisionPolicy: 'same_channel',
+              permissionFullView: {
+                label: 'View full command',
+                title: 'Full command',
+                filename: 'permission-command.txt',
+                content: 'git status --short',
+              },
+            },
+            callbackRoute: null,
+            idempotencyKey: 'permission:slack_main:perm-durable-full-view',
+            approverRef: null,
+            resolution: null,
+            createdAt: '2026-06-23T00:00:00.000Z',
+            expiresAt: '2026-06-24T00:00:00.000Z',
+            resolvedAt: null,
+          },
+        ]),
+      } as never,
+    });
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U_APPROVER']) as any,
+    );
+    await channel.connect();
+
+    const fullViewHandler = appRef.current.actionHandlers.get(
+      'gantry_perm_full_view',
+    );
+    await fullViewHandler?.({
+      ack: vi.fn().mockResolvedValue(undefined),
+      body: {
+        channel: { id: 'C123' },
+        trigger_id: 'trigger-full-view',
+        user: { id: 'U_APPROVER' },
+      },
+      action: {
+        value: JSON.stringify({
+          requestId: 'perm-durable-full-view',
+        }),
+      },
+    });
+
+    expect(appRef.current.client.views.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger_id: 'trigger-full-view',
+        view: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.objectContaining({
+                text: expect.stringContaining('git status --short'),
+              }),
+            }),
+          ]),
+        }),
+      }),
     );
   });
 

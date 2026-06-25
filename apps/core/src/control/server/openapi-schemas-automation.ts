@@ -238,6 +238,7 @@ export const automationOpenApiSchemas: Record<string, JsonSchema> = {
       message: { type: 'string' },
       senderId: { type: 'string' },
       senderName: { type: 'string' },
+      messageRef: { type: 'string' },
       correlationId: { type: 'string' },
     },
   },

@@ -25,20 +25,20 @@ export function formatRunStatusMessage(args: {
       ? ''
       : ` · ${formatDuration(args.durationMs)}`;
   const summary = notificationOutcome(displaySummary, args.runStatus, denial);
-  const lines = [
-    `**${statusEmoji(statusText)} ${statusText}** · ${args.job.name}${duration}`,
-    `Completed: ${summary}`,
-    'Used: scheduler job',
-    'Changed: not reported',
-    'Delegated: no',
-  ];
   const action = notificationAction(
     args.runStatus,
     displaySummary,
     denial,
     args.pauseReason,
   );
-  lines.push(`Needs attention: ${action ?? 'none'}`);
+  const lines = [
+    `**${statusEmoji(statusText)} ${statusText}** · ${args.job.name}${duration}`,
+    `Completed: ${summary}`,
+    `Used: ${denial ? humanizeTechnicalIdentifier(denial.toolName) : 'none reported'}`,
+    'Changed: none',
+    'Delegated: no',
+    `Needs attention: ${action || 'none'}`,
+  ];
   const next = nextRunLabel(args.nextRun, args.runStatus);
   if (next) lines.push(`Next: ${next}`);
   return lines.join('\n');

@@ -54,6 +54,7 @@ vi.mock('grammy', () => ({
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
       getChatMember: vi.fn().mockResolvedValue({ status: 'administrator' }),
       editMessageText: vi.fn().mockResolvedValue(undefined),
+      setMessageReaction: vi.fn().mockResolvedValue(true),
       setMyCommands: vi.fn().mockResolvedValue(true),
       config: { use: vi.fn() },
       raw: null as any,
@@ -196,6 +197,23 @@ function createTestOpts(
   };
 }
 
+function createTelegramGroupApprovalOpts(): TelegramChannelOpts {
+  const base = createTestOpts();
+  const settings = base.runtimeSettings!();
+  return createTestOpts({
+    runtimeSettings: vi.fn(() => ({
+      ...settings,
+      conversations: {
+        ...settings.conversations,
+        whatsapp_main_conversation: {
+          ...settings.conversations.whatsapp_main_conversation,
+          externalId: '-100200300',
+        },
+      },
+    })),
+  });
+}
+
 function createTextCtx(overrides: {
   chatId?: number;
   chatType?: string;
@@ -331,6 +349,22 @@ describe('TelegramChannel', () => {
     else process.env.GANTRY_HOME = savedGantryHome;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('adds Telegram reactions idempotently', async () => {
+    const channel = new TelegramChannel('token', createTestOpts());
+    await channel.connect({ inbound: false });
+
+    await channel.addReaction('tg:100200300', '987', 'running');
+    await channel.addReaction('tg:100200300', '987', 'running');
+
+    expect(botRef.current.api.setMessageReaction).toHaveBeenCalledTimes(1);
+    expect(botRef.current.api.setMessageReaction).toHaveBeenCalledWith(
+      '100200300',
+      987,
+      [{ type: 'emoji', emoji: '⏳' }],
+      { is_big: false },
+    );
   });
 
   it('renders todo messages in the active Telegram topic', async () => {
@@ -1629,7 +1663,7 @@ describe('TelegramChannel', () => {
           reply_markup: {
             inline_keyboard: [
               [
-                { text: 'Retry now', callback_data: 'dl:retry' },
+                { text: 'Retry now', callback_data: 'r:job-1' },
                 { text: 'Pause job', callback_data: 'dl:pause' },
               ],
               [{ text: 'Open in scheduler', callback_data: 'dl:open' }],
@@ -1639,12 +1673,37 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('fails closed when Telegram scheduler action buttons are clicked', async () => {
+    it('keeps Telegram retry buttons for long generated job ids', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
+      const jobId = `job-${'a'.repeat(40)}-${'b'.repeat(12)}`;
+
+      await channel.sendMessage('tg:100200300', 'Paused after failures', {
+        actionAffordances: [
+          { kind: 'scheduler_run_now', label: 'Retry now', jobId },
+        ],
+      });
+
+      const callbackData =
+        currentBot().api.sendMessage.mock.calls[0]?.[2]?.reply_markup
+          ?.inline_keyboard?.[0]?.[0]?.callback_data;
+      expect(callbackData).toBe(`r:${jobId}`);
+      expect(Buffer.byteLength(callbackData, 'utf8')).toBeLessThanOrEqual(64);
+    });
+
+    it('routes Telegram scheduler run-now action buttons through the message action callback', async () => {
+      const opts = createTestOpts({ onMessageAction: vi.fn() } as any);
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
       const callbackCtx = {
-        callbackQuery: { data: 'dl:retry' },
+        callbackQuery: {
+          data: 'r:job-1',
+          message: {
+            chat: { id: 100200300 },
+            message_thread_id: 42,
+          },
+        },
         chat: { id: 100200300 },
         from: { id: 111 },
         answerCallbackQuery: vi.fn(),
@@ -1652,9 +1711,15 @@ describe('TelegramChannel', () => {
 
       await triggerCallbackQuery(callbackCtx);
 
+      expect(opts.onMessageAction).toHaveBeenCalledWith({
+        kind: 'scheduler_run_now',
+        conversationJid: 'tg:100200300',
+        threadId: '42',
+        userId: '111',
+        jobId: 'job-1',
+      });
       expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: 'Open the scheduler surface or use scheduler tools to run this action.',
-        show_alert: true,
+        text: 'Checking retry request.',
       });
     });
 
@@ -2133,6 +2198,42 @@ describe('TelegramChannel', () => {
         'group update',
         { message_thread_id: 1 },
       );
+    });
+
+    it('retries Telegram group edits after retry_after rate limits', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot()
+        .api.editMessageText.mockRejectedValueOnce({
+          error_code: 429,
+          parameters: { retry_after: 0.001 },
+          message: 'Too Many Requests',
+        })
+        .mockResolvedValueOnce(undefined);
+
+      try {
+        await channel.sendStreamingChunk('tg:-1001234567890', 'group update');
+        await vi.advanceTimersByTimeAsync(950);
+        const updatePromise = channel.sendStreamingChunk(
+          'tg:-1001234567890',
+          ' more',
+        );
+        await Promise.resolve();
+
+        expect(currentBot().api.editMessageText).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await updatePromise;
+
+        expect(currentBot().api.editMessageText).toHaveBeenCalledTimes(2);
+        expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('does not duplicate final group message when edit returns "message is not modified"', async () => {
@@ -2819,9 +2920,15 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         expect.stringContaining(
-          'Command:\n<pre>rm -rf /tmp/old-cache &amp;&amp; npm install</pre>',
+          '<b>View full command</b>\n<blockquote expandable>rm -rf /tmp/old-cache &amp;&amp; npm install</blockquote>',
         ),
         expect.objectContaining({ message_thread_id: 42, parse_mode: 'HTML' }),
+      );
+      expect(currentBot().api.sendMessage.mock.calls[0]?.[1]).toContain(
+        'Runs: rm, npm',
+      );
+      expect(currentBot().api.sendMessage.mock.calls[0]?.[1]).not.toContain(
+        'Command:',
       );
 
       const callbackCtx = {
@@ -2876,15 +2983,15 @@ describe('TelegramChannel', () => {
       expect(decision.approved).toBe(true);
     });
 
-    it('splits oversized permission review text before sending the decision buttons', async () => {
-      const opts = createTestOpts();
+    it('DMs oversized permission full view files to approvers instead of the group', async () => {
+      const opts = createTelegramGroupApprovalOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
       const tail = 'review-tail-after-shared-budget';
       const proposed = `${'x'.repeat(7000)}${tail}`;
 
       const decisionPromise = channel.requestPermissionApproval(
-        'tg:100200300',
+        'tg:-100200300',
         {
           requestId: 'perm-profile-large',
           sourceAgentFolder: 'whatsapp_main',
@@ -2915,6 +3022,197 @@ describe('TelegramChannel', () => {
       await flushPromises();
 
       const calls = currentBot().api.sendMessage.mock.calls;
+      expect(currentBot().api.sendDocument).toHaveBeenCalled();
+      for (const call of currentBot().api.sendDocument.mock.calls) {
+        expect(call[0]).not.toBe('-100200300');
+      }
+      const uploaded = currentBot()
+        .api.sendDocument.mock.calls.map((call) =>
+          String((call[1] as any).data),
+        )
+        .join('');
+      expect(uploaded).toContain(tail);
+      const promptCall = calls.at(-1);
+      expect(promptCall?.[0]).toBe('-100200300');
+      expect(promptCall?.[1]).toContain('View diff: sent to approver DM.');
+      expect(promptCall?.[2]).toMatchObject({
+        parse_mode: 'HTML',
+        reply_markup: expect.objectContaining({
+          inline_keyboard: expect.any(Array),
+        }),
+      });
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:allow_once:perm-profile-large' },
+        chat: { id: -100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+      const decision = await decisionPromise;
+      expect(decision.approved).toBe(true);
+    });
+
+    it('sends oversized permission full view files only to that Telegram conversation approvers', async () => {
+      const base = createTestOpts().runtimeSettings!();
+      const opts = createTestOpts({
+        runtimeSettings: vi.fn(() => ({
+          ...base,
+          conversations: {
+            wrong_conversation: {
+              ...base.conversations.whatsapp_main_conversation,
+              externalId: '-100999',
+              controlApprovers: ['999'],
+            },
+            right_conversation: {
+              ...base.conversations.whatsapp_main_conversation,
+              externalId: '-100200300',
+              controlApprovers: ['12345'],
+            },
+          },
+          bindings: {
+            wrong_binding: {
+              ...base.bindings.whatsapp_main_binding,
+              conversation: 'wrong_conversation',
+            },
+            right_binding: {
+              ...base.bindings.whatsapp_main_binding,
+              conversation: 'right_conversation',
+            },
+          },
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:-100200300',
+        {
+          requestId: 'perm-profile-right-approvers',
+          sourceAgentFolder: 'whatsapp_main',
+          toolName: 'request_agent_profile_update',
+          title: 'Update AGENTS.md',
+          interaction: {
+            id: 'perm-profile-right-approvers',
+            title: 'Update AGENTS.md',
+            body: 's'.repeat(1000),
+            requestContext: {
+              requestId: 'perm-profile-right-approvers',
+              sourceAgentFolder: 'whatsapp_main',
+              targetJid: 'tg:-100200300',
+              toolName: 'request_agent_profile_update',
+            },
+            files: [
+              {
+                path: 'AGENTS.md',
+                preview: 'x'.repeat(7000),
+                truncated: false,
+                sizeBytes: 7000,
+                contentHash: 'abc123',
+              },
+            ],
+          },
+        },
+      );
+      await flushPromises();
+
+      const targets = currentBot().api.sendDocument.mock.calls.map(
+        (call) => call[0],
+      );
+      expect(targets).toEqual(['12345']);
+      expect(targets).not.toContain('999');
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:allow_once:perm-profile-right-approvers' },
+        chat: { id: -100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+      await decisionPromise;
+    });
+
+    it('fails closed when oversized permission full view delivery fails', async () => {
+      const opts = createTelegramGroupApprovalOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+      currentBot().api.sendDocument.mockRejectedValue(
+        new Error('upload failed'),
+      );
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:-100200300',
+        {
+          requestId: 'perm-profile-undelivered',
+          sourceAgentFolder: 'whatsapp_main',
+          toolName: 'request_agent_profile_update',
+          title: 'Update AGENTS.md',
+          interaction: {
+            id: 'perm-profile-undelivered',
+            title: 'Update AGENTS.md',
+            body: 's'.repeat(1000),
+            requestContext: {
+              requestId: 'perm-profile-undelivered',
+              sourceAgentFolder: 'whatsapp_main',
+              targetJid: 'tg:100200300',
+              toolName: 'request_agent_profile_update',
+            },
+            files: [
+              {
+                path: 'AGENTS.md',
+                preview: 'x'.repeat(7000),
+                truncated: false,
+                sizeBytes: 7000,
+                contentHash: 'abc123',
+              },
+            ],
+          },
+        },
+      );
+      await flushPromises();
+
+      const promptCall = currentBot().api.sendMessage.mock.calls.at(-1);
+      expect(promptCall?.[0]).toBe('-100200300');
+      expect(promptCall?.[1]).toContain(
+        'Approval unavailable until the full details can be reviewed.',
+      );
+      expect(promptCall?.[2]).not.toHaveProperty('reply_markup');
+
+      const decision = await decisionPromise;
+      expect(decision.approved).toBe(false);
+    });
+
+    it('splits an oversized intent-only review prompt before sending the decision buttons', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+      const details = Array.from({ length: 90 }, (_, index) => ({
+        label: `Field${index}`,
+        value: 'v'.repeat(150),
+      }));
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:100200300',
+        {
+          requestId: 'perm-mcp-large',
+          sourceAgentFolder: 'whatsapp_main',
+          toolName: 'request_mcp_server',
+          title: 'Connect MCP',
+          interaction: {
+            id: 'perm-mcp-large',
+            title: 'Connect MCP',
+            body: 'short body',
+            details,
+            requestContext: {
+              requestId: 'perm-mcp-large',
+              sourceAgentFolder: 'whatsapp_main',
+              targetJid: 'tg:100200300',
+              toolName: 'request_mcp_server',
+            },
+          },
+        },
+      );
+      await flushPromises();
+
+      const calls = currentBot().api.sendMessage.mock.calls;
       expect(calls.length).toBeGreaterThan(1);
       const reviewCalls = calls.slice(0, -1);
       const finalCall = calls.at(-1);
@@ -2923,7 +3221,7 @@ describe('TelegramChannel', () => {
         expect(call[2]).not.toHaveProperty('reply_markup');
         expect(call[2]).not.toHaveProperty('parse_mode');
       }
-      expect(reviewCalls.map((call) => call[1]).join('')).toContain(tail);
+      expect(currentBot().api.sendDocument).not.toHaveBeenCalled();
       expect(finalCall?.[1]).toContain(
         'Review the approval details above before choosing.',
       );
@@ -2935,7 +3233,7 @@ describe('TelegramChannel', () => {
       });
 
       await triggerCallbackQuery({
-        callbackQuery: { data: 'perm:allow_once:perm-profile-large' },
+        callbackQuery: { data: 'perm:allow_once:perm-mcp-large' },
         chat: { id: 100200300 },
         from: { id: 12345, first_name: 'Ravi' },
         answerCallbackQuery: vi.fn().mockResolvedValue(undefined),

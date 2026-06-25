@@ -371,6 +371,7 @@ export const requestSettingsUpdateHandler: TaskHandler = async (context) => {
           agentCount: Object.keys(parsed.agents).length,
           providerIds: Object.keys(parsed.providers),
           expectedRevision,
+          replacementYaml,
           diffSummary: summarizeYamlDiff(beforeYaml, replacementYaml),
           activation: 'local_settings_yaml',
         },

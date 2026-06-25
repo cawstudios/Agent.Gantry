@@ -1,6 +1,7 @@
 import {
   GroupDiscoverySource,
   InteractionSurface,
+  MessageReactionSink,
   ProgressSink,
   StreamingSink,
   StreamingStateSink,
@@ -36,6 +37,14 @@ export function asProgressSink(
 ): ProgressSink | undefined {
   return typeof channel.sendProgressUpdate === 'function'
     ? (channel as unknown as ProgressSink)
+    : undefined;
+}
+
+export function asMessageReactionSink(
+  channel: ChannelAdapter,
+): MessageReactionSink | undefined {
+  return typeof channel.addReaction === 'function'
+    ? (channel as unknown as MessageReactionSink)
     : undefined;
 }
 

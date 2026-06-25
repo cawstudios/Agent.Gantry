@@ -389,6 +389,8 @@ export async function startGantryRuntime(
             : undefined,
         });
       },
+      addMessageReaction: (jid, messageRef, emoji) =>
+        channelWiring.addReaction(jid, messageRef, emoji),
     });
   } catch (err) {
     await liveRecoveryCoordinatorLeaseManager.stop();

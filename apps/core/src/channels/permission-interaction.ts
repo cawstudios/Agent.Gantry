@@ -223,6 +223,14 @@ export interface PermissionPromptParts {
   /** Dim metadata lines (agent · source, routing note). */
   contextLines: string[];
   replyInMinutes: number;
+  fullView?: PermissionPromptFullView;
+}
+
+export interface PermissionPromptFullView {
+  label: string;
+  title: string;
+  filename: string;
+  content: string;
 }
 
 export function buildPermissionPromptParts(
@@ -231,6 +239,7 @@ export function buildPermissionPromptParts(
 ): PermissionPromptParts {
   const replyInMinutes = Math.max(1, Math.round(timeoutMs / 60000));
   const contextLines = formatPermissionContextLines(request);
+  const fullView = buildPermissionPromptFullView(request);
   if (request.interaction) {
     const interaction = request.interaction;
     const rule = firstPersistentRule(request);
@@ -259,7 +268,13 @@ export function buildPermissionPromptParts(
     if (interaction.files?.length) {
       bodyLines.push(...formatInteractionFileLines(interaction.files));
     }
-    return { title, bodyLines, contextLines, replyInMinutes };
+    return {
+      title,
+      bodyLines: fullView ? stripFullPayloadBodyLines(bodyLines) : bodyLines,
+      contextLines,
+      replyInMinutes,
+      fullView,
+    };
   }
   const rule = firstPersistentRule(request);
   const capabilityName = semanticCapabilityName(request, rule);
@@ -283,6 +298,7 @@ export function buildPermissionPromptParts(
       bodyLines,
       contextLines,
       replyInMinutes,
+      fullView,
     };
   }
   const label = permissionAccessLabel(request);
@@ -298,10 +314,154 @@ export function buildPermissionPromptParts(
   }
   return {
     title: permissionPromptTitle(request.sourceAgentFolder, label),
-    bodyLines,
+    bodyLines: fullView ? stripFullPayloadBodyLines(bodyLines) : bodyLines,
     contextLines,
     replyInMinutes,
+    fullView,
   };
+}
+
+export function formatPermissionPromptPartsText(
+  parts: PermissionPromptParts,
+): string {
+  const lines = [`${PERMISSION_GLYPH} ${parts.title}`];
+  if (parts.bodyLines.length > 0) lines.push('', ...parts.bodyLines);
+  if (parts.contextLines.length > 0) lines.push('', ...parts.contextLines);
+  lines.push(`Reply in ${parts.replyInMinutes}m`);
+  return limitPermissionMessage(lines.join('\n'));
+}
+
+function stripFullPayloadBodyLines(lines: string[]): string[] {
+  const stripped: string[] = [];
+  // ponytail: buildPermissionPromptFullView carries exactly one payload (the
+  // first untruncated file/command/diff), so strip only the first fenced block.
+  // Multi-file previews 2..n stay inline rather than being silently dropped.
+  let dropped = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (
+      !dropped &&
+      (line === 'Command:' ||
+        line === 'Change:' ||
+        line === 'Full content:' ||
+        line === 'Proposed content:') &&
+      lines[index + 1]?.startsWith('```')
+    ) {
+      dropped = true;
+      index += 2;
+      while (index < lines.length && !lines[index]?.startsWith('```')) {
+        index += 1;
+      }
+      continue;
+    }
+    stripped.push(line);
+  }
+  return stripped;
+}
+
+export function buildPermissionPromptFullView(
+  request: PermissionApprovalRequest,
+): PermissionPromptFullView | undefined {
+  const input =
+    request.toolInput && typeof request.toolInput === 'object'
+      ? request.toolInput
+      : undefined;
+  const settingsYaml =
+    typeof input?.replacementYaml === 'string' && input.replacementYaml.trim()
+      ? input.replacementYaml.trim()
+      : undefined;
+  if (settingsYaml) {
+    return fullView(
+      'View settings change',
+      'Settings change',
+      'settings-change.yaml',
+      settingsYaml,
+    );
+  }
+  const diffPreview =
+    typeof input?.diffPreview === 'string' && input.diffPreview.trim()
+      ? input.diffPreview.trim()
+      : undefined;
+  if (diffPreview) {
+    return fullView(
+      'View diff',
+      'Full diff',
+      'permission-diff.diff',
+      diffPreview,
+    );
+  }
+  const fileDiff = fullFileDiff(request.toolName, input);
+  if (fileDiff) {
+    return fullView('View diff', 'Full diff', 'permission-diff.diff', fileDiff);
+  }
+  const command =
+    typeof input?.command === 'string' && input.command.trim()
+      ? runtimeDisplayCommand(input.command.trim()).command
+      : undefined;
+  if (command) {
+    return fullView(
+      'View full command',
+      'Full command',
+      'permission-command.txt',
+      command,
+    );
+  }
+  const file = request.interaction?.files?.find(
+    (candidate) => candidate.preview && !candidate.truncated,
+  );
+  if (file?.preview) {
+    const isSettings = request.toolName === 'request_settings_update';
+    return fullView(
+      isSettings ? 'View settings change' : 'View diff',
+      isSettings ? 'Settings change' : 'Full payload',
+      isSettings ? 'settings-change.yaml' : 'permission-payload.txt',
+      file.preview,
+    );
+  }
+  return undefined;
+}
+
+function fullView(
+  label: string,
+  title: string,
+  filename: string,
+  content: string,
+): PermissionPromptFullView {
+  return {
+    label,
+    title,
+    filename,
+    content: sanitizeFullPermissionText(content),
+  };
+}
+
+function fullFileDiff(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!input) return undefined;
+  if (toolName === 'Edit') {
+    const lines: string[] = [];
+    if (typeof input.old_string === 'string' && input.old_string.trim()) {
+      lines.push(`-${input.old_string.trim()}`);
+    }
+    if (typeof input.new_string === 'string' && input.new_string.trim()) {
+      lines.push(`+${input.new_string.trim()}`);
+    }
+    return lines.length > 0 ? lines.join('\n') : undefined;
+  }
+  if (
+    toolName === 'Write' &&
+    typeof input.content === 'string' &&
+    input.content.trim()
+  ) {
+    return input.content
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => `+${line}`)
+      .join('\n');
+  }
+  return undefined;
 }
 
 function headTailTruncate(input: string, head: number, tail: number): string {
@@ -326,7 +486,37 @@ function sanitizePermissionCommandText(
   head: number,
   tail: number,
 ): string {
-  return headTailTruncate(redactSensitiveText(input), head, tail);
+  return clampCommandForDisplay(redactSensitiveText(input), head, tail);
+}
+
+function sanitizeFullPermissionText(input: string): string {
+  const result = sanitizeOutboundLlmText(redactSensitiveText(input));
+  return result.blocked ? 'Sensitive detail hidden.' : result.text;
+}
+
+function clampCommandForDisplay(
+  input: string,
+  head: number,
+  tail: number,
+): string {
+  const budget = head + tail;
+  if (input.length <= budget + 1) return input;
+  const lines = input.split(/\r?\n/);
+  if (lines.length <= 1 || lines[0].length > budget) {
+    return headTailTruncate(input, head, tail);
+  }
+  const shown: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    const nextUsed = used + (shown.length > 0 ? 1 : 0) + line.length;
+    if (shown.length > 0 && nextUsed > budget) break;
+    shown.push(line);
+    used = nextUsed;
+    if (used >= budget) break;
+  }
+  const hidden = lines.length - shown.length;
+  if (hidden <= 0) return input;
+  return `${shown.join('\n')}\n… (+${hidden} more lines)`;
 }
 
 function limitPermissionMessage(

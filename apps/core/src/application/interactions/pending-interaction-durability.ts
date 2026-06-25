@@ -23,6 +23,8 @@ import {
   type PermissionPersistenceBackend,
 } from './pending-interaction-permission-recovery.js';
 import { configurePendingInteractionPromptBinding } from './pending-interaction-prompt-binding.js';
+import type { DurablePermissionFullView } from './pending-interaction-prompt-binding.js';
+import { readDurablePermissionFullView } from './pending-interaction-prompt-binding.js';
 import {
   QUESTION_SELECTIONS_PAYLOAD_KEY,
   questionSelectionsFromPayload,
@@ -225,6 +227,7 @@ export interface DurablePermissionInteractionContext {
   sourceAgentFolder: string;
   targetJid: string | null;
   decisionPolicy: string | null;
+  fullView?: DurablePermissionFullView;
 }
 
 export async function findDurablePermissionInteractionByRequestId(input: {
@@ -249,6 +252,9 @@ export async function findDurablePermissionInteractionByRequestId(input: {
       pending?.payload,
     );
     if (!pending || !sourceAgentFolder) return null;
+    const fullView = readDurablePermissionFullView(
+      pending.payload.permissionFullView,
+    );
     return {
       sourceAgentFolder,
       targetJid:
@@ -259,6 +265,7 @@ export async function findDurablePermissionInteractionByRequestId(input: {
         typeof pending.payload.decisionPolicy === 'string'
           ? pending.payload.decisionPolicy
           : null,
+      ...(fullView ? { fullView } : {}),
     };
   } catch (err) {
     active.warn?.(

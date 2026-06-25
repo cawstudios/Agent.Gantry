@@ -75,6 +75,7 @@ export function renderBodyLinesHtml(lines: string[]): string {
 
 export function renderPermissionPromptHtml(
   parts: PermissionPromptParts,
+  options: { includeFullView?: boolean } = {},
 ): string {
   const segments = [
     `<b>${PERMISSION_GLYPH} ${escapeTelegramHtml(parts.title)}</b>`,
@@ -88,6 +89,13 @@ export function renderPermissionPromptHtml(
       parts.contextLines
         .map((line) => `<i>${escapeTelegramHtml(line)}</i>`)
         .join('\n'),
+    );
+  }
+  if (options.includeFullView && parts.fullView) {
+    segments.push(
+      '',
+      `<b>${escapeTelegramHtml(parts.fullView.label)}</b>`,
+      `<blockquote expandable>${escapeTelegramHtml(parts.fullView.content)}</blockquote>`,
     );
   }
   segments.push('', `<i>Reply in ${parts.replyInMinutes}m</i>`);

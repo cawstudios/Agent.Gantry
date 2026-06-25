@@ -161,6 +161,71 @@ describe('pending interaction durability', () => {
     });
   });
 
+  it('persists a redacted permission full-view payload with the prompt binding', async () => {
+    const pending = {
+      id: 'pending-permission-full-view',
+      appId: 'default',
+      kind: 'permission',
+      status: 'pending',
+      payload: {
+        requestId: 'perm-full-view',
+        sourceAgentFolder: 'main_agent',
+        conversationId: 'sl:C123',
+        decisionPolicy: 'same_channel',
+      },
+      callbackRoute: null,
+      idempotencyKey: 'permission:main_agent:perm-full-view',
+      approverRef: null,
+      resolution: null,
+      createdAt: '2026-06-23T00:00:00.000Z',
+      expiresAt: '2026-06-24T00:00:00.000Z',
+      resolvedAt: null,
+    };
+    let payload = pending.payload as Record<string, unknown>;
+    const repository = {
+      listPendingInteractions: vi.fn(async () => [{ ...pending, payload }]),
+      updatePendingInteractionPayload: vi.fn(
+        async (input: { payload: Record<string, unknown> }) => {
+          payload = input.payload;
+          return true;
+        },
+      ),
+    };
+    configurePendingInteractionDurability({ repository: repository as never });
+
+    await expect(
+      bindPendingPermissionInteractionMessage({
+        sourceAgentFolder: 'main_agent',
+        requestId: 'perm-full-view',
+        externalMessageId: '1710000000.400500',
+        provider: 'slack',
+        conversationId: 'C123',
+        fullView: {
+          label: 'View full command',
+          title: 'Full command',
+          filename: 'permission-command.txt',
+          content: 'git status --short',
+        },
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      findDurablePermissionInteractionByRequestId({
+        requestId: 'perm-full-view',
+      }),
+    ).resolves.toMatchObject({
+      sourceAgentFolder: 'main_agent',
+      targetJid: 'sl:C123',
+      decisionPolicy: 'same_channel',
+      fullView: {
+        label: 'View full command',
+        title: 'Full command',
+        filename: 'permission-command.txt',
+        content: 'git status --short',
+      },
+    });
+  });
+
   it('finds a permission prompt only by exact provider message binding', async () => {
     const repository = {
       listPendingInteractions: vi.fn(async () => [

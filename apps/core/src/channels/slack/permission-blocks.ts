@@ -1,7 +1,9 @@
 import {
   PERMISSION_GLYPH,
+  type PermissionPromptFullView,
   type PermissionPromptParts,
 } from '../permission-interaction.js';
+import { escapeMarkdownFenceDelimiters } from '../permission-fenced-content.js';
 import { truncateSlackText } from './channel-user-question-utils.js';
 
 const SLACK_HEADER_MAX = 150;
@@ -73,6 +75,27 @@ export function buildPermissionReceiptBlocks(text: string): SlackBlock[] {
       ],
     },
   ];
+}
+
+export function buildPermissionFullViewModalBlocks(
+  fullView: PermissionPromptFullView,
+): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+  const content = escapeMarkdownFenceDelimiters(fullView.content);
+  const marker = fullView.filename.endsWith('.diff')
+    ? '```diff'
+    : fullView.filename.endsWith('.yaml')
+      ? '```yaml'
+      : '```';
+  for (const chunk of chunkSlackFencedSectionText(marker, [content])) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: chunk },
+    });
+  }
+  return blocks.length > 0
+    ? blocks
+    : [{ type: 'section', text: { type: 'mrkdwn', text: '_No details._' } }];
 }
 
 function chunkSlackSectionText(lines: string[]): string[] {

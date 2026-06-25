@@ -240,6 +240,25 @@ describe('deepagents model factory', () => {
     );
   });
 
+  it('accepts the sandbox-runtime model gateway alias', async () => {
+    const sandboxGatewayBaseUrl =
+      'http://model-gateway.gantry.internal:4567/openai';
+    const resolved = await buildRunnerModel({
+      provider: 'openai',
+      modelId: 'gpt-5.5',
+      gatewayBaseUrl: sandboxGatewayBaseUrl,
+      gatewayToken,
+    });
+    const underlying = await (
+      resolved.model as unknown as {
+        _getModelInstance: () => Promise<{
+          clientConfig?: { baseURL?: string };
+        }>;
+      }
+    )._getModelInstance();
+    expect(underlying.clientConfig?.baseURL).toBe(sandboxGatewayBaseUrl);
+  });
+
   it('rejects a non-gateway token', async () => {
     await expect(
       buildRunnerModel({

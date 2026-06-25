@@ -4,9 +4,11 @@ import {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
   ProgressUpdateOptions,
+  StreamingChunkOptions,
   UserQuestionRequest,
   UserQuestionResponse,
 } from '../domain/types.js';
+import { isPartialMessageDeliveryError } from '../domain/messages/partial-delivery.js';
 import type { AgentTodoRender } from '../domain/ports/task-lifecycle.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import {
@@ -17,10 +19,12 @@ import {
   resolveDurableQuestionInteractionByRequestId,
 } from '../application/interactions/pending-interaction-durability.js';
 import {
+  buildPermissionPromptParts,
   decisionForMode,
-  formatPermissionPromptText,
+  formatPermissionPromptPartsText,
   permissionButtonLabel,
   permissionDecisionOptions,
+  type PermissionPromptFullView,
 } from './permission-interaction.js';
 import { ChannelAdapter, ChannelOpts } from './channel-provider.js';
 import {
@@ -33,6 +37,7 @@ import {
   permissionCustomId,
   QUESTION_CUSTOM_ID_PREFIX,
   questionComponents,
+  SCHEDULER_RUN_NOW_CUSTOM_ID_PREFIX,
 } from './discord-components.js';
 import {
   formatDiscordAgentTodo,
@@ -42,7 +47,9 @@ import {
 import { sendDiscordProgressUpdate } from './discord-progress.js';
 import { DiscordGatewayConnection } from './discord-gateway.js';
 import { agentTodoStopActions } from './agent-todo-render.js';
+import { CHANNEL_STREAM_UPDATE_INTERVAL_MS } from './channel-provider.js';
 import { getProviderRuntimeSecret } from './provider-runtime-secrets.js';
+import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import type {
   DiscordInteraction,
   DiscordInteractionOption,
@@ -57,6 +64,10 @@ export const DISCORD_JID_PREFIX = 'dc:';
 const DISCORD_API_ROOT = 'https://discord.com/api/v10';
 const DISCORD_INTERACTION_TIMEOUT_MS = 10 * 60 * 1000;
 const DISCORD_GATEWAY_INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
+const DISCORD_RETRY_DELAY_FALLBACK_MS = 1000;
+const DISCORD_RETRY_DELAY_MAX_MS = 5000;
+const DISCORD_PERMISSION_FULL_VIEW_PREFIX = 'gantry:perm_full:';
+const DISCORD_EPHEMERAL_MESSAGE_LIMIT = 1900;
 
 export function normalizeDiscordJid(raw: string): string | null {
   const trimmed = raw.trim();
@@ -79,6 +90,45 @@ function discordHeaders(token: string): Record<string, string> {
   };
 }
 
+function discordReactionEmoji(emoji: string): string {
+  if (emoji === 'seen') return '👀';
+  if (emoji === 'running') return '⏳';
+  return emoji;
+}
+
+function discordRateLimitRetryDelayMs(response: Response): number | null {
+  if (response.status !== 429) return null;
+  const retryAfter =
+    response.headers.get('retry-after') ??
+    response.headers.get('x-ratelimit-reset-after');
+  if (retryAfter) {
+    const seconds = Number.parseFloat(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.min(
+        DISCORD_RETRY_DELAY_MAX_MS,
+        Math.max(1, Math.round(seconds * 1000)),
+      );
+    }
+  }
+  const resetSeconds = Number.parseFloat(
+    response.headers.get('x-ratelimit-reset') ?? '',
+  );
+  if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
+    const delayMs = resetSeconds * 1000 - Date.now();
+    if (delayMs > 0) {
+      return Math.min(DISCORD_RETRY_DELAY_MAX_MS, Math.round(delayMs));
+    }
+  }
+  return DISCORD_RETRY_DELAY_FALLBACK_MS;
+}
+
+async function waitDiscordRetryDelay(delayMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, delayMs);
+    timer.unref?.();
+  });
+}
+
 function userName(user: DiscordUser | undefined, fallback = 'unknown'): string {
   return user?.username || user?.id || fallback;
 }
@@ -97,6 +147,16 @@ function discordGantrySlashText(interaction: DiscordInteraction): string {
   return ['/gantry', name, ...args].join(' ');
 }
 
+function discordPermissionFullViewCustomId(requestId: string): string {
+  return `${DISCORD_PERMISSION_FULL_VIEW_PREFIX}${encodeURIComponent(requestId)}`;
+}
+
+function discordPermissionFullViewRequestId(customId: string): string | null {
+  if (!customId.startsWith(DISCORD_PERMISSION_FULL_VIEW_PREFIX)) return null;
+  const raw = customId.slice(DISCORD_PERMISSION_FULL_VIEW_PREFIX.length);
+  return raw ? decodeURIComponent(raw) : null;
+}
+
 function websocketFactory(url: string): WebSocketLike {
   return new WebSocket(url) as unknown as WebSocketLike;
 }
@@ -106,6 +166,17 @@ export class DiscordChannel implements ChannelAdapter {
   private gateway: DiscordGatewayConnection | null = null;
   private botUserId = '';
   private activeProgressMessages = new Map<string, string>();
+  private activeStreams = new Map<
+    string,
+    {
+      channelId: string;
+      messageId?: string;
+      rawBuffer: string;
+      lastFlushAt: number;
+    }
+  >();
+  private readonly streamGenerationByJid = new Map<string, number>();
+  private readonly sealedStreamGenerationByJid = new Map<string, number>();
   private pendingPermissions = new Map<
     string,
     {
@@ -128,10 +199,11 @@ export class DiscordChannel implements ChannelAdapter {
     string,
     { channelId: string; messageId: string }
   >();
+  private readonly reactionKeys = new Set<string>();
 
   constructor(
     private readonly botToken: string,
-    _applicationId: string,
+    private readonly applicationId: string,
     private readonly opts: ChannelOpts,
     private readonly createWebSocket: WebSocketFactory = websocketFactory,
   ) {}
@@ -180,6 +252,32 @@ export class DiscordChannel implements ChannelAdapter {
     });
   }
 
+  async addReaction(
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ): Promise<void> {
+    const channelId = discordChannelIdFromJid(jid);
+    if (!channelId || !messageRef.trim()) return;
+    const reaction = discordReactionEmoji(emoji);
+    const key = `${channelId}:${messageRef}:${reaction}`;
+    if (this.reactionKeys.has(key)) return;
+    try {
+      await this.requestJson<void>(
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageRef)}/reactions/${encodeURIComponent(reaction)}/@me`,
+        {
+          method: 'PUT',
+          headers: discordHeaders(this.botToken),
+        },
+        'Discord reaction update failed',
+        false,
+      );
+      this.reactionKeys.add(key);
+    } catch (err) {
+      logger.debug({ jid, messageRef, err }, 'Discord reaction update failed');
+    }
+  }
+
   async sendProgressUpdate(
     jid: string,
     text: string,
@@ -201,6 +299,122 @@ export class DiscordChannel implements ChannelAdapter {
         }),
       edit: (messageId, body) => this.patchMessage(channelId, messageId, body),
     });
+  }
+
+  async sendStreamingChunk(
+    jid: string,
+    text: string,
+    options: StreamingChunkOptions = {},
+  ): Promise<boolean> {
+    const channelId = options.threadId || discordChannelIdFromJid(jid);
+    if (!channelId) return false;
+    if (!this.shouldAcceptStreamingChunk(jid, options.generation)) return false;
+    const key = `${jid}\n${options.threadId ?? ''}`;
+    let state = this.activeStreams.get(key);
+    if (!state) {
+      state = { channelId, rawBuffer: '', lastFlushAt: 0 };
+      this.activeStreams.set(key, state);
+    }
+    if (text) state.rawBuffer += text;
+    if (!state.rawBuffer.trim() && options.done) {
+      this.activeStreams.delete(key);
+      this.markStreamingGenerationDone(jid, options.generation);
+      return false;
+    }
+    const now = currentTimeMs();
+    const shouldFlush =
+      options.done ||
+      !state.messageId ||
+      now - state.lastFlushAt >= CHANNEL_STREAM_UPDATE_INTERVAL_MS.discord;
+    if (!shouldFlush) return Boolean(state.messageId);
+
+    const parts = splitDiscordText(state.rawBuffer);
+    const headText = parts[0] ?? ' ';
+    try {
+      const body = {
+        content: headText,
+        allowed_mentions: { parse: [] },
+        components: options.done ? [] : undefined,
+      };
+      if (state.messageId) {
+        await this.patchMessage(state.channelId, state.messageId, body);
+      } else {
+        const posted = await this.postMessage(state.channelId, body);
+        state.messageId = posted.id;
+      }
+      state.lastFlushAt = now;
+      if (options.done) {
+        const overflowParts = parts.slice(1).filter((part) => part.length > 0);
+        if (overflowParts.length > 0) {
+          await postDiscordMessageParts({
+            channelId: state.channelId,
+            parts: overflowParts,
+            post: (target, body) => this.postMessage(target, body),
+          });
+        }
+        this.activeStreams.delete(key);
+        this.markStreamingGenerationDone(jid, options.generation);
+      } else {
+        this.activeStreams.set(key, state);
+      }
+      return true;
+    } catch (err) {
+      if (isPartialMessageDeliveryError(err)) throw err;
+      logger.warn(
+        { jid, err },
+        'Discord streaming update failed; preserving current stream state',
+      );
+      if (options.done) return false;
+      return Boolean(state.messageId);
+    }
+  }
+
+  resetStreaming(jid: string): void {
+    this.sealStreamingGenerationOnReset(jid);
+    this.clearStreamingStateForJid(jid);
+  }
+
+  private clearStreamingStateForJid(jid: string): void {
+    for (const key of this.activeStreams.keys()) {
+      if (key.startsWith(`${jid}\n`)) this.activeStreams.delete(key);
+    }
+  }
+
+  private shouldAcceptStreamingChunk(
+    jid: string,
+    generation?: number,
+  ): boolean {
+    if (generation === undefined) return true;
+    const sealed = this.sealedStreamGenerationByJid.get(jid);
+    if (sealed !== undefined && generation <= sealed) return false;
+    const latest = this.streamGenerationByJid.get(jid);
+    if (latest === undefined) {
+      this.streamGenerationByJid.set(jid, generation);
+      return true;
+    }
+    if (generation < latest) return false;
+    if (generation > latest) {
+      this.clearStreamingStateForJid(jid);
+      this.streamGenerationByJid.set(jid, generation);
+    }
+    return true;
+  }
+
+  private markStreamingGenerationDone(jid: string, generation?: number): void {
+    if (generation === undefined) return;
+    const sealed = this.sealedStreamGenerationByJid.get(jid);
+    if (sealed === undefined || generation > sealed) {
+      this.sealedStreamGenerationByJid.set(jid, generation);
+    }
+  }
+
+  private sealStreamingGenerationOnReset(jid: string): void {
+    const latest = this.streamGenerationByJid.get(jid);
+    if (latest === undefined) return;
+    const sealed = this.sealedStreamGenerationByJid.get(jid);
+    if (sealed === undefined || latest > sealed) {
+      this.sealedStreamGenerationByJid.set(jid, latest);
+    }
   }
 
   async renderAgentTodo(
@@ -247,22 +461,36 @@ export class DiscordChannel implements ChannelAdapter {
     request: PermissionApprovalRequest,
   ): Promise<PermissionApprovalDecision> {
     const modes = permissionDecisionOptions(request);
+    const parts = buildPermissionPromptParts(
+      request,
+      DISCORD_INTERACTION_TIMEOUT_MS,
+    );
+    const buttons = [
+      ...(parts.fullView
+        ? [
+            {
+              label: parts.fullView.label,
+              style: 2,
+              custom_id: discordPermissionFullViewCustomId(request.requestId),
+            },
+          ]
+        : []),
+      ...modes.map((mode) => ({
+        label: permissionButtonLabel(mode, request),
+        style: mode === 'cancel' ? 4 : 1,
+        custom_id: permissionCustomId(request.requestId, mode),
+      })),
+    ];
     const sent = await this.sendDiscordPrompt(
       jid,
-      formatPermissionPromptText(request, DISCORD_INTERACTION_TIMEOUT_MS),
+      formatPermissionPromptPartsText(parts),
       {
         threadId: request.threadId,
-        components: buttonRows(
-          modes.map((mode) => ({
-            label: permissionButtonLabel(mode, request),
-            style: mode === 'cancel' ? 4 : 1,
-            custom_id: permissionCustomId(request.requestId, mode),
-          })),
-        ),
+        components: buttonRows(buttons),
       },
     );
     if (sent.externalMessageId) {
-      void bindPendingPermissionInteractionMessage({
+      await bindPendingPermissionInteractionMessage({
         sourceAgentFolder: request.sourceAgentFolder,
         requestId: request.requestId,
         appId: request.appId,
@@ -270,6 +498,7 @@ export class DiscordChannel implements ChannelAdapter {
         provider: 'discord',
         conversationId: discordChannelIdFromJid(jid) || jid,
         ...(request.threadId ? { threadId: request.threadId } : {}),
+        fullView: parts.fullView,
       });
     }
     return new Promise((resolve) => {
@@ -327,14 +556,38 @@ export class DiscordChannel implements ChannelAdapter {
     });
   }
 
+  private async requestJson<T>(
+    path: string,
+    init: RequestInit,
+    errorMessage: string,
+    parseJson = true,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await fetch(`${DISCORD_API_ROOT}${path}`, init);
+      if (response.ok) {
+        return parseJson ? ((await response.json()) as T) : (undefined as T);
+      }
+      const retryDelayMs = discordRateLimitRetryDelayMs(response);
+      if (retryDelayMs === null || attempt >= 2) throw new Error(errorMessage);
+      logger.warn(
+        { path, attempt: attempt + 1, retryDelayMs },
+        'Discord REST request rate-limited; retrying',
+      );
+      await waitDiscordRetryDelay(retryDelayMs);
+    }
+    throw new Error(errorMessage);
+  }
+
   private async postJson<T>(path: string, body: unknown): Promise<T> {
-    const response = await fetch(`${DISCORD_API_ROOT}${path}`, {
-      method: 'POST',
-      headers: discordHeaders(this.botToken),
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error(`Discord REST request failed: ${path}`);
-    return (await response.json()) as T;
+    return this.requestJson<T>(
+      path,
+      {
+        method: 'POST',
+        headers: discordHeaders(this.botToken),
+        body: JSON.stringify(body),
+      },
+      `Discord REST request failed: ${path}`,
+    );
   }
 
   private async postMessage(
@@ -352,15 +605,16 @@ export class DiscordChannel implements ChannelAdapter {
     messageId: string,
     body: Record<string, unknown>,
   ): Promise<void> {
-    const response = await fetch(
-      `${DISCORD_API_ROOT}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+    await this.requestJson<void>(
+      `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
       {
         method: 'PATCH',
         headers: discordHeaders(this.botToken),
         body: JSON.stringify(body),
       },
+      'Discord message edit failed',
+      false,
     );
-    if (!response.ok) throw new Error('Discord message edit failed');
   }
 
   private async sendDiscordPrompt(
@@ -440,8 +694,24 @@ export class DiscordChannel implements ChannelAdapter {
         });
         return;
       }
+      if (customId.startsWith(SCHEDULER_RUN_NOW_CUSTOM_ID_PREFIX)) {
+        await this.ackInteraction(interaction, 'Checking retry request.');
+        await this.opts.onMessageAction?.({
+          kind: 'scheduler_run_now',
+          conversationJid: `${DISCORD_JID_PREFIX}${interaction.channel_id}`,
+          userId: interaction.member?.user?.id || interaction.user?.id,
+          jobId: decodeURIComponent(
+            customId.slice(SCHEDULER_RUN_NOW_CUSTOM_ID_PREFIX.length),
+          ),
+        });
+        return;
+      }
       if (customId.startsWith(PERMISSION_CUSTOM_ID_PREFIX)) {
         await this.handlePermissionInteraction(interaction, customId);
+        return;
+      }
+      if (customId.startsWith(DISCORD_PERMISSION_FULL_VIEW_PREFIX)) {
+        await this.handlePermissionFullViewInteraction(interaction, customId);
         return;
       }
       if (customId.startsWith(QUESTION_CUSTOM_ID_PREFIX)) {
@@ -522,6 +792,86 @@ export class DiscordChannel implements ChannelAdapter {
     this.pendingPermissions.delete(parsed.requestId);
     const decision = decisionForMode(pending.request, parsed.mode, user?.id);
     pending.resolve(decision);
+  }
+
+  private async handlePermissionFullViewInteraction(
+    interaction: DiscordInteraction,
+    customId: string,
+  ): Promise<void> {
+    const requestId = discordPermissionFullViewRequestId(customId);
+    if (!requestId) {
+      await this.ackInteraction(
+        interaction,
+        'This approval is no longer active.',
+      );
+      return;
+    }
+    const pending = this.pendingPermissions.get(requestId);
+    const user = interaction.member?.user || interaction.user;
+    let fullView: PermissionPromptFullView | undefined;
+    if (pending) {
+      const allowed = await this.isInteractionApproverAllowed(
+        interaction,
+        user?.id,
+        pending.request.sourceAgentFolder,
+        pending.request.decisionPolicy,
+      );
+      if (!allowed) {
+        await this.ackInteraction(
+          interaction,
+          'You are not allowed to view this approval payload.',
+        );
+        return;
+      }
+      fullView = buildPermissionPromptParts(
+        pending.request,
+        DISCORD_INTERACTION_TIMEOUT_MS,
+      ).fullView;
+    } else {
+      const durable = await findDurablePermissionInteractionByRequestId({
+        requestId,
+      });
+      if (
+        !durable ||
+        durable.targetJid !== `${DISCORD_JID_PREFIX}${interaction.channel_id}`
+      ) {
+        await this.ackInteraction(
+          interaction,
+          'This approval is no longer active.',
+        );
+        return;
+      }
+      const allowed = await this.isInteractionApproverAllowed(
+        interaction,
+        user?.id,
+        durable.sourceAgentFolder,
+        durable.decisionPolicy as PermissionApprovalRequest['decisionPolicy'],
+      );
+      if (!allowed) {
+        await this.ackInteraction(
+          interaction,
+          'You are not allowed to view this approval payload.',
+        );
+        return;
+      }
+      fullView = durable.fullView;
+    }
+    if (!fullView) {
+      await this.ackInteraction(
+        interaction,
+        'This approval has no full payload.',
+      );
+      return;
+    }
+    if (fullView.content.length <= DISCORD_EPHEMERAL_MESSAGE_LIMIT) {
+      await this.ackInteraction(
+        interaction,
+        `${fullView.title}\n\`\`\`\n${fullView.content}\n\`\`\``,
+      );
+      return;
+    }
+    await this.deferEphemeralInteraction(interaction);
+    await this.postDiscordInteractionFollowupFile(interaction, fullView);
   }
 
   private async handleQuestionInteraction(
@@ -647,6 +997,60 @@ export class DiscordChannel implements ChannelAdapter {
             allowed_mentions: { parse: [] },
           },
         }),
+      },
+    );
+  }
+
+  private async deferEphemeralInteraction(
+    interaction: DiscordInteraction,
+  ): Promise<void> {
+    await fetch(
+      `${DISCORD_API_ROOT}/interactions/${encodeURIComponent(interaction.id || '')}/${encodeURIComponent(interaction.token || '')}/callback`,
+      {
+        method: 'POST',
+        headers: discordHeaders(this.botToken),
+        body: JSON.stringify({
+          type: 5,
+          data: {
+            flags: 64,
+          },
+        }),
+      },
+    );
+  }
+
+  private async postDiscordInteractionFollowupFile(
+    interaction: DiscordInteraction,
+    fullView: PermissionPromptFullView,
+  ): Promise<void> {
+    // ponytail: file follow-up only for payloads too large for a single
+    // ephemeral message; add chunked files only if Discord rejects real payloads.
+    const form = new FormData();
+    form.set(
+      'payload_json',
+      JSON.stringify({
+        content: fullView.title,
+        flags: 64,
+        allowed_mentions: { parse: [] },
+        attachments: [
+          {
+            id: 0,
+            filename: fullView.filename,
+            description: fullView.title,
+          },
+        ],
+      }),
+    );
+    form.set(
+      'files[0]',
+      new Blob([fullView.content], { type: 'text/plain' }),
+      fullView.filename,
+    );
+    await fetch(
+      `${DISCORD_API_ROOT}/webhooks/${encodeURIComponent(this.applicationId)}/${encodeURIComponent(interaction.token || '')}`,
+      {
+        method: 'POST',
+        body: form,
       },
     );
   }

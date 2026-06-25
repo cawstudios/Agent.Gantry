@@ -298,9 +298,51 @@ export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
         return;
       }
 
-      const deadLetterActionMatch =
-        TELEGRAM_DEAD_LETTER_ACTION_CALLBACK_PATTERN.exec(data);
-      if (deadLetterActionMatch) {
+      const compactRetryJobId = data.startsWith('r:') ? data.slice(2) : '';
+      const deadLetterActionMatch = compactRetryJobId
+        ? null
+        : TELEGRAM_DEAD_LETTER_ACTION_CALLBACK_PATTERN.exec(data);
+      if (compactRetryJobId || deadLetterActionMatch) {
+        if (
+          compactRetryJobId ||
+          (deadLetterActionMatch?.[1] === 'retry' && deadLetterActionMatch[2])
+        ) {
+          let jobId: string;
+          try {
+            jobId = decodeURIComponent(
+              compactRetryJobId || deadLetterActionMatch![2],
+            );
+          } catch {
+            await ctx.answerCallbackQuery({
+              text: 'Invalid scheduler action.',
+              show_alert: true,
+            });
+            return;
+          }
+          const callbackMessage = ctx.callbackQuery?.message as
+            | {
+                chat?: { id?: number | string };
+                message_thread_id?: number;
+              }
+            | undefined;
+          const chatId =
+            callbackMessage?.chat?.id?.toString() ||
+            ctx.chat?.id?.toString() ||
+            '';
+          if (!chatId) return;
+          await this.opts.onMessageAction?.({
+            kind: 'scheduler_run_now',
+            conversationJid: `tg:${chatId}`,
+            threadId:
+              typeof callbackMessage?.message_thread_id === 'number'
+                ? String(callbackMessage.message_thread_id)
+                : undefined,
+            userId: ctx.from?.id?.toString(),
+            jobId,
+          });
+          await ctx.answerCallbackQuery({ text: 'Checking retry request.' });
+          return;
+        }
         await ctx.answerCallbackQuery({
           text: 'Open the scheduler surface or use scheduler tools to run this action.',
           show_alert: true,

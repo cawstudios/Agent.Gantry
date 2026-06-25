@@ -213,6 +213,7 @@ export function startControlServer(input: {
   app: RuntimeApp;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   sendConversationIngressProjection?: ControlRouteContext['sendConversationIngressProjection'];
+  addMessageReaction?: ControlRouteContext['addMessageReaction'];
   /**
    * Which control routes to mount. `'full'` (default) mounts every route, the
    * historical behaviour. `'ops'` mounts only operational + read-only diagnostic
@@ -366,6 +367,7 @@ export function startControlServer(input: {
       });
     },
     sendConversationIngressProjection: input.sendConversationIngressProjection,
+    addMessageReaction: input.addMessageReaction,
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) => {
       const storage = getRuntimeStorage();

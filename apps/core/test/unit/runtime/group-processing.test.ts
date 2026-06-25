@@ -634,6 +634,56 @@ describe('createGroupProcessor', () => {
       expect(result).toBe(true);
     });
 
+    it('notifies first progress with the native message ref after visible progress sends', async () => {
+      vi.useFakeTimers();
+      try {
+        const runnerResult = deferred<AgentOutput>();
+        const onFirstProgress = vi.fn();
+        const messages = [
+          makeMessage({ external_message_id: '1710000000.000100' }),
+        ];
+        const { deps } = setupHappyPath({ messages });
+        const progressChannel = makeChannel({
+          sendProgressUpdate: vi.fn().mockResolvedValue(undefined),
+        });
+        deps.channelRuntime = progressChannel;
+        mockSpawnAgent.mockImplementation(
+          async (
+            _group: ConversationRoute,
+            _input: unknown,
+            _onProc: unknown,
+            onOutput?: (output: AgentOutput) => Promise<void>,
+          ) => {
+            const output = await runnerResult.promise;
+            await onOutput?.(output);
+            return output;
+          },
+        );
+
+        const { processGroupMessages } = createGroupProcessor(deps);
+        const processing = processGroupMessages('group1@g.us', {
+          onFirstProgress,
+        });
+
+        await vi.advanceTimersByTimeAsync(750);
+
+        expect(onFirstProgress).toHaveBeenCalledWith({
+          jid: 'group1@g.us',
+          messageRef: '1710000000.000100',
+        });
+        expect(progressChannel.sendProgressUpdate).toHaveBeenCalledWith(
+          'group1@g.us',
+          '⏳ Working',
+          expect.any(Object),
+        );
+
+        runnerResult.resolve({ status: 'success', result: 'done' });
+        await processing;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('sends agent output to channel with internal tags stripped', async () => {
       const agentOutput: AgentOutput = {
         status: 'success',

@@ -6,6 +6,7 @@ import type {
 import { logger } from '../../infrastructure/logging/logger.js';
 import {
   buildPermissionPromptParts,
+  formatPermissionPromptPartsText,
   permissionButtonLabel,
   permissionDecisionOptions,
 } from '../permission-interaction.js';
@@ -21,7 +22,6 @@ export async function requestSlackPermissionApproval(input: {
   channelId: string;
   request: PermissionApprovalRequest;
   timeoutMs: number;
-  promptText: string;
   approverUserIds?: readonly string[];
   pendingPermissionPrompts: Map<string, PendingPermissionPrompt>;
   resolvePermissionPrompt: (
@@ -29,33 +29,50 @@ export async function requestSlackPermissionApproval(input: {
     decision: PermissionApprovalDecision,
   ) => Promise<void>;
 }): Promise<PermissionApprovalDecision> {
-  const contentBlocks = buildPermissionPromptContentBlocks(
-    buildPermissionPromptParts(input.request, input.timeoutMs),
-  );
+  const parts = buildPermissionPromptParts(input.request, input.timeoutMs);
+  const contentBlocks = buildPermissionPromptContentBlocks(parts);
+  const promptText = formatPermissionPromptPartsText(parts);
   const actionsBlock = {
     type: 'actions',
-    elements: permissionDecisionOptions(input.request).map((mode) => ({
-      type: 'button',
-      action_id: slackPermissionDecisionActionId(mode),
-      text: {
-        type: 'plain_text',
-        text: permissionButtonLabel(mode, input.request),
-      },
-      ...(mode === 'cancel'
-        ? { style: 'danger' as const }
-        : { style: 'primary' as const }),
-      value: JSON.stringify({
-        requestId: input.request.requestId,
-        decision: mode,
-      }),
-    })),
+    elements: [
+      ...(parts.fullView
+        ? [
+            {
+              type: 'button',
+              action_id: 'gantry_perm_full_view',
+              text: {
+                type: 'plain_text',
+                text: parts.fullView.label,
+              },
+              value: JSON.stringify({
+                requestId: input.request.requestId,
+              }),
+            },
+          ]
+        : []),
+      ...permissionDecisionOptions(input.request).map((mode) => ({
+        type: 'button',
+        action_id: slackPermissionDecisionActionId(mode),
+        text: {
+          type: 'plain_text',
+          text: permissionButtonLabel(mode, input.request),
+        },
+        ...(mode === 'cancel'
+          ? { style: 'danger' as const }
+          : { style: 'primary' as const }),
+        value: JSON.stringify({
+          requestId: input.request.requestId,
+          decision: mode,
+        }),
+      })),
+    ],
   };
   const threadTs = slackThreadTsFromThreadId(input.request.threadId);
   const threadPayload = threadTs ? { thread_ts: threadTs } : {};
   const postPrompt = (blocks: unknown[]) =>
     input.app.client.chat.postMessage({
       channel: input.channelId,
-      text: input.promptText,
+      text: promptText,
       ...threadPayload,
       blocks: blocks as any,
     }) as Promise<{ ts?: string }>;
@@ -70,7 +87,7 @@ export async function requestSlackPermissionApproval(input: {
         const sent = (await input.app.client.chat.postEphemeral({
           channel: input.channelId,
           user,
-          text: input.promptText,
+          text: promptText,
           ...threadPayload,
           blocks: blocks as any,
         })) as { ts?: string; message_ts?: string };
@@ -99,7 +116,7 @@ export async function requestSlackPermissionApproval(input: {
       const simpleBlocks = [
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: input.promptText },
+          text: { type: 'mrkdwn', text: promptText },
         },
         actionsBlock,
       ];
@@ -114,7 +131,7 @@ export async function requestSlackPermissionApproval(input: {
         reason: 'Slack did not accept the approval prompt.',
       };
     }
-    void bindPendingPermissionInteractionMessage({
+    await bindPendingPermissionInteractionMessage({
       sourceAgentFolder: input.request.sourceAgentFolder,
       requestId: input.request.requestId,
       appId: input.request.appId,
@@ -122,6 +139,7 @@ export async function requestSlackPermissionApproval(input: {
       provider: 'slack',
       conversationId: input.channelId,
       ...(input.request.threadId ? { threadId: input.request.threadId } : {}),
+      fullView: parts.fullView,
     });
 
     return await new Promise<PermissionApprovalDecision>((resolve) => {

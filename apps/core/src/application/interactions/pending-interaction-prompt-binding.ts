@@ -10,6 +10,13 @@ type PromptBindingBackend = {
   warn?: (context: Record<string, unknown>, message: string) => void;
 };
 
+export interface DurablePermissionFullView {
+  label: string;
+  title: string;
+  filename: string;
+  content: string;
+}
+
 let backend: PromptBindingBackend | null = null;
 
 export function configurePendingInteractionPromptBinding(
@@ -47,6 +54,7 @@ export async function bindPendingPermissionInteractionMessage(input: {
   provider?: string | null;
   conversationId?: string | null;
   threadId?: string | null;
+  fullView?: DurablePermissionFullView | null;
 }): Promise<boolean> {
   const active = backend;
   if (!active) return false;
@@ -67,6 +75,7 @@ export async function bindPendingPermissionInteractionMessage(input: {
         interaction.idempotencyKey === key,
     );
     if (!pending) return false;
+    const fullView = readDurablePermissionFullView(input.fullView);
     return await active.repository.updatePendingInteractionPayload({
       idempotencyKey: key,
       payload: {
@@ -77,6 +86,7 @@ export async function bindPendingPermissionInteractionMessage(input: {
           ? { externalPromptConversationId: input.conversationId }
           : {}),
         ...(input.threadId ? { externalPromptThreadId: input.threadId } : {}),
+        ...(fullView ? { permissionFullView: fullView } : {}),
       },
     });
   } catch (err) {
@@ -86,6 +96,25 @@ export async function bindPendingPermissionInteractionMessage(input: {
     );
     return false;
   }
+}
+
+export function readDurablePermissionFullView(
+  value: unknown,
+): DurablePermissionFullView | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  const label = durablePermissionFullViewString(candidate.label);
+  const title = durablePermissionFullViewString(candidate.title);
+  const filename = durablePermissionFullViewString(candidate.filename);
+  const content = durablePermissionFullViewString(candidate.content);
+  if (!label || !title || !filename || !content) return undefined;
+  return { label, title, filename, content };
+}
+
+function durablePermissionFullViewString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 export interface DurablePermissionPromptMessageContext {

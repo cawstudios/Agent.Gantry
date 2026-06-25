@@ -11,6 +11,7 @@ import {
   renderUserQuestionPromptHtml,
 } from '@core/channels/telegram/html-render.js';
 import {
+  buildPermissionFullViewModalBlocks,
   buildPermissionPromptContentBlocks,
   buildPermissionReceiptBlocks,
 } from '@core/channels/slack/permission-blocks.js';
@@ -28,15 +29,80 @@ describe('buildPermissionPromptParts', () => {
   it('splits a command prompt into title, fenced body, and context', () => {
     const parts = buildPermissionPromptParts(commandRequest, 60_000);
     expect(parts.title).toBe('Allow Main Agent to use exact command access?');
-    expect(parts.bodyLines).toContain('Command:');
-    expect(parts.bodyLines).toContain('npm test');
-    expect(parts.bodyLines).toContain('```');
+    expect(parts.bodyLines).toEqual(['Runs: npm']);
     expect(parts.contextLines[0]).toBe('Agent: Main Agent');
     expect(parts.contextLines[1]).toBe('Context: agent chat');
     expect(parts.contextLines).toContain(
       'The agent cannot approve this itself.',
     );
     expect(parts.replyInMinutes).toBe(1);
+    expect(parts.fullView).toMatchObject({
+      label: 'View full command',
+      content: 'npm test',
+    });
+  });
+
+  it('keeps full command out of Telegram prompt unless full view is requested', () => {
+    const parts = buildPermissionPromptParts(
+      {
+        ...commandRequest,
+        toolInput: {
+          description: 'Run the test suite',
+          command: 'npm test -- --runInBand',
+        },
+      },
+      60_000,
+    );
+    const collapsed = renderPermissionPromptHtml(parts);
+    expect(collapsed).toContain('Run the test suite');
+    expect(collapsed).not.toContain('npm test -- --runInBand');
+
+    const expanded = renderPermissionPromptHtml(parts, {
+      includeFullView: true,
+    });
+    expect(expanded).toContain('<b>View full command</b>');
+    expect(expanded).toContain(
+      '<blockquote expandable>npm test -- --runInBand</blockquote>',
+    );
+  });
+
+  it('builds a Slack full-view modal without truncating payload text', () => {
+    const blocks = buildPermissionFullViewModalBlocks({
+      label: 'View diff',
+      title: 'Full diff',
+      filename: 'permission-diff.diff',
+      content: `-${'old\n'.repeat(1200)}+new`,
+    });
+    const rendered = blocks
+      .map((block) => ((block as any).text?.text as string | undefined) || '')
+      .join('');
+    expect(rendered).toContain('+new');
+    expect(rendered).not.toContain('...');
+  });
+
+  it('keeps settings YAML in full view instead of the inline body', () => {
+    const yaml = `agents:\n  main_agent:\n    name: Gantry\n${'x'.repeat(1200)}`;
+    const parts = buildPermissionPromptParts(
+      {
+        requestId: 'settings-1',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'request_settings_update',
+        toolInput: {
+          expectedRevision: 'rev-1',
+          agentCount: 1,
+          replacementYaml: yaml,
+          diffSummary: ['+ 3:     name: Gantry'],
+        },
+      },
+      60_000,
+    );
+
+    expect(parts.bodyLines.join('\n')).not.toContain(yaml);
+    expect(parts.fullView).toMatchObject({
+      label: 'View settings change',
+      filename: 'settings-change.yaml',
+      content: yaml,
+    });
   });
 
   it('omits the body for a tool that takes no arguments (no empty Input block)', () => {
@@ -312,7 +378,8 @@ describe('Telegram HTML rendering', () => {
     expect(html).toContain(
       `<b>${PERMISSION_GLYPH} Allow Main Agent to use exact command access?</b>`,
     );
-    expect(html).toContain('<pre>npm test</pre>');
+    expect(html).toContain('Runs: npm');
+    expect(html).not.toContain('<pre>npm test</pre>');
     expect(html).not.toContain('```');
     expect(html).toContain('<i>Reply in 1m</i>');
   });

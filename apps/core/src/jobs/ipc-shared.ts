@@ -21,6 +21,19 @@ function writeJsonAtomic(filePath: string, value: unknown): void {
   writeFileAtomic(filePath, JSON.stringify(value, null, 2));
 }
 
+export function taskIpcResponsePath(
+  sourceAgentFolder: string,
+  taskId: string,
+): string {
+  return path.join(
+    DATA_DIR,
+    'ipc',
+    sourceAgentFolder,
+    'task-responses',
+    `task-${taskId}.json`,
+  );
+}
+
 export function writeTaskIpcResponse(
   sourceAgentFolder: string,
   taskId: string | undefined,
@@ -44,7 +57,7 @@ export function writeTaskIpcResponse(
     'task-responses',
   );
   fs.mkdirSync(responseDir, { recursive: true });
-  const responsePath = path.join(responseDir, `task-${taskId}.json`);
+  const responsePath = taskIpcResponsePath(sourceAgentFolder, taskId);
   const responsePayload = {
     taskId,
     ...payload,

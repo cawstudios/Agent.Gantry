@@ -312,6 +312,59 @@ export abstract class TelegramChannelState implements ChannelAdapter {
     };
   }
 
+  private telegramRateLimitRetryDelayMs(err: unknown): number | null {
+    const candidate = err as {
+      error_code?: unknown;
+      status?: unknown;
+      statusCode?: unknown;
+      parameters?: { retry_after?: unknown };
+      response?: {
+        status?: unknown;
+        parameters?: { retry_after?: unknown };
+      };
+    };
+    if (
+      candidate.error_code !== 429 &&
+      candidate.status !== 429 &&
+      candidate.statusCode !== 429 &&
+      candidate.response?.status !== 429
+    ) {
+      return null;
+    }
+    const retryAfter =
+      candidate.parameters?.retry_after ??
+      candidate.response?.parameters?.retry_after;
+    const seconds =
+      typeof retryAfter === 'number'
+        ? retryAfter
+        : typeof retryAfter === 'string'
+          ? Number.parseFloat(retryAfter)
+          : Number.NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0) return 1000;
+    return Math.min(5000, Math.max(1, Math.round(seconds * 1000)));
+  }
+
+  private async withTelegramGroupRateLimitRetry<T>(
+    jid: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await action();
+    } catch (err) {
+      const retryDelayMs = this.telegramRateLimitRetryDelayMs(err);
+      if (retryDelayMs === null) throw err;
+      logger.warn(
+        { jid, retryDelayMs },
+        'Telegram group stream rate-limited; retrying current flush',
+      );
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, retryDelayMs);
+        timer.unref?.();
+      });
+      return action();
+    }
+  }
+
   protected async handleGroupStreamingChunk(
     jid: string,
     numericId: string,
@@ -368,22 +421,24 @@ export abstract class TelegramChannelState implements ChannelAdapter {
             ? { message_thread_id: state.threadId }
             : {};
           if (options.done) {
-            const messageId = await sendTelegramMessageWithResult(
-              this.bot.api,
-              numericId,
-              headText,
-              sendOptions,
-              { preserveStyleMarkers: true },
+            const messageId = await this.withTelegramGroupRateLimitRetry(
+              jid,
+              () =>
+                sendTelegramMessageWithResult(
+                  this.bot!.api,
+                  numericId,
+                  headText,
+                  sendOptions,
+                  { preserveStyleMarkers: true },
+                ),
             );
             if (messageId) {
               state.messageId = messageId;
               delivered = true;
             }
           } else {
-            const sent = await this.bot.api.sendMessage(
-              numericId,
-              headText,
-              sendOptions,
+            const sent = await this.withTelegramGroupRateLimitRetry(jid, () =>
+              this.bot!.api.sendMessage(numericId, headText, sendOptions),
             );
             const messageId = (sent as { message_id?: number })?.message_id;
             if (messageId) {
@@ -397,12 +452,14 @@ export abstract class TelegramChannelState implements ChannelAdapter {
           }
         } else if (options.done) {
           // Final edit — apply MarkdownV2 formatting
-          await editTelegramMessage(
-            this.bot.api,
-            numericId,
-            state.messageId,
-            headText,
-            { preserveStyleMarkers: true },
+          await this.withTelegramGroupRateLimitRetry(jid, () =>
+            editTelegramMessage(
+              this.bot!.api,
+              numericId,
+              state.messageId!,
+              headText,
+              { preserveStyleMarkers: true },
+            ),
           );
           delivered = true;
           logger.info(
@@ -412,10 +469,12 @@ export abstract class TelegramChannelState implements ChannelAdapter {
         } else {
           // Intermediate edits — plain text, single API call, no fallback cascade
           try {
-            await this.bot.api.editMessageText(
-              numericId,
-              state.messageId,
-              headText,
+            await this.withTelegramGroupRateLimitRetry(jid, () =>
+              this.bot!.api.editMessageText(
+                numericId,
+                state.messageId!,
+                headText,
+              ),
             );
             delivered = true;
             logger.debug(
@@ -449,12 +508,14 @@ export abstract class TelegramChannelState implements ChannelAdapter {
               ? { message_thread_id: state.threadId }
               : {};
             for (const part of overflowParts) {
-              await sendTelegramMessageWithResult(
-                this.bot.api,
-                numericId,
-                part,
-                sendOptions,
-                { preserveStyleMarkers: true },
+              await this.withTelegramGroupRateLimitRetry(jid, () =>
+                sendTelegramMessageWithResult(
+                  this.bot!.api,
+                  numericId,
+                  part,
+                  sendOptions,
+                  { preserveStyleMarkers: true },
+                ),
               );
               delivered = true;
             }
@@ -481,12 +542,16 @@ export abstract class TelegramChannelState implements ChannelAdapter {
             const sentOverflowMessageIds: string[] = [];
             try {
               for (const part of overflowParts) {
-                const messageId = await sendTelegramMessageWithResult(
-                  this.bot.api,
-                  numericId,
-                  part,
-                  sendOptions,
-                  { preserveStyleMarkers: true },
+                const messageId = await this.withTelegramGroupRateLimitRetry(
+                  jid,
+                  () =>
+                    sendTelegramMessageWithResult(
+                      this.bot!.api,
+                      numericId,
+                      part,
+                      sendOptions,
+                      { preserveStyleMarkers: true },
+                    ),
                 );
                 if (messageId !== undefined) {
                   const externalMessageId = String(messageId);
@@ -603,12 +668,14 @@ export abstract class TelegramChannelState implements ChannelAdapter {
           ? { message_thread_id: state.threadId }
           : {};
         for (const part of overflowParts) {
-          await sendTelegramMessageWithResult(
-            this.bot.api,
-            numericId,
-            part,
-            sendOptions,
-            { preserveStyleMarkers: true },
+          await this.withTelegramGroupRateLimitRetry(jid, () =>
+            sendTelegramMessageWithResult(
+              this.bot!.api,
+              numericId,
+              part,
+              sendOptions,
+              { preserveStyleMarkers: true },
+            ),
           );
           delivered = true;
         }

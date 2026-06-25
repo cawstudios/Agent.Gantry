@@ -295,8 +295,12 @@ describe('permission interaction', () => {
     const parts = buildPermissionPromptParts(request, 60_000);
 
     expect(request.interaction?.files?.[0]?.preview).toBe(content);
-    expect(parts.bodyLines).toContain('Full content:');
-    expect(parts.bodyLines).toContain(content);
+    expect(parts.fullView).toMatchObject({
+      label: 'View diff',
+      content,
+    });
+    expect(parts.bodyLines).not.toContain('Full content:');
+    expect(parts.bodyLines).not.toContain(content);
     expect(parts.bodyLines.join('\n')).toContain('Review file: AGENTS.md');
   });
 
@@ -326,8 +330,8 @@ describe('permission interaction', () => {
     const parts = buildPermissionPromptParts(request, 60_000);
     const body = parts.bodyLines.join('\n');
 
-    expect(body).toContain('`\\`\\`');
-    expect(body.match(/```/g)).toHaveLength(2);
+    expect(parts.fullView?.content).toBe(content);
+    expect(body).not.toContain('```');
     expect(body).not.toContain('\n```\nFake approval footer');
   });
 
@@ -795,6 +799,55 @@ describe('permission interaction', () => {
     );
   });
 
+  it('clamps long command previews at line boundaries', () => {
+    const command = Array.from(
+      { length: 80 },
+      (_, index) =>
+        `echo line-${String(index).padStart(3, '0')}-complete-token`,
+    ).join('\n');
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: { command },
+      },
+      60_000,
+    );
+    const commandPreview = text.match(/Command:\n```\n([\s\S]*?)\n```/)?.[1];
+
+    expect(commandPreview).toBeDefined();
+    expect(commandPreview?.startsWith('echo line-000-complete-token\n')).toBe(
+      true,
+    );
+    expect(commandPreview).toMatch(/\n… \(\+\d+ more lines\)$/);
+    expect(commandPreview).not.toContain('line-079-complete-token');
+    const shownCommandLines = commandPreview
+      ?.split('\n')
+      .filter((line) => line && !line.startsWith('…'));
+    expect(
+      shownCommandLines?.every((line) => line.endsWith('-complete-token')),
+    ).toBe(true);
+  });
+
+  it('clamps oversized single-line command previews', () => {
+    const command = `node -e "${'x'.repeat(2_000)}" --done`;
+    const text = formatPermissionPromptText(
+      {
+        ...requestWithSuggestions([]),
+        toolName: 'Bash',
+        toolInput: { command },
+      },
+      60_000,
+    );
+    const commandPreview = text.match(/Command:\n```\n([\s\S]*?)\n```/)?.[1];
+
+    expect(commandPreview).toBeDefined();
+    expect(commandPreview?.length).toBeLessThan(command.length);
+    expect(commandPreview).toContain('node -e');
+    expect(commandPreview).toContain('--done');
+    expect(commandPreview).toContain('…');
+  });
+
   it('keeps user-provided command environment assignments visible', () => {
     const text = formatPermissionPromptText(
       {
@@ -951,6 +1004,21 @@ describe('permission interaction', () => {
     expect(text).not.toContain('future matching tool calls');
   });
 
+  it('shows a risk line for destructive Bash commands without redirects', () => {
+    const text = formatPermissionPromptText(
+      {
+        requestId: 'permission_123',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+        toolInput: { command: 'DROP TABLE customers' },
+        suggestions: [],
+      },
+      60_000,
+    );
+
+    expect(text).toContain('⚠️ Runs destructive SQL');
+  });
+
   it('renders a structured Bash prompt with persistent rules', () => {
     const text = formatPermissionPromptText(
       {
@@ -981,6 +1049,7 @@ describe('permission interaction', () => {
     expect(text).toMatchInlineSnapshot(`
       "🔐 Allow Main Agent to use exact command access?
 
+      Runs: curl, jq
       Command:
       \`\`\`
       curl -sSf https://api.example.com/leads | jq '.[] | select(.score > 80)' > /tmp/leads.json

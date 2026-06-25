@@ -38,7 +38,16 @@ import { renderTelegramChannelAgentTodo } from './agent-todo-delivery.js';
 import { bindTelegramPermissionPromptMessage } from './prompt-binding.js';
 import { unescapeTelegramEscapedMarkdownV2 } from './markdown-v2-unescape.js';
 import { sendTelegramTyping } from './typing-indicator.js';
+
+function telegramReactionEmoji(emoji: string): string {
+  if (emoji === 'seen') return '👀';
+  if (emoji === 'running') return '⏳';
+  return emoji;
+}
+
 export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
+  private readonly reactionKeys = new Set<string>();
+
   async sendMessage(
     jid: string,
     text: string,
@@ -162,6 +171,31 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
         'Failed to send Telegram message',
       );
       throw err;
+    }
+  }
+
+  async addReaction(
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericId = jid.replace(/^tg:/, '');
+    const messageId = Number.parseInt(messageRef, 10);
+    if (!Number.isFinite(messageId)) return;
+    const reaction = telegramReactionEmoji(emoji);
+    const key = `${jid}:${messageId}:${reaction}`;
+    if (this.reactionKeys.has(key)) return;
+    try {
+      await this.bot.api.setMessageReaction(
+        numericId,
+        messageId,
+        [{ type: 'emoji', emoji: reaction as never }],
+        { is_big: false },
+      );
+      this.reactionKeys.add(key);
+    } catch (err) {
+      logger.debug({ jid, messageRef, err }, 'Telegram reaction update failed');
     }
   }
 

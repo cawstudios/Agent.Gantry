@@ -119,6 +119,11 @@ export type ControlRouteContext = {
     threadId: string | null;
     text: string;
   }) => Promise<void>;
+  addMessageReaction?: (
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ) => Promise<void>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   syncSettingsFromProjection: (appId: AppId) => Promise<void>;
   getSelectedAgentHarness: (agentFolder?: string) => AgentHarness;
