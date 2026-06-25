@@ -36,6 +36,7 @@ export function startInitialGroupProgress(input: {
     text: string,
     options?: ProgressUpdateOptions,
   ): Promise<void>;
+  onSent?: () => Promise<void> | void;
   log: GroupProgressHeartbeatLogger;
 }): { cancel(): Promise<void> } {
   if (!input.supportsProgress) {
@@ -75,6 +76,7 @@ export function startInitialGroupProgress(input: {
     );
     sendStarted = input
       .sendProgressToChannel('⏳ Working', input.buildProgressOptions())
+      .then(() => input.onSent?.())
       .then(() =>
         logProgressLifecycle(
           input.log,

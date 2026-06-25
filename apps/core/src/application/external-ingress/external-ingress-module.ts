@@ -509,6 +509,7 @@ export class ExternalIngressModule {
     const conversationId = readString(target, 'conversationId');
     const message = readString(target, 'message');
     const senderName = readOptionalString(target, 'senderName');
+    const messageRef = readOptionalString(target, 'messageRef');
     const accepted = await this.deps.conversationMessages.acceptMessage({
       appId,
       invocationId,
@@ -517,6 +518,7 @@ export class ExternalIngressModule {
       message,
       senderId: readOptionalString(target, 'senderId'),
       senderName,
+      ...(messageRef ? { messageRef } : {}),
       correlationId: readOptionalString(target, 'correlationId'),
     });
     if (this.deps.conversationProviderMessages) {

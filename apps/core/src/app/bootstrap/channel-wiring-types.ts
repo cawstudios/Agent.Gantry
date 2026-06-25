@@ -167,6 +167,11 @@ export interface ChannelWiring {
     text: string,
     options?: ProgressUpdateOptions,
   ) => Promise<void>;
+  addReaction: (
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ) => Promise<void>;
   syncGroups: (force: boolean) => Promise<void>;
   requestPermissionApproval: (
     request: PermissionApprovalRequest,

@@ -82,6 +82,9 @@ vi.mock('@slack/bolt', () => ({
           .fn()
           .mockResolvedValue({ ok: true, message_ts: '1710000000.100201' }),
       },
+      reactions: {
+        add: vi.fn().mockResolvedValue({ ok: true }),
+      },
       apiCall: vi.fn().mockResolvedValue({ ok: false }),
       views: {
         publish: vi.fn().mockResolvedValue({ ok: true }),
@@ -255,6 +258,25 @@ describe('Slack channel', () => {
       if (savedApp !== undefined) process.env.SLACK_APP_TOKEN = savedApp;
       else delete process.env.SLACK_APP_TOKEN;
     }
+  });
+
+  it('adds Slack reactions idempotently', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+    await channel.connect({ inbound: false });
+
+    await channel.addReaction('sl:C1234567890', '1710000000.000100', 'seen');
+    await channel.addReaction('sl:C1234567890', '1710000000.000100', 'seen');
+
+    expect(appRef.current.client.reactions.add).toHaveBeenCalledTimes(1);
+    expect(appRef.current.client.reactions.add).toHaveBeenCalledWith({
+      channel: 'C1234567890',
+      timestamp: '1710000000.000100',
+      name: 'eyes',
+    });
   });
 
   it('records metadata only for unregistered Slack conversations', async () => {

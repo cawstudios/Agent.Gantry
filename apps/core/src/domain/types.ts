@@ -607,6 +607,10 @@ export interface MessageSink {
   ): Promise<void | MessageDeliveryResult>;
 }
 
+export interface MessageReactionSink {
+  addReaction(jid: string, messageRef: string, emoji: string): Promise<void>;
+}
+
 export interface TypingSink {
   setTyping(jid: string, isTyping: boolean): Promise<void>;
 }

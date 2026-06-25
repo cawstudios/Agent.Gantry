@@ -54,6 +54,7 @@ vi.mock('grammy', () => ({
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
       getChatMember: vi.fn().mockResolvedValue({ status: 'administrator' }),
       editMessageText: vi.fn().mockResolvedValue(undefined),
+      setMessageReaction: vi.fn().mockResolvedValue(true),
       setMyCommands: vi.fn().mockResolvedValue(true),
       config: { use: vi.fn() },
       raw: null as any,
@@ -331,6 +332,22 @@ describe('TelegramChannel', () => {
     else process.env.GANTRY_HOME = savedGantryHome;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('adds Telegram reactions idempotently', async () => {
+    const channel = new TelegramChannel('token', createTestOpts());
+    await channel.connect({ inbound: false });
+
+    await channel.addReaction('tg:100200300', '987', 'running');
+    await channel.addReaction('tg:100200300', '987', 'running');
+
+    expect(botRef.current.api.setMessageReaction).toHaveBeenCalledTimes(1);
+    expect(botRef.current.api.setMessageReaction).toHaveBeenCalledWith(
+      '100200300',
+      987,
+      [{ type: 'emoji', emoji: '⏳' }],
+      { is_big: false },
+    );
   });
 
   it('renders todo messages in the active Telegram topic', async () => {

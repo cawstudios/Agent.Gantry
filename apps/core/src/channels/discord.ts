@@ -85,6 +85,12 @@ function discordHeaders(token: string): Record<string, string> {
   };
 }
 
+function discordReactionEmoji(emoji: string): string {
+  if (emoji === 'seen') return '👀';
+  if (emoji === 'running') return '⏳';
+  return emoji;
+}
+
 function discordRateLimitRetryDelayMs(response: Response): number | null {
   if (response.status !== 429) return null;
   const retryAfter =
@@ -176,6 +182,7 @@ export class DiscordChannel implements ChannelAdapter {
     string,
     { channelId: string; messageId: string }
   >();
+  private readonly reactionKeys = new Set<string>();
 
   constructor(
     private readonly botToken: string,
@@ -226,6 +233,32 @@ export class DiscordChannel implements ChannelAdapter {
       botToken: this.botToken,
       post: (target, body) => this.postMessage(target, body),
     });
+  }
+
+  async addReaction(
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ): Promise<void> {
+    const channelId = discordChannelIdFromJid(jid);
+    if (!channelId || !messageRef.trim()) return;
+    const reaction = discordReactionEmoji(emoji);
+    const key = `${channelId}:${messageRef}:${reaction}`;
+    if (this.reactionKeys.has(key)) return;
+    try {
+      await this.requestJson<void>(
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageRef)}/reactions/${encodeURIComponent(reaction)}/@me`,
+        {
+          method: 'PUT',
+          headers: discordHeaders(this.botToken),
+        },
+        'Discord reaction update failed',
+        false,
+      );
+      this.reactionKeys.add(key);
+    } catch (err) {
+      logger.debug({ jid, messageRef, err }, 'Discord reaction update failed');
+    }
   }
 
   async sendProgressUpdate(

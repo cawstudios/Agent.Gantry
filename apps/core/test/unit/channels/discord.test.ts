@@ -140,6 +140,23 @@ describe('DiscordChannel', () => {
     fetchMock.mockRestore();
   });
 
+  it('adds Discord reactions idempotently', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({}));
+    const channel = new DiscordChannel('bot-token', 'app-id', opts());
+
+    await channel.addReaction('dc:channel-1', 'message-1', 'seen');
+    await channel.addReaction('dc:channel-1', 'message-1', 'seen');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    fetchMock.mockRestore();
+  });
+
   it('uploads message files with Discord multipart delivery', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

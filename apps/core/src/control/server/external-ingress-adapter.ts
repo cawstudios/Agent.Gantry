@@ -57,6 +57,9 @@ export function createExternalIngressModule(
     providerForConversationJid: (conversationJid) =>
       providerIdForJid(conversationJid, 'app'),
     makeQueueKey: makeThreadQueueKey,
+    messageReactions: ctx.addMessageReaction
+      ? { addReaction: ctx.addMessageReaction }
+      : undefined,
     now: nowIso,
     createId: randomUUID,
   });

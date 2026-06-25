@@ -96,6 +96,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       existingRunLeaseWorkerInstanceId?: string;
       existingRunLeaseFencingVersion?: number;
       onRunResult?: (result: 'success' | 'error' | 'stopped') => void;
+      onFirstProgress?: (input: {
+        jid: string;
+        messageRef: string;
+      }) => Promise<void> | void;
     } = {},
   ): Promise<boolean> {
     const { chatJid, threadId: queueThreadId } = parseThreadQueueKey(queueJid);
@@ -119,6 +123,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       });
     if (missedMessages.length === 0) return true;
     const latestMessage = missedMessages[missedMessages.length - 1];
+    const latestMessageReactionRef =
+      latestMessage.external_message_id &&
+      !latestMessage.external_message_id.startsWith('external-ingress:')
+        ? latestMessage.external_message_id
+        : null;
     const activeThreadId = firstThreadQueueId(
       queueThreadId,
       latestMessage.thread_id,
@@ -358,11 +367,22 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let backgroundDemoted = false;
     const turnUiToken = Symbol(queueJid);
     const supportsProgress = deps.channelRuntime.supportsProgress(chatJid);
+    let firstProgressNotified = false;
+    const notifyFirstProgress = async () => {
+      if (firstProgressNotified || !latestMessageReactionRef) return;
+      firstProgressNotified = true;
+      await options
+        .onFirstProgress?.({
+          jid: chatJid,
+          messageRef: latestMessageReactionRef,
+        })
+        ?.catch(() => undefined);
+    };
     const sendRunningProgress = async () => {
       if (!supportsProgress) return;
-      await sendProgressToChannel('⏳ Working', buildProgressOptions()).catch(
-        () => undefined,
-      );
+      await sendProgressToChannel('⏳ Working', buildProgressOptions())
+        .then(() => notifyFirstProgress())
+        .catch(() => undefined);
     };
     const sendDoneProgress = async (state: progress.FinalProgressState) => {
       if (!supportsProgress) return;
@@ -437,6 +457,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       groupName: group.name,
       buildProgressOptions,
       sendProgressToChannel,
+      onSent: notifyFirstProgress,
       log: logger,
     });
     progressHeartbeat = startGroupProgressHeartbeats({

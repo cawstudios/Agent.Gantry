@@ -38,6 +38,7 @@ import type { AppId } from '../../domain/app/app.js';
 import {
   asAgentTodoSurface,
   asGroupDiscoverySource,
+  asMessageReactionSink,
   asPermissionApprovalSurface,
   asProgressSink,
   asStreamingSink,
@@ -679,6 +680,18 @@ export function createChannelWiring(
     await typingSink.setTyping(jid, isTyping);
   }
 
+  async function addReaction(
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ): Promise<void> {
+    const channel = findBoundChannel(jid);
+    if (!channel) return;
+    const reactionSink = asMessageReactionSink(channel);
+    if (!reactionSink) return;
+    await reactionSink.addReaction(jid, messageRef, emoji);
+  }
+
   async function syncGroups(force: boolean): Promise<void> {
     const syncSources = connectedChannels
       .map(asGroupDiscoverySource)
@@ -724,6 +737,7 @@ export function createChannelWiring(
     resetStreaming,
     setTyping,
     sendProgressUpdate,
+    addReaction,
     syncGroups,
     requestPermissionApproval,
     requestUserAnswer: userQuestionResponder.requestUserAnswer,

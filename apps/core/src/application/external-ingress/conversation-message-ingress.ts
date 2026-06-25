@@ -55,6 +55,13 @@ export class ConversationMessageIngressModule {
           liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
         }>;
       };
+      messageReactions?: {
+        addReaction(
+          jid: string,
+          messageRef: string,
+          emoji: string,
+        ): Promise<void>;
+      };
       liveAdmissionAppId?: string | null;
       isConversationRoutable: (conversationJid: string) => boolean;
       providerForConversationJid: (conversationJid: string) => string;
@@ -75,6 +82,7 @@ export class ConversationMessageIngressModule {
     message: string;
     senderId?: string | null;
     senderName?: string | null;
+    messageRef?: string | null;
     correlationId?: string | null;
   }): Promise<{
     messageId: string;
@@ -125,7 +133,8 @@ export class ConversationMessageIngressModule {
       timestamp: now,
       is_from_me: false,
       is_bot_message: false,
-      external_message_id: `external-ingress:${input.invocationId}`,
+      external_message_id:
+        input.messageRef?.trim() || `external-ingress:${input.invocationId}`,
       thread_id: runtimeThreadId ?? undefined,
     };
 
@@ -189,6 +198,12 @@ export class ConversationMessageIngressModule {
     }
     if (admissionResult) {
       await this.deps.ops.notifyLiveAdmissionWorkItem?.(admissionResult);
+    }
+    const messageRef = input.messageRef?.trim();
+    if (messageRef) {
+      await this.deps.messageReactions
+        ?.addReaction(conversationJid, messageRef, 'seen')
+        .catch(() => undefined);
     }
 
     return {

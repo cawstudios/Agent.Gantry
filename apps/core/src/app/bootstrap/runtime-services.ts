@@ -523,6 +523,8 @@ export async function startRuntimeServices(
       timezone: TIMEZONE,
       enqueueMessageCheck: app.queue.enqueueMessageCheck.bind(app.queue),
       warn: (context, message) => resolved.logger.warn(context, message),
+      addReaction: (jid, messageRef, emoji) =>
+        channelWiring.addReaction(jid, messageRef, emoji),
       finalizeBrowserForLiveTurn: buildLiveTurnBrowserFinalizer({
         getConversationRoutes: () => app.getConversationRoutes(),
         closeBrowserSession: closeBrowser,
@@ -1030,6 +1032,8 @@ export async function startRuntimeServices(
     registerActiveRecoveryLoop: (loop) => {
       activeLiveTurnRecoveryLoop = loop;
     },
+    addReaction: (jid, messageRef, emoji) =>
+      channelWiring.addReaction(jid, messageRef, emoji),
     // Fleet-only queued-capacity UX; workstation recovery can replay old backlog.
     waitingStatus:
       liveTurns && resolved.getDeploymentMode() === 'fleet'

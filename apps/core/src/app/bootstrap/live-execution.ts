@@ -151,6 +151,10 @@ interface AdmissionApp {
       existingRunLeaseWorkerInstanceId?: string;
       existingRunLeaseFencingVersion?: number;
       onRunResult?: (result: 'success' | 'error' | 'stopped' | null) => void;
+      onFirstProgress?: (input: {
+        jid: string;
+        messageRef: string;
+      }) => Promise<void> | void;
     },
   ) => Promise<boolean>;
   getOrRecoverCursor: (queueJid: string) => Promise<string>;
@@ -183,6 +187,11 @@ export function buildLiveAdmissionProcessor(input: {
   timezone: string;
   enqueueMessageCheck: (queueJid: string) => void;
   warn: WarnLog;
+  addReaction?: (
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ) => Promise<void>;
   finalizeBrowserForLiveTurn?: LiveTurnBrowserFinalizer;
 }): (queueJid: string) => Promise<boolean> {
   const {
@@ -324,6 +333,10 @@ export function buildLiveAdmissionProcessor(input: {
         onRunResult: (result) => {
           liveRunResult = result;
         },
+        onFirstProgress: ({ jid, messageRef }) =>
+          input
+            .addReaction?.(jid, messageRef, 'running')
+            .catch(() => undefined),
       });
       const terminalSuccess = success && liveRunResult !== 'stopped';
       // Snapshot the browser profile (if used) BEFORE finalizing the live turn,
@@ -451,6 +464,11 @@ export function startLiveExecutionServices(input: {
   onPollingCrash: (err: unknown) => void;
   info: InfoLog;
   warn: WarnLog;
+  addReaction?: (
+    jid: string,
+    messageRef: string,
+    emoji: string,
+  ) => Promise<void>;
 }): LiveExecutionServicesHandle {
   const {
     app,

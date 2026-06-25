@@ -159,6 +159,33 @@ describe('Teams Adaptive Card payloads', () => {
 });
 
 describe('TeamsChannel adapter scaffold', () => {
+  it('falls back to visible Teams reaction text idempotently', async () => {
+    const sdkClient: TeamsSdkClient = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => ({ externalMessageId: 'teams-msg-1' })),
+    };
+    const channel = new TeamsChannel(
+      {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tenantId: 'tenant-id',
+      },
+      makeOpts(),
+      sdkClient,
+    );
+    await channel.connect({ inbound: false });
+
+    await channel.addReaction('teams:19:abc@thread.v2', 'message-1', 'running');
+    await channel.addReaction('teams:19:abc@thread.v2', 'message-1', 'running');
+
+    expect(sdkClient.sendMessage).toHaveBeenCalledTimes(1);
+    expect(sdkClient.sendMessage).toHaveBeenCalledWith({
+      conversationId: '19:abc@thread.v2',
+      text: 'Running.',
+    });
+  });
+
   it('renders todo cards in the active Teams thread', async () => {
     let messageCounter = 0;
     const sdkClient: TeamsSdkClient = {

@@ -7,6 +7,7 @@ function makeModule(overrides?: {
   thread?: Record<string, unknown> | null;
   ops?: Record<string, unknown>;
   runtimeEvents?: Record<string, unknown>;
+  messageReactions?: Record<string, unknown>;
   routable?: boolean;
   liveAdmissionAppId?: string | null;
 }) {
@@ -56,6 +57,7 @@ function makeModule(overrides?: {
     conversations: conversations as never,
     ops: ops as never,
     runtimeEvents,
+    messageReactions: overrides?.messageReactions as never,
     liveAdmissionAppId: overrides?.liveAdmissionAppId,
     isConversationRoutable: vi.fn(() => overrides?.routable ?? true),
     providerForConversationJid: (jid) =>
@@ -118,6 +120,28 @@ describe('ConversationMessageIngressModule', () => {
           direction: 'inbound',
           deliveryStatus: 'accepted',
         }),
+      }),
+    );
+  });
+
+  it('adds a seen reaction when ingress provides a native message ref', async () => {
+    const addReaction = vi.fn(async () => undefined);
+    const { module, ops } = makeModule({
+      messageReactions: { addReaction },
+    });
+
+    await module.acceptMessage({
+      appId: 'app-one',
+      invocationId: 'invocation-1',
+      conversationId: 'conversation:tg:-100',
+      message: 'Run this',
+      messageRef: '12345',
+    });
+
+    expect(addReaction).toHaveBeenCalledWith('tg:-100', '12345', 'seen');
+    expect(ops.storeMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        external_message_id: '12345',
       }),
     );
   });
