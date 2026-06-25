@@ -1,5 +1,6 @@
 import path from 'path';
 
+import { ApplicationError } from '../application/common/application-error.js';
 import { publishInvalidMcpToolRequestAudit } from '../application/mcp/mcp-tool-audit.js';
 import type { McpToolProxy } from '../application/mcp/mcp-tool-proxy.js';
 import { isActiveRunLeaseForInteraction } from '../application/interactions/pending-interaction-durability.js';
@@ -223,11 +224,43 @@ function mcpCallToolHandler(
       });
       acceptData(`MCP tool ${serverName}.${toolName} completed.`, result);
     } catch (err) {
+      const missingCapability = missingMcpCapabilityBindingResult(err);
+      if (missingCapability) {
+        acceptData(
+          missingCapability.message,
+          missingCapability,
+          'missing_capability_binding',
+        );
+        return;
+      }
       reject(
         err instanceof Error ? err.message : 'MCP tool call failed.',
         'mcp_proxy_failed',
       );
     }
+  };
+}
+
+function missingMcpCapabilityBindingResult(err: unknown): {
+  errorType: 'missing_capability_binding';
+  tool: string;
+  message: string;
+  recovery: string;
+} | null {
+  if (!(err instanceof ApplicationError) || err.code !== 'FORBIDDEN') {
+    return null;
+  }
+  const match = /^MCP tool is not approved for this agent: (mcp__.+)$/.exec(
+    err.message,
+  );
+  if (!match) return null;
+  const tool = match[1];
+  return {
+    errorType: 'missing_capability_binding',
+    tool,
+    message: `This MCP tool is connected but not approved by the selected capability: ${tool}.`,
+    recovery:
+      'Ask a conversation approver to review and grant a capability that includes this MCP tool before continuing.',
   };
 }
 
