@@ -476,7 +476,10 @@ export async function spawnAgent(
     if (runnerInputPatch.deepAgentCheckpointer) {
       runnerInput.deepAgentCheckpointer =
         runnerSandboxProviderId === 'sandbox_runtime'
-          ? { ...runnerInputPatch.deepAgentCheckpointer }
+          ? {
+              ...runnerInputPatch.deepAgentCheckpointer,
+              proxyUrl: egressGateway.proxyUrl,
+            }
           : runnerInputPatch.deepAgentCheckpointer;
     }
     runnerInput.deepAgentSkills = runnerInputPatch.deepAgentSkills;
