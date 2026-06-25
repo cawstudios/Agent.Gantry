@@ -182,10 +182,13 @@ function skillsSection(): string {
 }
 
 function gantryControlSection(): string {
+  // request_access target.kind taxonomy is owned by the profile OPERATING_GUIDANCE
+  // (FULL_TOOL_ACCESS_GUIDANCE) and the request_access tool schema; re-stating it
+  // here duplicated the static prefix and leaked permission machinery into locked
+  // agents (this section is not accessPreset-aware, the locked profile strips it).
   return [
     '## Gantry Control',
     'Use send_message for channel-visible updates and ask_user_question for decision-blocking questions.',
-    'Use request_access target.kind=capability for reviewed semantic capabilities and Browser, target.kind=tool for exact Gantry tools such as AgentDelegation or mcp__gantry__request_settings_update, and target.kind=run_command for scoped RunCommand(<argv pattern>) fallback.',
     'If Gantry mounts async_run_command, use it for approved long-running commands. If Gantry mounts delegate_task, use task_get/task_list/task_message/task_cancel to inspect, steer, and cancel delegated work.',
   ].join('\n');
 }

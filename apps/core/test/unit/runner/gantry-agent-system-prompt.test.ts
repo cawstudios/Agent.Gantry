@@ -67,6 +67,23 @@ describe('buildGantryAgentSystemPrompt', () => {
     expect(prompt.prompt).not.toContain('DeepAgents');
   });
 
+  it('does not re-inject request_access taxonomy (owned by the profile, stripped for locked)', () => {
+    // Empty compiledSystemPrompt stands in for a locked profile (request_access
+    // stripped) or a compile failure. The runner-owned sections must not leak
+    // the request_access taxonomy that the locked posture forbids and the full
+    // profile already carries.
+    for (const promptMode of ['full', 'minimal'] as const) {
+      const prompt = buildGantryAgentSystemPrompt({
+        runtimeProjection: 'wrapped-tool-projection',
+        promptMode,
+        assistantName: 'Asha',
+        compiledSystemPrompt: '',
+        currentDateTimeIso: '2026-06-17T00:00:00.000Z',
+      });
+      expect(prompt.prompt, promptMode).not.toContain('request_access');
+    }
+  });
+
   it('keeps minimal mode compact for delegated/internal runs', () => {
     const prompt = buildGantryAgentSystemPrompt({
       runtimeProjection: 'native-tool-projection',
