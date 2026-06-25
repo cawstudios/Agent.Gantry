@@ -27,7 +27,10 @@ import type { logger } from '../../infrastructure/logging/logger.js';
 import type { RuntimeSecretProvider } from '../../domain/ports/runtime-secret-provider.js';
 import type { AppId } from '../../domain/app/app.js';
 import type { RuntimeEventPublishInput } from '../../domain/events/events.js';
-import type { AgentTodoRender } from '../../domain/ports/task-lifecycle.js';
+import type {
+  AgentTodoCardStatus,
+  AgentTodoRender,
+} from '../../domain/ports/task-lifecycle.js';
 
 export type ChannelWiringRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository;
@@ -180,6 +183,14 @@ export interface ChannelWiring {
     request: UserQuestionRequest,
   ) => Promise<UserQuestionResponse>;
   renderAgentTodo: (jid: string, render: AgentTodoRender) => Promise<boolean>;
+  finalizeAgentTodo: (
+    jid: string,
+    input: {
+      threadId?: string | null;
+      cardKind?: AgentTodoRender['cardKind'];
+      status: AgentTodoCardStatus;
+    },
+  ) => Promise<boolean>;
   isControlApproverAllowed: (input: {
     conversationJid: string;
     userId: string;

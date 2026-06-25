@@ -122,6 +122,8 @@ function makeChannelWiring(): ChannelWiring {
     syncGroups: vi.fn(async () => {}),
     requestPermissionApproval: vi.fn(async () => ({ approved: true })),
     requestUserAnswer: vi.fn(async () => ({ requestId: 'q', answers: {} })),
+    renderAgentTodo: vi.fn(async () => true),
+    finalizeAgentTodo: vi.fn(async () => true),
     disconnectChannels: vi.fn(async () => {}),
     isControlApproverAllowed: vi.fn(async () => true),
   };
@@ -622,14 +624,18 @@ describe('startRuntimeServices', () => {
       expect(getAgentTurnContext).toHaveBeenCalledOnce();
       expect(createSessionAgentRun).toHaveBeenCalledOnce();
 
-      expect(app.processGroupMessages).toHaveBeenCalledWith('tg:primary', {
-        queued: true,
-        existingRunId: 'agent-run:live-1',
-        existingRunLeaseToken: 'lease-1',
-        existingRunLeaseWorkerInstanceId: expect.any(String),
-        existingRunLeaseFencingVersion: 1,
-        onRunResult: expect.any(Function),
-      });
+      expect(app.processGroupMessages).toHaveBeenCalledWith(
+        'tg:primary',
+        expect.objectContaining({
+          queued: true,
+          existingRunId: 'agent-run:live-1',
+          existingRunLeaseToken: 'lease-1',
+          existingRunLeaseWorkerInstanceId: expect.any(String),
+          existingRunLeaseFencingVersion: 1,
+          onRunResult: expect.any(Function),
+          onFirstProgress: expect.any(Function),
+        }),
+      );
       expect([...liveTurns.turns.values()]).toEqual([
         expect.objectContaining({
           appId: 'default',
@@ -648,6 +654,86 @@ describe('startRuntimeServices', () => {
           status: 'completed',
           resultSummary: 'Live turn completed.',
         },
+      ]);
+    } finally {
+      stopLiveTurnRecoveryLoop();
+      await stopLiveAdmissionLoop(0);
+      await shutdownLiveTurnAuthority();
+    }
+  });
+
+  it('finalizes the live todo card as failed from host turn outcome', async () => {
+    const app = makeApp();
+    const channelWiring = makeChannelWiring();
+    const liveTurns = new FakeLiveTurns();
+    const coordination = Object.assign(new FakeCoordination(), {
+      registerWorker: vi.fn(async () => {}),
+      heartbeatWorker: vi.fn(async () => true),
+    });
+    liveTurns.coordination = coordination;
+    app.processGroupMessages = vi.fn(
+      async (_queueJid: string, options: any) => {
+        await channelWiring.renderAgentTodo('tg:primary', {
+          summary: 'Plan done',
+          status: 'done',
+          items: [{ id: 'step-1', title: 'Work', status: 'completed' }],
+        });
+        options.onRunResult?.('error');
+        return false;
+      },
+    );
+
+    await startRuntimeServices(
+      {
+        app,
+        channelWiring,
+      },
+      {
+        startSchedulerLoop: vi.fn() as any,
+        startIpcWatcher: vi.fn() as any,
+        writeGroupsSnapshot: vi.fn() as any,
+        opsRepository: {
+          getAgentTurnContext: vi.fn(async () => ({
+            appId: 'default',
+            agentSessionId: 'session-main',
+          })),
+          createSessionAgentRun: vi.fn(async () => 'agent-run:live-1'),
+        } as any,
+        getToolRepository: vi.fn(() => ({}) as any),
+        getWorkerCoordinationRepository: vi.fn(() => coordination as any),
+        getLiveTurnRepository: vi.fn(() => liveTurns as any),
+        recoverPendingMessages: vi.fn() as any,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          fatal: vi.fn(),
+        },
+        exit: vi.fn() as any,
+      },
+    );
+    try {
+      const processMessages = vi.mocked(app.queue.setProcessMessagesFn as any)
+        .mock.calls[0]?.[0] as (queueJid: string) => Promise<boolean>;
+
+      await expect(processMessages('tg:primary')).resolves.toBe(false);
+
+      expect(channelWiring.renderAgentTodo).toHaveBeenCalledWith(
+        'tg:primary',
+        expect.objectContaining({ status: 'done' }),
+      );
+      expect(channelWiring.finalizeAgentTodo).toHaveBeenCalledWith(
+        'tg:primary',
+        {
+          threadId: null,
+          status: 'failed',
+        },
+      );
+      expect([...liveTurns.turns.values()]).toEqual([
+        expect.objectContaining({
+          conversationId: 'tg:primary',
+          runId: 'agent-run:live-1',
+          state: 'failed',
+        }),
       ]);
     } finally {
       stopLiveTurnRecoveryLoop();

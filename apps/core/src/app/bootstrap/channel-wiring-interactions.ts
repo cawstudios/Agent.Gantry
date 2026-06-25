@@ -4,7 +4,10 @@ import type {
   UserQuestionRequest,
   UserQuestionResponse,
 } from '../../domain/types.js';
-import type { AgentTodoRender } from '../../domain/ports/task-lifecycle.js';
+import type {
+  AgentTodoCardStatus,
+  AgentTodoRender,
+} from '../../domain/ports/task-lifecycle.js';
 import { formatDuration } from '../../shared/human-format.js';
 import { PERMISSION_APPROVAL_TIMEOUT_MS } from '../../shared/permission-timeout.js';
 
@@ -34,6 +37,18 @@ interface AgentTodoSurfaceLike {
     jid: string,
     render: AgentTodoRender,
   ) => Promise<void | boolean>;
+}
+
+export interface AgentTodoRenderer {
+  (jid: string, render: AgentTodoRender): Promise<boolean>;
+  finalize: (
+    jid: string,
+    input: {
+      threadId?: string | null;
+      cardKind?: AgentTodoRender['cardKind'];
+      status: AgentTodoCardStatus;
+    },
+  ) => Promise<boolean>;
 }
 
 interface PermissionApprovalTargetResolution {
@@ -232,11 +247,13 @@ export function createAgentTodoRenderer(input: {
     channel: ChannelLike,
   ) => AgentTodoSurfaceLike | undefined;
   logger: Pick<ChannelWiringInteractionsLogger, 'error'>;
-}): (jid: string, render: AgentTodoRender) => Promise<boolean> {
+}): AgentTodoRenderer {
   const windows = new Map<
     string,
     { pending: AgentTodoRender | null; timer: ReturnType<typeof setTimeout> }
   >();
+  // ponytail: ceiling is the latest in-memory render only; todo state stays non-durable.
+  const latest = new Map<string, AgentTodoRender>();
 
   const getSurface = (jid: string): AgentTodoSurfaceLike | undefined => {
     const channel = input.findBoundChannel(jid);
@@ -282,9 +299,13 @@ export function createAgentTodoRenderer(input: {
     windows.set(key, { pending: windows.get(key)?.pending ?? null, timer });
   };
 
-  return async (jid: string, render: AgentTodoRender): Promise<boolean> => {
+  const renderTodo = (async (
+    jid: string,
+    render: AgentTodoRender,
+  ): Promise<boolean> => {
     if (!jid || !getSurface(jid)) return false;
     const key = renderKey(jid, render);
+    latest.set(key, render);
     if (render.flush) {
       const existing = windows.get(key);
       if (existing) {
@@ -301,5 +322,32 @@ export function createAgentTodoRenderer(input: {
     }
     openWindow(key, jid);
     return flush(jid, render);
+  }) as AgentTodoRenderer;
+
+  renderTodo.finalize = async (
+    jid: string,
+    final: {
+      threadId?: string | null;
+      cardKind?: AgentTodoRender['cardKind'];
+      status: AgentTodoCardStatus;
+    },
+  ): Promise<boolean> => {
+    if (!jid || !getSurface(jid)) return false;
+    const key = renderKey(jid, {
+      summary: null,
+      items: [],
+      threadId: final.threadId ?? null,
+      cardKind: final.cardKind ?? 'todo',
+    });
+    const render = latest.get(key);
+    if (!render) return false;
+    return renderTodo(jid, {
+      ...render,
+      status: final.status,
+      updatedAt: new Date().toISOString(),
+      flush: true,
+    });
   };
+
+  return renderTodo;
 }

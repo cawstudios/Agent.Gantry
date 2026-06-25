@@ -72,6 +72,10 @@ describe('agent tool references', () => {
       ok: false,
       reason: expect.stringContaining('AgentDelegation'),
     });
+    expect(validateReadableAgentToolRule('TodoWrite')).toEqual({
+      ok: false,
+      reason: expect.stringContaining('mcp__gantry__todo_update'),
+    });
     expect(validateReadableAgentToolRule('RunCommand(npm test *)')).toEqual({
       ok: true,
     });

@@ -5,6 +5,10 @@ import type {
   LiveTurn,
   LiveTurnScope,
 } from '../../domain/ports/live-turns.js';
+import type {
+  AgentTodoCardStatus,
+  AgentTodoRender,
+} from '../../domain/ports/task-lifecycle.js';
 import type { RunLease } from '../../domain/ports/worker-coordination.js';
 import type { RuntimeLease } from '../../domain/ports/runtime-lease.js';
 import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
@@ -192,6 +196,14 @@ export function buildLiveAdmissionProcessor(input: {
     messageRef: string,
     emoji: string,
   ) => Promise<void>;
+  finalizeAgentTodo?: (
+    jid: string,
+    input: {
+      threadId?: string | null;
+      cardKind?: AgentTodoRender['cardKind'];
+      status: AgentTodoCardStatus;
+    },
+  ) => Promise<boolean>;
   finalizeBrowserForLiveTurn?: LiveTurnBrowserFinalizer;
 }): (queueJid: string) => Promise<boolean> {
   const {
@@ -202,6 +214,7 @@ export function buildLiveAdmissionProcessor(input: {
     messageFetchPageSize,
     timezone,
     warn,
+    finalizeAgentTodo,
     finalizeBrowserForLiveTurn,
   } = input;
 
@@ -235,10 +248,10 @@ export function buildLiveAdmissionProcessor(input: {
     if (!liveTurnAuthority) {
       return app.processGroupMessages(queueJid, { queued: true });
     }
+    const { chatJid, threadId } = parseThreadQueueKey(queueJid);
     let liveRunId = liveTurnAuthority.ownedRunId(queueJid) ?? undefined;
     let liveRunFence = liveTurnAuthority.ownedFence(queueJid);
     if (!liveTurnAuthority.ownsQueue(queueJid)) {
-      const { chatJid, threadId } = parseThreadQueueKey(queueJid);
       const route = app.getConversationRoutes()[chatJid];
       if (!route) return false;
       const executionProviderId =
@@ -361,6 +374,17 @@ export function buildLiveAdmissionProcessor(input: {
               }),
         },
       );
+      if (finalized && finalizeAgentTodo) {
+        await finalizeAgentTodo(chatJid, {
+          threadId: threadId ?? null,
+          status: terminalSuccess ? 'done' : 'failed',
+        }).catch((todoErr) => {
+          warn(
+            { err: todoErr, queueJid },
+            'Failed to finalize live-turn todo card',
+          );
+        });
+      }
       return success && finalized;
     } catch (err) {
       // Snapshot on failure too: the browser may have persisted new cookies/
@@ -388,6 +412,17 @@ export function buildLiveAdmissionProcessor(input: {
           return false;
         });
       void finalized;
+      if (finalized && finalizeAgentTodo) {
+        await finalizeAgentTodo(chatJid, {
+          threadId: threadId ?? null,
+          status: 'failed',
+        }).catch((todoErr) => {
+          warn(
+            { err: todoErr, queueJid },
+            'Failed to finalize live-turn todo card after message processing error',
+          );
+        });
+      }
       throw err;
     }
   };

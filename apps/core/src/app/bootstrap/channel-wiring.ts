@@ -742,6 +742,7 @@ export function createChannelWiring(
     requestPermissionApproval,
     requestUserAnswer: userQuestionResponder.requestUserAnswer,
     renderAgentTodo: agentTodoRenderer,
+    finalizeAgentTodo: agentTodoRenderer.finalize,
     disconnectChannels,
     isControlApproverAllowed: (input) => {
       const providerId = providerIdForJid(input.conversationJid, '');

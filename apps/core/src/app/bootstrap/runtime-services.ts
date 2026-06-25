@@ -525,6 +525,8 @@ export async function startRuntimeServices(
       warn: (context, message) => resolved.logger.warn(context, message),
       addReaction: (jid, messageRef, emoji) =>
         channelWiring.addReaction(jid, messageRef, emoji),
+      finalizeAgentTodo: (jid, render) =>
+        channelWiring.finalizeAgentTodo(jid, render),
       finalizeBrowserForLiveTurn: buildLiveTurnBrowserFinalizer({
         getConversationRoutes: () => app.getConversationRoutes(),
         closeBrowserSession: closeBrowser,
