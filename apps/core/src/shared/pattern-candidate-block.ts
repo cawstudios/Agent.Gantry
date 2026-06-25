@@ -103,21 +103,39 @@ export async function loadPatternsContext(
   if (!repo) return { block: '', surfacedCandidateIds: [] };
   const subject = patternSubjectForScope(scope);
   if (!subject) return { block: '', surfacedCandidateIds: [] };
-  const candidates = await repo
-    .listEligible({
+  try {
+    const candidates = await repo.listEligible({
       subject,
       limit: 1,
-    })
-    .catch(() => [] as PatternCandidate[]);
-  const block = formatPatternsBlock(candidates);
-  return {
-    block,
-    surfacedCandidateIds: block
-      ? candidates
-          .filter((candidate) => candidate.candidateStatus === 'detected')
-          .map((candidate) => candidate.id)
-      : [],
-  };
+    });
+    const surfacedCandidateIds: string[] = [];
+    const survivingCandidates: PatternCandidate[] = [];
+    for (const candidate of candidates) {
+      if (candidate.candidateStatus !== 'detected') {
+        survivingCandidates.push(candidate);
+        continue;
+      }
+      const claimed = await repo.transition?.({
+        id: candidate.id,
+        transition: {
+          candidateStatus: 'suggested',
+          proposalStatus: null,
+          snoozedUntil: null,
+        },
+        nowIso: nowIso(),
+      });
+      if (!claimed) continue;
+      survivingCandidates.push(candidate);
+      surfacedCandidateIds.push(candidate.id);
+    }
+    const block = formatPatternsBlock(survivingCandidates);
+    return {
+      block,
+      surfacedCandidateIds: block ? surfacedCandidateIds : [],
+    };
+  } catch {
+    return { block: '', surfacedCandidateIds: [] };
+  }
 }
 
 export async function markPatternsContextSurfaced(

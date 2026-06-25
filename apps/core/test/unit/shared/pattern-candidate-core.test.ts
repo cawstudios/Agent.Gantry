@@ -207,8 +207,10 @@ describe('formatPatternsBlock', () => {
     expect(block).not.toContain('drop_accepted');
   });
 
-  it('returns surfaced candidate ids without marking before delivery', async () => {
-    const transition = vi.fn(async () => null);
+  it('claims detected candidate before returning surfaced ids', async () => {
+    const transition = vi.fn(async () =>
+      candidate({ id: 'pc_once', candidateStatus: 'suggested' }),
+    );
     const context = await loadPatternsContext(
       {
         listEligible: async () => [candidate({ id: 'pc_once' })],
@@ -223,15 +225,55 @@ describe('formatPatternsBlock', () => {
       },
     );
     expect(context.block).toContain('"pattern_id":"pc_once"');
+    expect(context.block).toContain('"candidate_status":"detected"');
     expect(context.surfacedCandidateIds).toEqual(['pc_once']);
-    expect(transition).not.toHaveBeenCalled();
+    expect(transition).toHaveBeenCalledTimes(1);
+    expect(transition).toHaveBeenCalledWith({
+      id: 'pc_once',
+      transition: {
+        candidateStatus: 'suggested',
+        proposalStatus: null,
+        snoozedUntil: null,
+      },
+      nowIso: expect.any(String),
+    });
+  });
 
+  it('drops detected candidate when atomic claim is lost', async () => {
+    const transition = vi.fn(async () => null);
+    const context = await loadPatternsContext(
+      {
+        listEligible: async () => [candidate({ id: 'pc_lost' })],
+        transition,
+      },
+      {
+        appId: 'app',
+        agentId: 'agent',
+        folder: 'work',
+        conversationKind: 'channel',
+        conversationId: 'sl:C123',
+      },
+    );
+    expect(context).toEqual({ block: '', surfacedCandidateIds: [] });
+    expect(transition).toHaveBeenCalledWith({
+      id: 'pc_lost',
+      transition: {
+        candidateStatus: 'suggested',
+        proposalStatus: null,
+        snoozedUntil: null,
+      },
+      nowIso: expect.any(String),
+    });
+  });
+
+  it('keeps the post-run surfaced marker idempotent', async () => {
+    const transition = vi.fn(async () => null);
     await markPatternsContextSurfaced(
       {
         listEligible: async () => [],
         transition,
       },
-      context.surfacedCandidateIds,
+      ['pc_once'],
     );
     expect(transition).toHaveBeenCalledWith({
       id: 'pc_once',
