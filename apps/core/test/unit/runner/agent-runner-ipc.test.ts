@@ -2772,7 +2772,7 @@ describe('agent-runner IPC lifecycle', () => {
             {
               selectedCapabilityId: 'acme.records.get',
               sourceType: 'local_cli',
-              auditLabel: 'Gog Sheets get',
+              auditLabel: 'Fixture Records get',
               commandRules: [
                 'RunCommand(/opt/homebrew/bin/acme records get *)',
               ],
@@ -2793,7 +2793,7 @@ describe('agent-runner IPC lifecycle', () => {
           TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_SDK_NETWORK_HOST: 'oauth2.googleapis.com',
           TEST_TOOL_USE_CMD:
-            '/opt/homebrew/bin/acme records get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
+            '/opt/homebrew/bin/acme records get fixture_sheet_001 "Fixture Leads!A1:Z1" --json --account operator@example.test',
         },
       );
 
@@ -2833,7 +2833,7 @@ describe('agent-runner IPC lifecycle', () => {
           TEST_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_TOOL_USE_CMD:
-            '/opt/homebrew/bin/acme records get 12s6uzwLDLV-DVcTH6XBa5vV3FZJUo04fLm0npfgACb4 "Bot Recommendation!A1:Z1" --json --account ravi@knacklabs.ai',
+            '/opt/homebrew/bin/acme records get fixture_sheet_001 "Fixture Leads!A1:Z1" --json --account operator@example.test',
         },
       );
 

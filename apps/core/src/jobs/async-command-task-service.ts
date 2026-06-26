@@ -12,7 +12,6 @@ import {
   sendDelegatedAgentTaskMessage,
   startDelegatedAgentTask,
   type StartDelegatedAgentTaskInput,
-  type StartDelegatedAgentTaskResult,
 } from './async-delegated-agent-task.js';
 import {
   buildAgentToolExecutionRequest,
