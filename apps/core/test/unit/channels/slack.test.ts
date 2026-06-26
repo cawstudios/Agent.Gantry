@@ -472,6 +472,34 @@ describe('Slack channel', () => {
     );
   });
 
+  it('promotes inline authenticated Slack bot mentions to the route trigger', async () => {
+    const opts = createOpts();
+    opts.conversationRoutes.mockReturnValue({
+      'sl:C123': { folder: 'slack_ops', name: 'Ops', trigger: '@Gantry' },
+    });
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
+    await channel.connect();
+
+    const handlers = appRef.current.eventHandlers.get('app_mention') || [];
+    await handlers[0]({
+      event: {
+        channel: 'C123',
+        ts: '1710000000.000300',
+        thread_ts: '1710000000.000100',
+        user: 'U123',
+        text: 'yes <@U_BOT> you can request permission',
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.objectContaining({
+        content: '@Gantry yes you can request permission',
+        thread_id: '1710000000.000100',
+      }),
+    );
+  });
+
   it('keeps Slack thread replies in the root thread without requiring a new root', async () => {
     const opts = createOpts();
     opts.conversationRoutes.mockReturnValue({

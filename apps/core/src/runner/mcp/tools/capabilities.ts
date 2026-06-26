@@ -39,31 +39,25 @@ type RunCommandFallbackValidator = (input: {
   argvPattern: string;
 }) => ToolResponse | null;
 
-const CapabilityTargetSchema = z.object({
-  kind: z.literal('capability'),
+const AccessTargetSchema = z.object({
+  kind: z
+    .enum(['capability', 'tool', 'run_command'])
+    .describe('Access target kind: capability, tool, or run_command'),
   id: z
     .string()
-    .min(1)
+    .optional()
     .describe('Reviewed semantic capability id, such as acme.invoices.read'),
-});
-
-const RunCommandTargetSchema = z.object({
-  kind: z.literal('run_command'),
-  argvPattern: z
-    .string()
-    .min(1)
-    .describe(
-      'Scoped command pattern for a persistent RunCommand fallback, such as "npm test *" or "git status". Never broad "cli *".',
-    ),
-});
-
-const ExactToolTargetSchema = z.object({
-  kind: z.literal('tool'),
   name: z
     .string()
-    .min(1)
+    .optional()
     .describe(
       'Exact durable Gantry tool rule, such as AgentDelegation or mcp__gantry__request_settings_update. Use run_command for scoped commands.',
+    ),
+  argvPattern: z
+    .string()
+    .optional()
+    .describe(
+      'Scoped command pattern for a persistent RunCommand fallback, such as "npm test *" or "git status". Never broad "cli *".',
     ),
 });
 
@@ -88,11 +82,7 @@ export function registerAccessRequestTool(
       'Source setup and raw skill, MCP, CLI, browser, or network details are review metadata, not durable authority.',
     ].join(' '),
     {
-      target: z.discriminatedUnion('kind', [
-        CapabilityTargetSchema,
-        ExactToolTargetSchema,
-        RunCommandTargetSchema,
-      ]),
+      target: AccessTargetSchema,
       reason: z.string().describe('Why this access is needed'),
       temporaryOnly: z
         .boolean()
@@ -113,6 +103,11 @@ export function registerAccessRequestTool(
       const { target } = args;
       switch (target.kind) {
         case 'capability': {
+          if (!target.id?.trim()) {
+            return requestAccessInputError(
+              'target.id is required when target.kind=capability.',
+            );
+          }
           const approved = (await availableSemanticCapabilities(options)).find(
             (candidate) => candidate.capabilityId === target.id,
           );
@@ -183,6 +178,11 @@ export function registerAccessRequestTool(
           );
         }
         case 'tool': {
+          if (!target.name?.trim()) {
+            return requestAccessInputError(
+              'target.name is required when target.kind=tool.',
+            );
+          }
           const toolName = normalizeExactRequestableToolName(target.name);
           if (!toolName) {
             return {
@@ -207,6 +207,11 @@ export function registerAccessRequestTool(
           });
         }
         case 'run_command': {
+          if (!target.argvPattern?.trim()) {
+            return requestAccessInputError(
+              'target.argvPattern is required when target.kind=run_command.',
+            );
+          }
           const rule = `${RUN_COMMAND_TOOL_NAME}(${target.argvPattern})`;
           const validation = validateReadableAgentToolRule(rule);
           if (!validation.ok) {
@@ -267,6 +272,13 @@ async function availableSemanticCapabilities(options: {
     const validation = validateSemanticCapabilityDefinition(capability);
     return validation.ok;
   });
+}
+
+function requestAccessInputError(message: string): ToolResponse {
+  return {
+    isError: true,
+    content: [{ type: 'text' as const, text: message }],
+  };
 }
 
 function submitExactToolRequest(input: {

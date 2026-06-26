@@ -117,10 +117,10 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
     const rawContent = enriched.text;
     const content =
       this.botUserId && group
-        ? rawContent.replace(
-            new RegExp(`^<@${this.botUserId}>\\s+`),
-            `${triggerForRoute(group)} `,
-          )
+        ? normalizeBotMentionTrigger(rawContent, {
+            botUserId: this.botUserId,
+            trigger: triggerForRoute(group),
+          })
         : rawContent;
     if (!content) return;
     const sender = event.user || 'unknown';
@@ -737,4 +737,24 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
     });
     registerSlackMessageActionHandler(this.app, this.opts.onMessageAction);
   }
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeBotMentionTrigger(
+  text: string,
+  input: { botUserId: string; trigger: string },
+): string {
+  const mentionPattern = new RegExp(
+    `<@${escapeRegex(input.botUserId)}>(?:[,:])?\\s*`,
+    'gi',
+  );
+  if (!mentionPattern.test(text)) return text;
+  const withoutMention = text
+    .replace(mentionPattern, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return `${input.trigger}${withoutMention ? ` ${withoutMention}` : ''}`;
 }
