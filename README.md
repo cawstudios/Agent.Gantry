@@ -96,6 +96,11 @@ gantry provider list
 gantry settings validate
 ```
 
+Bundled runtime surfaces:
+
+- `/commands` is host-managed command help, not an SDK skill folder.
+- `gantry-admin` is the maintainer skill for local runtime administration.
+
 ## SDK
 
 The Node SDK talks to the Control API over a Unix socket or HTTP endpoint.
