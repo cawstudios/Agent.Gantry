@@ -35,6 +35,236 @@ describe('@cawstudios/agent-gantry', () => {
     expect(normalizeAgentMaxSteps(101)).toBe(100);
   });
 
+  it('uses modelStepTimeoutMs for generic agent model steps', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () =>
+          await new Promise<Record<string, unknown>>((resolve) => {
+            setTimeout(() => resolve({ action: 'final', output: {} }), 50);
+          }),
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.timeout.model',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+      modelStepTimeoutMs: 5,
+      stepTimeoutMs: 1_000,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'agent_model_step_timeout' },
+    });
+  });
+
+  it('can retry a timed-out model step with projected state', async () => {
+    let calls = 0;
+    const seenInputSizes: number[] = [];
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async ({ input }) => {
+          calls += 1;
+          seenInputSizes.push(JSON.stringify(input).length);
+          if (calls === 1) {
+            return await new Promise<Record<string, unknown>>((resolve) => {
+              setTimeout(() => resolve({ action: 'final', output: { status: 'late' } }), 50);
+            });
+          }
+          return { action: 'final', output: { status: 'ok' } };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.timeout.projected-retry',
+      instructions: 'Return JSON.',
+      input: { large: 'x'.repeat(10_000) },
+      tools: [],
+      maxSteps: 1,
+      modelStepTimeoutMs: 5,
+      projectStepStateForModel: ({ attempt, state }) => attempt === 'timeout_retry'
+        ? { input: { retry: true }, observations: [], agentMemory: { nextGoal: { recommendedTool: 'final' } } }
+        : state,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'ok' },
+    });
+    expect(calls).toBe(2);
+    expect(seenInputSizes[1]).toBeLessThan(seenInputSizes[0] ?? 0);
+  });
+
+  it('uses toolStepTimeoutMs for generic agent tool steps', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () => ({
+          action: 'call_tool',
+          toolName: 'slow_tool',
+          input: {},
+          previousGoalEvaluation: {
+            goal: null,
+            status: 'not_evaluated',
+            evidenceRefs: [],
+            reason: 'Start.',
+          },
+          memoryUpdate: {},
+          nextGoal: {
+            goal: 'Call slow tool.',
+            requiredEvidence: [],
+            recommendedTool: 'slow_tool',
+          },
+        }),
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.timeout.tool',
+      instructions: 'Call the slow tool.',
+      input: {},
+      tools: [
+        {
+          name: 'slow_tool',
+          execute: async () =>
+            await new Promise<Record<string, unknown>>((resolve) => {
+              setTimeout(() => resolve({ status: 'ok' }), 50);
+            }),
+        },
+      ],
+      maxSteps: 1,
+      modelStepTimeoutMs: 1_000,
+      toolStepTimeoutMs: 5,
+      stepTimeoutMs: 1_000,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'agent_tool_timeout:slow_tool' },
+    });
+  });
+
+  it('can recover a timed-out tool with a final-only model step', async () => {
+    let modelCalls = 0;
+    let recoveryHookCalls = 0;
+    let recoveryAvailableToolCount: number | null = null;
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async ({ input }) => {
+          modelCalls += 1;
+          if (modelCalls === 1) {
+            return {
+              action: 'call_tool',
+              toolName: 'slow_tool',
+              input: { value: 'first' },
+              previousGoalEvaluation: {
+                goal: null,
+                status: 'not_evaluated',
+                evidenceRefs: [],
+                reason: 'Start.',
+              },
+              memoryUpdate: {},
+              nextGoal: {
+                goal: 'Call slow tool.',
+                requiredEvidence: [],
+                recommendedTool: 'slow_tool',
+              },
+            };
+          }
+          recoveryAvailableToolCount = Array.isArray(input.availableTools)
+            ? input.availableTools.length
+            : null;
+          return {
+            action: 'final',
+            output: { status: 'completed', recovered: true },
+            previousGoalEvaluation: {
+              goal: 'Recover from tool timeout.',
+              status: 'passed',
+              evidenceRefs: [],
+              reason: 'Returned a final response.',
+            },
+            memoryUpdate: {},
+            nextGoal: {
+              goal: 'Done.',
+              requiredEvidence: [],
+              recommendedTool: null,
+            },
+          };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.timeout.tool-recovery',
+      instructions: 'Call the slow tool.',
+      input: { large: 'x'.repeat(10_000) },
+      tools: [
+        {
+          name: 'slow_tool',
+          execute: async () =>
+            await new Promise<Record<string, unknown>>((resolve) => {
+              setTimeout(() => resolve({ status: 'ok' }), 50);
+            }),
+        },
+      ],
+      maxSteps: 1,
+      modelStepTimeoutMs: 1_000,
+      toolStepTimeoutMs: 5,
+      recoverFromToolError: ({ error, toolName, toolInput, state }) => {
+        recoveryHookCalls += 1;
+        expect(error).toBe('agent_tool_timeout:slow_tool');
+        expect(toolName).toBe('slow_tool');
+        expect(toolInput).toEqual({ value: 'first' });
+        expect(state.input).toMatchObject({ large: expect.any(String) });
+        return { instructions: 'Return final JSON now.', tools: [] };
+      },
+      projectStepStateForModel: ({ attempt, state }) => attempt === 'tool_error_recovery'
+        ? {
+            input: { recovery: true },
+            observations: [],
+            agentMemory: { nextGoal: { recommendedTool: 'final' } },
+          }
+        : state,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'completed', recovered: true },
+    });
+    expect(modelCalls).toBe(2);
+    expect(recoveryHookCalls).toBe(1);
+    expect(recoveryAvailableToolCount).toBe(0);
+    expect(result?.steps.map((step) => step.status)).toEqual(['failed', 'completed']);
+  });
+
+  it('keeps stepTimeoutMs as the generic agent timeout fallback', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () =>
+          await new Promise<Record<string, unknown>>((resolve) => {
+            setTimeout(() => resolve({ action: 'final', output: {} }), 50);
+          }),
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.timeout.legacy',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+      stepTimeoutMs: 5,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'agent_model_step_timeout' },
+    });
+  });
+
   it('maps Tavily search responses into structured search results', async () => {
     const provider = createTavilySearchProvider({
       apiKey: 'test-key',
@@ -173,7 +403,90 @@ describe('@cawstudios/agent-gantry', () => {
       messages: [{ role: 'user' }],
     });
     expect(requestBody).not.toHaveProperty('temperature');
+    expect(requestBody).not.toHaveProperty('thinking');
+    expect(requestBody).not.toHaveProperty('output_config');
     expect(JSON.stringify(requestBody)).not.toContain('test-key');
+  });
+
+  it('applies Anthropic task policies to model, effort, and max tokens', async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const model = createAnthropicStructuredModelProvider({
+      provider: 'anthropic',
+      apiKey: 'test-key',
+      defaultModel: 'claude-default',
+      maxTokens: 4096,
+      taskPolicies: {
+        'task.expensive': {
+          model: 'claude-sonnet-task',
+          effort: 'low',
+          maxTokens: 1234,
+        },
+      },
+      fetchImpl: async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '{"status":"completed"}' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    await expect(
+      model.generateJson({
+        taskType: 'task.expensive',
+        instructions: 'Return JSON.',
+        input: { value: 1 },
+      }),
+    ).resolves.toEqual({ status: 'completed' });
+
+    expect(requestBody).toMatchObject({
+      model: 'claude-sonnet-task',
+      max_tokens: 1234,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'low' },
+    });
+  });
+
+  it('omits Anthropic effort fields when a task policy sets effort off', async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const model = createAnthropicStructuredModelProvider({
+      provider: 'anthropic',
+      apiKey: 'test-key',
+      defaultModel: 'claude-default',
+      taskPolicies: {
+        'task.cheap': {
+          model: 'claude-haiku-task',
+          effort: 'off',
+          maxTokens: 512,
+        },
+      },
+      fetchImpl: async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '{"status":"completed"}' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    await expect(
+      model.generateJson({
+        taskType: 'task.cheap',
+        instructions: 'Return JSON.',
+        input: { value: 1 },
+      }),
+    ).resolves.toEqual({ status: 'completed' });
+
+    expect(requestBody).toMatchObject({
+      model: 'claude-haiku-task',
+      max_tokens: 512,
+    });
+    expect(requestBody).not.toHaveProperty('thinking');
+    expect(requestBody).not.toHaveProperty('output_config');
   });
 
   it('sends Anthropic structured task image attachments as vision blocks', async () => {

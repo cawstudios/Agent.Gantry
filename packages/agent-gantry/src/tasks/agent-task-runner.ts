@@ -6,6 +6,7 @@ import type {
   GantryAgentTaskInput,
   GantryAgentTaskResult,
   GantryAgentTaskStep,
+  GantryAgentTool,
   StructuredModelTaskRunnerConfig,
   StructuredJsonModelProvider,
 } from '../shared/types.js';
@@ -251,14 +252,12 @@ export async function runGenericAgentTask(
         state,
       });
       const actionSchema = buildGenericAgentActionSchema();
-      const modelInput = {
-        state: cloneJsonRecord(compactAgentLoopState(state)),
-        availableTools: stepTools.map((tool) => ({
-          name: tool.name,
-          description: tool.description ?? '',
-          inputSchema: tool.inputSchema ?? {},
-        })),
-      };
+      let modelInput = await buildAgentModelInput(input, {
+        step,
+        state,
+        stepTools,
+        attempt: 'primary',
+      });
       const attachments = await readAgentStepAttachments(input, {
         taskType: input.taskType,
         correlationId: input.correlationId,
@@ -289,20 +288,71 @@ export async function runGenericAgentTask(
         attachments: traceAttachments,
         promptMetrics,
       });
-      const generated = await runWithOptionalTimeout(
-        config.model.generateJson({
-          taskType: input.taskType,
+      let generated: unknown;
+      try {
+        generated = await runWithOptionalTimeout(
+          config.model.generateJson({
+            taskType: input.taskType,
+            instructions,
+            input: modelInput,
+            outputSchema: actionSchema,
+            correlationId: input.correlationId
+              ? `${input.correlationId}:step:${step}`
+              : undefined,
+            attachments,
+          }),
+          input.modelStepTimeoutMs ?? input.stepTimeoutMs ?? remainingMs,
+          'agent_model_step_timeout',
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== 'agent_model_step_timeout' || !input.projectStepStateForModel) {
+          throw error;
+        }
+        const retryModelInput = await buildAgentModelInput(input, {
+          step,
+          state,
+          stepTools,
+          attempt: 'timeout_retry',
+          error: message,
+        });
+        const retryPromptMetrics = buildAgentPromptMetrics({
           instructions,
-          input: modelInput,
+          input: retryModelInput,
           outputSchema: actionSchema,
-          correlationId: input.correlationId
-            ? `${input.correlationId}:step:${step}`
-            : undefined,
           attachments,
-        }),
-        input.stepTimeoutMs ?? remainingMs,
-        'agent_model_step_timeout',
-      );
+        });
+        await writeAgentModelTrace(traceDir, {
+          kind: 'model_input_timeout_retry',
+          taskRunId,
+          taskType: input.taskType,
+          correlationId: input.correlationId ?? null,
+          step,
+          createdAt: new Date().toISOString(),
+          instructions,
+          modelInput: retryModelInput,
+          outputSchema: actionSchema,
+          attachments: traceAttachments,
+          promptMetrics: retryPromptMetrics,
+          previousError: message,
+        });
+        modelInput = retryModelInput;
+        promptMetrics = retryPromptMetrics;
+        generated = await runWithOptionalTimeout(
+          config.model.generateJson({
+            taskType: input.taskType,
+            instructions,
+            input: modelInput,
+            outputSchema: actionSchema,
+            correlationId: input.correlationId
+              ? `${input.correlationId}:step:${step}:timeout_retry`
+              : undefined,
+            attachments,
+          }),
+          input.modelStepTimeoutMs ?? input.stepTimeoutMs ?? remainingMs,
+          'agent_model_step_timeout',
+        );
+      }
       action =
         typeof generated === 'string'
           ? parseJsonRecord(generated)
@@ -627,7 +677,7 @@ export async function runGenericAgentTask(
             state,
           }),
         ),
-        input.stepTimeoutMs ?? remainingMs,
+        input.toolStepTimeoutMs ?? input.stepTimeoutMs ?? remainingMs,
         `agent_tool_timeout:${tool.name}`,
       );
       await writeAgentModelTrace(traceDir, {
@@ -850,6 +900,182 @@ export async function runGenericAgentTask(
         fallbackIfWrong: parsed.fallbackIfWrong,
         ...progressTrace,
       });
+      if (message.startsWith(`agent_tool_timeout:${tool.name}`) && input.recoverFromToolError) {
+        const recovery = await input.recoverFromToolError({
+          taskType: input.taskType,
+          correlationId: input.correlationId,
+          step,
+          state,
+          toolName: tool.name,
+          toolInput: parsed.input,
+          error: message,
+          tools: stepTools,
+        });
+        if (recovery) {
+          const recoveryTools = recovery.tools ?? [];
+          const recoveryInstructions =
+            recovery.instructions ??
+            [
+              input.instructions,
+              '',
+              'Tool timeout recovery is active.',
+              'Do not call tools. Return a final answer using the current state.',
+            ].join('\n');
+          const actionSchema = buildGenericAgentActionSchema();
+          const recoveryModelInput = await buildAgentModelInput(input, {
+            step,
+            state,
+            stepTools: recoveryTools,
+            attempt: recovery.attempt ?? 'tool_error_recovery',
+            error: message,
+          });
+          const recoveryPromptMetrics = buildAgentPromptMetrics({
+            instructions: recoveryInstructions,
+            input: recoveryModelInput,
+            outputSchema: actionSchema,
+            attachments: [],
+          });
+          await writeAgentModelTrace(traceDir, {
+            kind: 'model_input_tool_error_recovery',
+            taskRunId,
+            taskType: input.taskType,
+            correlationId: input.correlationId ?? null,
+            step,
+            createdAt: new Date().toISOString(),
+            instructions: recoveryInstructions,
+            modelInput: recoveryModelInput,
+            outputSchema: actionSchema,
+            attachments: [],
+            promptMetrics: recoveryPromptMetrics,
+            previousError: message,
+          });
+          try {
+            const generated = await runWithOptionalTimeout(
+              config.model.generateJson({
+                taskType: input.taskType,
+                instructions: recoveryInstructions,
+                input: recoveryModelInput,
+                outputSchema: actionSchema,
+                correlationId: input.correlationId
+                  ? `${input.correlationId}:step:${step}:tool_error_recovery`
+                  : undefined,
+                attachments: [],
+              }),
+              input.modelStepTimeoutMs ?? input.stepTimeoutMs ?? remainingMs,
+              'agent_model_step_timeout',
+            );
+            const recoveryAction =
+              typeof generated === 'string'
+                ? parseJsonRecord(generated)
+                : (generated as Record<string, unknown>);
+            await writeAgentModelTrace(traceDir, {
+              kind: 'model_output_tool_error_recovery',
+              taskRunId,
+              taskType: input.taskType,
+              correlationId: input.correlationId ?? null,
+              step,
+              createdAt: new Date().toISOString(),
+              rawOutput: generated,
+              parsedAction: recoveryAction,
+              promptMetrics: recoveryPromptMetrics,
+              previousError: message,
+            });
+            const recoveryParsed = parseGenericAgentAction(recoveryAction);
+            mergeModelProgressIntoAgentMemory(state, step, recoveryParsed);
+            if (recoveryParsed.action === 'final') {
+              const recoveryValidation = await validateFinalOutput({
+                step,
+                output: recoveryParsed.output,
+                source: 'model_final',
+              });
+              if (recoveryValidation.accepted) {
+                recordAgentMemoryObservation(state, {
+                  step,
+                  toolName: 'model_final',
+                  actionInput: null,
+                  observation: recoveryParsed.output,
+                  status: 'completed',
+                });
+                await recordStep({
+                  step,
+                  actionType: 'final',
+                  status: 'completed',
+                  startedAt: new Date().toISOString(),
+                  completedAt: new Date().toISOString(),
+                  durationMs: 0,
+                  observation: summarizeAgentObservation(recoveryParsed.output),
+                  promptMetrics: recoveryPromptMetrics,
+                  auditNote: recoveryParsed.auditNote,
+                  whyThisStep: recoveryParsed.whyThisStep,
+                  expectedOutcome: recoveryParsed.expectedOutcome,
+                  nextIfFails: recoveryParsed.nextIfFails,
+                  visualSummary: recoveryParsed.visualSummary,
+                  visibleTarget: recoveryParsed.visibleTarget,
+                  whyThisAction: recoveryParsed.whyThisAction,
+                  expectedStateChange: recoveryParsed.expectedStateChange,
+                  fallbackIfWrong: recoveryParsed.fallbackIfWrong,
+                  previousGoalEvaluation: recoveryParsed.previousGoalEvaluation ?? null,
+                  memoryUpdate: recoveryParsed.memoryUpdate ?? null,
+                  nextGoal: recoveryParsed.nextGoal ?? null,
+                });
+                const status =
+                  recoveryParsed.output.status === 'needs_review' ||
+                  recoveryParsed.output.status === 'failed'
+                    ? recoveryParsed.output.status
+                    : 'completed';
+                return await finish(status, recoveryParsed.output);
+              }
+              await recordStep({
+                step,
+                actionType: 'final_validation',
+                status: 'failed',
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                durationMs: 0,
+                error: recoveryValidation.reason ?? 'final_validation_rejected',
+                observation: applyFinalValidationRejection({
+                  step,
+                  source: 'model_final',
+                  validation: recoveryValidation,
+                }),
+                promptMetrics: recoveryPromptMetrics,
+                auditNote: 'Tool timeout recovery final output rejected by task-specific validator.',
+              });
+            }
+          } catch (recoveryError) {
+            const recoveryMessage = recoveryError instanceof Error
+              ? recoveryError.message
+              : String(recoveryError);
+            await writeAgentModelTrace(traceDir, {
+              kind: 'model_error_tool_error_recovery',
+              taskRunId,
+              taskType: input.taskType,
+              correlationId: input.correlationId ?? null,
+              step,
+              createdAt: new Date().toISOString(),
+              error: recoveryMessage,
+              previousError: message,
+              promptMetrics: recoveryPromptMetrics,
+            });
+            await recordStep({
+              step,
+              actionType: 'tool_error_recovery',
+              toolName: tool.name,
+              status: 'failed',
+              startedAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+              durationMs: 0,
+              error: recoveryMessage,
+              observation: {
+                status: 'failed',
+                originalError: message,
+                recoveryError: recoveryMessage,
+              },
+              promptMetrics: recoveryPromptMetrics,
+            });
+          }
+        }
+      }
       return await finish(
         'failed',
         { status: 'failed', error: message },
@@ -1061,6 +1287,38 @@ function sanitizeTracePathSegment(value: string): string {
 }
 
 export { summarizeAgentObservation } from './agent-task-runner-helpers.js';
+
+async function buildAgentModelInput(
+  input: GantryAgentTaskInput,
+  request: {
+    readonly step: number;
+    readonly state: Record<string, unknown>;
+    readonly stepTools: readonly GantryAgentTool[];
+    readonly attempt: 'primary' | 'timeout_retry' | 'tool_error_recovery';
+    readonly error?: string | null;
+  },
+) {
+  const compactedState = cloneJsonRecord(compactAgentLoopState(request.state));
+  const projectedState = input.projectStepStateForModel
+    ? await input.projectStepStateForModel({
+        taskType: input.taskType,
+        correlationId: input.correlationId,
+        step: request.step,
+        state: compactedState,
+        tools: request.stepTools,
+        attempt: request.attempt,
+        error: request.error ?? null,
+      })
+    : compactedState;
+  return {
+    state: cloneJsonRecord(projectedState),
+    availableTools: request.stepTools.map((tool) => ({
+      name: tool.name,
+      description: tool.description ?? '',
+      inputSchema: tool.inputSchema ?? {},
+    })),
+  };
+}
 
 async function selectToolsForStep(
   input: GantryAgentTaskInput,

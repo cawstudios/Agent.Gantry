@@ -96,6 +96,8 @@ export interface GantryAgentTaskInput {
   readonly maxSteps?: number;
   readonly deadlineAt?: string | null;
   readonly stepTimeoutMs?: number;
+  readonly modelStepTimeoutMs?: number;
+  readonly toolStepTimeoutMs?: number;
   readonly getStepAttachments?: (
     input: GantryAgentTaskAttachmentRequest,
   ) =>
@@ -109,6 +111,16 @@ export interface GantryAgentTaskInput {
   ) =>
     | Promise<readonly string[] | null | undefined>
     | readonly string[]
+    | null
+    | undefined;
+  readonly projectStepStateForModel?: (
+    input: GantryAgentTaskModelStateProjectionRequest,
+  ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  readonly recoverFromToolError?: (
+    input: GantryAgentTaskToolErrorRecoveryRequest,
+  ) =>
+    | Promise<GantryAgentTaskToolErrorRecoveryResult | null | undefined>
+    | GantryAgentTaskToolErrorRecoveryResult
     | null
     | undefined;
   readonly validateFinal?: (
@@ -247,6 +259,33 @@ export interface GantryAgentTaskToolSelectionRequest {
   readonly maxSteps: number;
   readonly state: Record<string, unknown>;
   readonly tools: readonly GantryAgentTool[];
+}
+
+export interface GantryAgentTaskModelStateProjectionRequest {
+  readonly taskType: string;
+  readonly correlationId?: string | null;
+  readonly step: number;
+  readonly state: Record<string, unknown>;
+  readonly tools: readonly GantryAgentTool[];
+  readonly attempt: 'primary' | 'timeout_retry' | 'tool_error_recovery';
+  readonly error?: string | null;
+}
+
+export interface GantryAgentTaskToolErrorRecoveryRequest {
+  readonly taskType: string;
+  readonly correlationId?: string | null;
+  readonly step: number;
+  readonly state: Record<string, unknown>;
+  readonly toolName: string;
+  readonly toolInput: Record<string, unknown>;
+  readonly error: string;
+  readonly tools: readonly GantryAgentTool[];
+}
+
+export interface GantryAgentTaskToolErrorRecoveryResult {
+  readonly instructions?: string | null;
+  readonly tools?: readonly GantryAgentTool[];
+  readonly attempt?: 'tool_error_recovery';
 }
 
 export interface GantryAgentTaskStep {
@@ -438,12 +477,30 @@ export interface StructuredJsonModelProvider {
   }): Promise<Record<string, unknown> | string>;
 }
 
+export type AnthropicStructuredModelEffort =
+  | 'off'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'max';
+
+export interface AnthropicStructuredModelTaskPolicy {
+  readonly model?: string | null;
+  readonly maxTokens?: number | null;
+  readonly effort?: AnthropicStructuredModelEffort | null;
+  readonly temperature?: number | null;
+}
+
 export interface AnthropicStructuredModelConfig {
   readonly provider: 'anthropic';
   readonly apiKey?: string | null;
   readonly model?: string | null;
   readonly defaultModel?: string | null;
   readonly taskModels?: Record<string, string | null | undefined>;
+  readonly taskPolicies?: Record<
+    string,
+    AnthropicStructuredModelTaskPolicy | null | undefined
+  >;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
   readonly maxRetries?: number;

@@ -1,5 +1,7 @@
 import type {
+  AnthropicStructuredModelEffort,
   AnthropicStructuredModelConfig,
+  AnthropicStructuredModelTaskPolicy,
   GantryAgentTaskAttachment,
   GantryStructuredModelConfig,
   StructuredJsonModelProvider,
@@ -35,16 +37,22 @@ export function createAnthropicStructuredModelProvider(
   const fetchImpl = config.fetchImpl ?? fetch;
   const timeoutMs = Math.max(1_000, config.timeoutMs ?? 60_000);
   const maxRetries = Math.max(1, config.maxRetries ?? 3);
-  const maxTokens = Math.max(1, config.maxTokens ?? 4096);
-  const temperature = config.temperature;
   const apiVersion = config.apiVersion ?? '2023-06-01';
 
   return {
     generateJson: async (input) => {
-      const model = selectAnthropicModel(input.taskType, config);
+      const taskPolicy = resolveAnthropicTaskPolicy(input.taskType, config);
+      const model = taskPolicy.model;
       let lastError: unknown = null;
       for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
         try {
+          const body = buildAnthropicRequestBody({
+            input,
+            model,
+            maxTokens: taskPolicy.maxTokens,
+            temperature: taskPolicy.temperature,
+            effort: taskPolicy.effort,
+          });
           const response = await fetchWithTimeout(
             fetchImpl,
             'https://api.anthropic.com/v1/messages',
@@ -55,18 +63,7 @@ export function createAnthropicStructuredModelProvider(
                 'content-type': 'application/json',
                 'x-api-key': apiKey,
               },
-              body: JSON.stringify({
-                model,
-                max_tokens: maxTokens,
-                ...(temperature === undefined ? {} : { temperature }),
-                system: buildAnthropicSystemPrompt(input.instructions),
-                messages: [
-                  {
-                    role: 'user',
-                    content: buildAnthropicUserContent(input),
-                  },
-                ],
-              }),
+              body: JSON.stringify(body),
             },
             timeoutMs,
           );
@@ -89,6 +86,13 @@ export function createAnthropicStructuredModelProvider(
   };
 }
 
+interface ResolvedAnthropicTaskPolicy {
+  readonly model: string;
+  readonly maxTokens: number;
+  readonly effort: AnthropicStructuredModelEffort;
+  readonly temperature?: number;
+}
+
 function isStructuredJsonModelProvider(
   value: GantryStructuredModelConfig,
 ): value is StructuredJsonModelProvider {
@@ -107,6 +111,64 @@ function selectAnthropicModel(
     asNonEmptyString(config.defaultModel) ??
     'claude-sonnet-4-6'
   );
+}
+
+function resolveAnthropicTaskPolicy(
+  taskType: string,
+  config: AnthropicStructuredModelConfig,
+): ResolvedAnthropicTaskPolicy {
+  const policy = config.taskPolicies?.[taskType];
+  const model =
+    asNonEmptyString(policy?.model) ?? selectAnthropicModel(taskType, config);
+  return {
+    model,
+    maxTokens: Math.max(1, policy?.maxTokens ?? config.maxTokens ?? 4096),
+    effort: normalizeAnthropicEffort(policy?.effort),
+    temperature: policy?.temperature ?? config.temperature,
+  };
+}
+
+function normalizeAnthropicEffort(
+  value: AnthropicStructuredModelTaskPolicy['effort'],
+): AnthropicStructuredModelEffort {
+  return value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'max'
+    ? value
+    : 'off';
+}
+
+function buildAnthropicRequestBody(input: {
+  readonly input: Parameters<StructuredJsonModelProvider['generateJson']>[0];
+  readonly model: string;
+  readonly maxTokens: number;
+  readonly temperature?: number;
+  readonly effort: AnthropicStructuredModelEffort;
+}): Record<string, unknown> {
+  return {
+    model: input.model,
+    max_tokens: input.maxTokens,
+    ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+    ...buildAnthropicEffortRequestFields(input.effort),
+    system: buildAnthropicSystemPrompt(input.input.instructions),
+    messages: [
+      {
+        role: 'user',
+        content: buildAnthropicUserContent(input.input),
+      },
+    ],
+  };
+}
+
+function buildAnthropicEffortRequestFields(
+  effort: AnthropicStructuredModelEffort,
+): Record<string, unknown> {
+  if (effort === 'off') return {};
+  return {
+    thinking: { type: 'adaptive' },
+    output_config: { effort },
+  };
 }
 
 function buildAnthropicSystemPrompt(instructions: string): string {
