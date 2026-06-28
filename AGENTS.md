@@ -151,6 +151,8 @@ Important constraints:
 ## Docs Rules
 
 - User-facing and project-facing docs must use `Gantry` naming.
+- Public GitHub repository metadata and clone URLs must use
+  `https://github.com/cawstudios/Agent.Gantry`, not old moved repository URLs.
 - Existing code identifiers, package names, CLI binaries, environment variables,
   paths, MCP tool names, and database schema names that still contain `gantry`
   are literal implementation names until an explicit rename task changes them.
