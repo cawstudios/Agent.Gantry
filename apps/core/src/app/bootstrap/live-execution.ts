@@ -37,74 +37,14 @@ import {
 } from '../../runtime/live-admission-work-loop.js';
 import { markPendingContinuationCommandsApplied } from './live-turn-continuation.js';
 import { routeScopeActiveLiveTurnAdmissionFromCursor } from './live-recovery-coordinator.js';
-import { resolveConversationBrowserProfile } from '../../shared/browser-profile-scope.js';
-import { getProfile } from '../../runtime/browser-profiles.js';
 import {
-  consumeBrowserProfileActivity,
-  isBrowserProfileSyncEnabled,
-  snapshotBrowserProfile,
-} from '../../runtime/browser-profile-sync.js';
+  buildLiveTurnBrowserFinalizer,
+  type LiveTurnBrowserFinalizer,
+} from './live-turn-browser-finalizer.js';
 import { computeHostCapacityPlan } from '../../shared/host-capacity.js';
 
 type WarnLog = (context: Record<string, unknown>, message: string) => void;
 type InfoLog = (obj: string | Record<string, unknown>, msg?: string) => void;
-
-/**
- * Browser teardown + cross-worker snapshot at live-turn finalize. Resolves the
- * conversation profile, read-and-clears the per-profile activity flag set by the
- * IPC browser handler, and (only when the browser was actually used this turn)
- * closes the backends + session and snapshots the quiescent bytes. No-op when
- * the snapshot coordinator is unregistered (workstation single-process) or no
- * browser activity was recorded.
- */
-export interface LiveTurnBrowserFinalizer {
-  (input: {
-    queueJid: string;
-    runId?: string | null;
-    fencingVersion?: number;
-  }): Promise<void>;
-}
-
-export function buildLiveTurnBrowserFinalizer(deps: {
-  getConversationRoutes: () => Record<string, { folder: string }>;
-  closeBrowserSession?: (profileName: string) => Promise<unknown>;
-  closeBrowserToolBackends?: (profileName: string) => Promise<void>;
-  warn: WarnLog;
-}): LiveTurnBrowserFinalizer {
-  return async (input) => {
-    const { chatJid } = parseThreadQueueKey(input.queueJid);
-    const folder = deps.getConversationRoutes()[chatJid]?.folder;
-    if (!folder) return;
-    const profileName = resolveConversationBrowserProfile({
-      agentId: folder,
-      workspaceKey: folder,
-      conversationId: chatJid,
-    });
-    // Read-and-clear: even when sync is disabled we must clear so the flag does
-    // not leak across turns on a long-lived worker.
-    const used = consumeBrowserProfileActivity(profileName);
-    if (!used) return;
-    try {
-      if (!isBrowserProfileSyncEnabled()) return;
-      await deps.closeBrowserToolBackends?.(profileName);
-      await deps.closeBrowserSession?.(profileName);
-      const profile = getProfile(profileName);
-      if (!profile) return;
-      await snapshotBrowserProfile({
-        profileName,
-        profileDir: profile.dir,
-        userDataDir: profile.userDataDir,
-        snapshotRunId: input.runId ?? null,
-        snapshotFencingVersion: input.fencingVersion ?? 0,
-      });
-    } catch (err) {
-      deps.warn(
-        { err, queueJid: input.queueJid, profileName },
-        'Failed to snapshot live-turn browser profile after finalize',
-      );
-    }
-  };
-}
 
 interface AdmissionOpsRepository {
   getAgentTurnContext?: (input: {

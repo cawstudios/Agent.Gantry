@@ -1,5 +1,4 @@
 import type {
-  InteractionFile,
   PermissionApprovalDecision,
   PermissionApprovalDecisionMode,
   PermissionApprovalRequest,
@@ -12,10 +11,6 @@ import {
   parseReadableScopedToolRule,
   publicGantryToolNameForSdkTool,
 } from '../shared/agent-tool-references.js';
-import {
-  redactSensitiveText,
-  sanitizeOutboundLlmText,
-} from '../shared/sensitive-material.js';
 import { generatedRuntimeSkillPathDisplay } from '../shared/generated-runtime-paths.js';
 import {
   skillActionCapabilityDisplayName,
@@ -26,7 +21,17 @@ import {
   firstPersistentRule,
   PERSISTENT_RULE_APPROVAL_MAX_RULES,
 } from '../domain/permission-decision.js';
-import { escapeMarkdownFenceDelimiters } from './permission-fenced-content.js';
+import {
+  buildPermissionPromptFullView,
+  formatInteractionDetailLine as formatPromptInteractionDetailLine,
+  formatInteractionFileLines as formatPromptInteractionFileLines,
+  type PermissionPromptFullView,
+} from './permission-full-view.js';
+
+export {
+  buildPermissionPromptFullView,
+  type PermissionPromptFullView,
+} from './permission-full-view.js';
 import {
   formatPermissionAgentDisplayName,
   permissionPromptTitle,
@@ -35,6 +40,12 @@ import {
   formatPermissionToolInputLines,
   runtimeDisplayCommand,
 } from './permission-tool-input-format.js';
+import {
+  limitPermissionMessage,
+  sanitizePermissionCommandText,
+  sanitizePermissionText,
+  sanitizeReceiptDetail,
+} from './permission-text-sanitizer.js';
 
 export {
   decisionForMode,
@@ -44,7 +55,6 @@ export {
   TIMED_GRANT_DURATION_MS,
 } from '../domain/permission-decision.js';
 
-const PERMISSION_MESSAGE_BUDGET = 2800;
 const USER_FACING_TOOL_LABELS: Record<string, string> = {
   RunCommand: 'exact command access',
   Bash: 'exact command access',
@@ -226,13 +236,6 @@ export interface PermissionPromptParts {
   fullView?: PermissionPromptFullView;
 }
 
-export interface PermissionPromptFullView {
-  label: string;
-  title: string;
-  filename: string;
-  content: string;
-}
-
 export function buildPermissionPromptParts(
   request: PermissionApprovalRequest,
   timeoutMs: number,
@@ -261,12 +264,22 @@ export function buildPermissionPromptParts(
     if (interaction.details?.length) {
       bodyLines.push(
         ...interaction.details.map((detail) =>
-          formatInteractionDetailLine(detail.label, detail.value, detail.mono),
+          formatPromptInteractionDetailLine(
+            detail.label,
+            detail.value,
+            detail.mono,
+            sanitizePermissionText,
+          ),
         ),
       );
     }
     if (interaction.files?.length) {
-      bodyLines.push(...formatInteractionFileLines(interaction.files));
+      bodyLines.push(
+        ...formatPromptInteractionFileLines(
+          interaction.files,
+          sanitizePermissionText,
+        ),
+      );
     }
     return {
       title,
@@ -359,174 +372,6 @@ function stripFullPayloadBodyLines(lines: string[]): string[] {
   return stripped;
 }
 
-export function buildPermissionPromptFullView(
-  request: PermissionApprovalRequest,
-): PermissionPromptFullView | undefined {
-  const input =
-    request.toolInput && typeof request.toolInput === 'object'
-      ? request.toolInput
-      : undefined;
-  const settingsYaml =
-    typeof input?.replacementYaml === 'string' && input.replacementYaml.trim()
-      ? input.replacementYaml.trim()
-      : undefined;
-  if (settingsYaml) {
-    return fullView(
-      'View settings change',
-      'Settings change',
-      'settings-change.yaml',
-      settingsYaml,
-    );
-  }
-  const diffPreview =
-    typeof input?.diffPreview === 'string' && input.diffPreview.trim()
-      ? input.diffPreview.trim()
-      : undefined;
-  if (diffPreview) {
-    return fullView(
-      'View diff',
-      'Full diff',
-      'permission-diff.diff',
-      diffPreview,
-    );
-  }
-  const fileDiff = fullFileDiff(request.toolName, input);
-  if (fileDiff) {
-    return fullView('View diff', 'Full diff', 'permission-diff.diff', fileDiff);
-  }
-  const command =
-    typeof input?.command === 'string' && input.command.trim()
-      ? runtimeDisplayCommand(input.command.trim()).command
-      : undefined;
-  if (command) {
-    return fullView(
-      'View full command',
-      'Full command',
-      'permission-command.txt',
-      command,
-    );
-  }
-  const file = request.interaction?.files?.find(
-    (candidate) => candidate.preview && !candidate.truncated,
-  );
-  if (file?.preview) {
-    const isSettings = request.toolName === 'request_settings_update';
-    return fullView(
-      isSettings ? 'View settings change' : 'View diff',
-      isSettings ? 'Settings change' : 'Full payload',
-      isSettings ? 'settings-change.yaml' : 'permission-payload.txt',
-      file.preview,
-    );
-  }
-  return undefined;
-}
-
-function fullView(
-  label: string,
-  title: string,
-  filename: string,
-  content: string,
-): PermissionPromptFullView {
-  return {
-    label,
-    title,
-    filename,
-    content: sanitizeFullPermissionText(content),
-  };
-}
-
-function fullFileDiff(
-  toolName: string,
-  input: Record<string, unknown> | undefined,
-): string | undefined {
-  if (!input) return undefined;
-  if (toolName === 'Edit') {
-    const lines: string[] = [];
-    if (typeof input.old_string === 'string' && input.old_string.trim()) {
-      lines.push(`-${input.old_string.trim()}`);
-    }
-    if (typeof input.new_string === 'string' && input.new_string.trim()) {
-      lines.push(`+${input.new_string.trim()}`);
-    }
-    return lines.length > 0 ? lines.join('\n') : undefined;
-  }
-  if (
-    toolName === 'Write' &&
-    typeof input.content === 'string' &&
-    input.content.trim()
-  ) {
-    return input.content
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => `+${line}`)
-      .join('\n');
-  }
-  return undefined;
-}
-
-function headTailTruncate(input: string, head: number, tail: number): string {
-  if (input.length <= head + tail + 1) return input;
-  return `${input.slice(0, head)}…${input.slice(-tail)}`;
-}
-
-function sanitizePermissionText(
-  input: string,
-  head: number,
-  tail: number,
-): string {
-  const result = sanitizeOutboundLlmText(input);
-  if (result.blocked) {
-    return 'Sensitive detail hidden.';
-  }
-  return headTailTruncate(result.text, head, tail);
-}
-
-function sanitizePermissionCommandText(
-  input: string,
-  head: number,
-  tail: number,
-): string {
-  return clampCommandForDisplay(redactSensitiveText(input), head, tail);
-}
-
-function sanitizeFullPermissionText(input: string): string {
-  const result = sanitizeOutboundLlmText(redactSensitiveText(input));
-  return result.blocked ? 'Sensitive detail hidden.' : result.text;
-}
-
-function clampCommandForDisplay(
-  input: string,
-  head: number,
-  tail: number,
-): string {
-  const budget = head + tail;
-  if (input.length <= budget + 1) return input;
-  const lines = input.split(/\r?\n/);
-  if (lines.length <= 1 || lines[0].length > budget) {
-    return headTailTruncate(input, head, tail);
-  }
-  const shown: string[] = [];
-  let used = 0;
-  for (const line of lines) {
-    const nextUsed = used + (shown.length > 0 ? 1 : 0) + line.length;
-    if (shown.length > 0 && nextUsed > budget) break;
-    shown.push(line);
-    used = nextUsed;
-    if (used >= budget) break;
-  }
-  const hidden = lines.length - shown.length;
-  if (hidden <= 0) return input;
-  return `${shown.join('\n')}\n… (+${hidden} more lines)`;
-}
-
-function limitPermissionMessage(
-  input: string,
-  budget = PERMISSION_MESSAGE_BUDGET,
-): string {
-  if (input.length <= budget) return input;
-  return `${input.slice(0, budget - 44)}\n\n[additional permission details omitted]`;
-}
-
 function formatPermissionContextLines(
   request: PermissionApprovalRequest | undefined,
 ): string[] {
@@ -570,12 +415,23 @@ function formatInteractionPermissionPrompt(
     lines.push(
       '',
       ...interaction.details.map((detail) =>
-        formatInteractionDetailLine(detail.label, detail.value, detail.mono),
+        formatPromptInteractionDetailLine(
+          detail.label,
+          detail.value,
+          detail.mono,
+          sanitizePermissionText,
+        ),
       ),
     );
   }
   if (interaction.files?.length) {
-    lines.push('', ...formatInteractionFileLines(interaction.files));
+    lines.push(
+      '',
+      ...formatPromptInteractionFileLines(
+        interaction.files,
+        sanitizePermissionText,
+      ),
+    );
   }
   lines.push('', ...formatPermissionContextLines(request));
   lines.push(`Reply in ${timeoutMinutes}m`);
@@ -627,56 +483,6 @@ function semanticCapabilityNetworkLine(
   ];
   if (hosts.length === 0) return undefined;
   return `Network: ${sanitizePermissionText(hosts.join(', '), 200, 100)}`;
-}
-
-function formatInteractionDetailLine(
-  label: string,
-  value: string,
-  mono?: boolean,
-): string {
-  const text = sanitizePermissionText(value, 200, 100);
-  return `${label}: ${mono ? '`' : ''}${text}${mono ? '`' : ''}`;
-}
-
-function formatInteractionFileLines(files: InteractionFile[]): string[] {
-  const lines: string[] = [];
-  files.slice(0, 3).forEach((file, index) => {
-    const path = sanitizePermissionText(file.path, 160, 60);
-    const details = [
-      typeof file.sizeBytes === 'number'
-        ? formatApproxBytes(file.sizeBytes)
-        : null,
-      file.contentHash ? `sha256 ${file.contentHash.slice(0, 16)}` : null,
-    ].filter(Boolean);
-    lines.push(
-      `Review file${files.length > 1 ? ` ${index + 1}` : ''}: ${path}${
-        details.length > 0 ? ` (${details.join(', ')})` : ''
-      }`,
-    );
-    if (file.preview && !file.truncated) {
-      lines.push(
-        'Full content:',
-        '```markdown',
-        escapeMarkdownFenceDelimiters(
-          sanitizePermissionText(file.preview, file.preview.length, 0),
-        ),
-        '```',
-      );
-    } else if (file.preview) {
-      lines.push(
-        'Preview is truncated; review the full artifact before allowing.',
-      );
-    }
-  });
-  if (files.length > 3) lines.push(`+${files.length - 3} more review files`);
-  return lines;
-}
-
-function formatApproxBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} bytes`;
-  if (bytes < 1024) return `${bytes} bytes`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function requestHasThreadRoute(
@@ -876,13 +682,4 @@ function formatPermissionReceiptActionSummary(
   return tool
     ? sanitizePermissionText(humanizeIdentifier(tool), 120, 40)
     : 'permission request';
-}
-
-function sanitizeReceiptDetail(input: string): string | null {
-  const result = sanitizeOutboundLlmText(input);
-  if (result.redacted || result.blocked) return null;
-  if (/\[REDACTED_(?:SECRET|POTENTIALLY_SENSITIVE)\]/.test(result.text)) {
-    return null;
-  }
-  return headTailTruncate(result.text, 200, 100);
 }

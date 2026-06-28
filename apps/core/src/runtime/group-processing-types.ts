@@ -36,6 +36,7 @@ import type { AgentHarness } from '../shared/agent-engine.js';
 import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
 import type { PatternCandidateRepository } from '../domain/ports/pattern-candidates.js';
 import type { AgentTodoRender } from '../domain/ports/task-lifecycle.js';
+import type { AgentLockStatus } from './proactive-surfacing-gate.js';
 
 export type {
   ConversationContextHydrationRequest,
@@ -162,6 +163,7 @@ export interface GroupProcessingDeps {
   getProactiveSurfacingRepository?: () =>
     | ProactiveSurfacingConsentReader
     | undefined;
+  getAgentLockStatus?: (sourceAgentFolder: string) => AgentLockStatus;
   getSkillRepository?: () => SkillCatalogRepository | undefined;
   getMcpServerRepository?: () => McpServerRepository | undefined;
   getCapabilitySecretRepository?: () => CapabilitySecretRepository | undefined;

@@ -9,10 +9,10 @@ import { processMemoryRequest, writeMemoryResponse } from '../memory/memory-ipc.
 import { getIpcResponseSigningPrivateKey } from './ipc-auth.js';
 import type { IpcDeps } from './ipc-domain-types.js';
 // prettier-ignore
-import { interactionInFlightKey, processPermissionInteractionIpc, processRichInteractionIpc, processUserQuestionInteractionIpc, writePermissionInteractionFailure, writeUserQuestionInteractionFailure } from './ipc-interaction-processing.js';
+import { interactionInFlightKey, processPermissionInteractionIpc, processUserQuestionInteractionIpc, writePermissionInteractionFailure, writeUserQuestionInteractionFailure } from './ipc-interaction-processing.js';
 import { processTaskIpc } from '../jobs/ipc-handler.js';
 // prettier-ignore
-import { parseIpcMessage, parseMemoryIpcRequest, parsePermissionIpcRequest, parseRichInteractionIpcRequest, parseUserQuestionIpcRequest } from './ipc-parsing.js';
+import { parseIpcMessage, parseMemoryIpcRequest, parsePermissionIpcRequest, parseUserQuestionIpcRequest } from './ipc-parsing.js';
 import { parseTaskIpcData } from './ipc-task-parsing.js';
 import {
   isLongRunningTask,
@@ -31,6 +31,7 @@ import {
   type IpcRequestWakeupHint,
 } from './ipc-request-wakeup-registry.js';
 import { IpcWakeupScopeTracker } from './ipc-wakeup-scope.js';
+import { processRichInteractionRequestDirectory } from './ipc-rich-interaction-directory.js';
 export type { IpcDeps } from './ipc-domain-types.js';
 export { processTaskIpc } from '../jobs/ipc-handler.js';
 export { validateIpcAuthRequest } from './ipc-auth-validation.js';
@@ -277,16 +278,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
           sourceAgentFolder,
           'permission-requests',
         );
-        const richInteractionRequestsDir = runnerControlPort.requestDir(
-          sourceAgentFolder,
-          'rich-interactions',
-        );
         const userQuestionRequestsDir = runnerControlPort.requestDir(
           sourceAgentFolder,
           'user-questions',
         );
 
-        // Process messages from this group's IPC directory
         try {
           if (
             shouldProcessRequestLane(sourceAgentFolder, 'messages') &&
@@ -310,7 +306,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 claimedPath = claimed.claimedPath;
                 const rawData = claimed.raw;
                 const data = parseIpcMessage(rawData, sourceAgentFolder);
-                // Authorization: verify this group can send to this chatJid
                 const targetGroup = groupRegistry[data.chatJid];
                 if (targetGroup && targetGroup.folder === sourceAgentFolder) {
                   const message = await resolveOwnedFileArtifactMessage({
@@ -369,7 +364,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process tasks from this group's IPC directory
         try {
           if (
             shouldProcessRequestLane(sourceAgentFolder, 'tasks') &&
@@ -394,7 +388,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 claimedPath = claimed.claimedPath;
                 rawTaskData = claimed.raw;
                 const data = parseTaskIpcData(rawTaskData, sourceAgentFolder);
-                // Pass source group identity to processTaskIpc for authorization
                 if (isLongRunningTask(data.type)) {
                   void processLongRunningTaskIpc({
                     data,
@@ -437,7 +430,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process memory request/response IPC for this group
         try {
           if (
             shouldProcessRequestLane(sourceAgentFolder, 'memory-requests') &&
@@ -523,7 +515,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process browser request/response IPC for this group
         if (shouldProcessRequestLane(sourceAgentFolder, 'browser-requests')) {
           processBrowserRequestDirectory({
             ipcBaseDir,
@@ -535,7 +526,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           });
         }
 
-        // Process permission request/response IPC for this group
         try {
           if (
             shouldProcessRequestLane(
@@ -668,105 +658,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process rich interaction IPC for this group
-        try {
-          if (
-            shouldProcessRequestLane(sourceAgentFolder, 'rich-interactions') &&
-            runnerControlPort.isTrustedRequestDir(
-              sourceAgentFolder,
-              'rich-interactions',
-            )
-          ) {
-            const richInteractionFiles = runnerControlPort.listPendingRequests(
-              sourceAgentFolder,
-              'rich-interactions',
-            );
-            for (const file of richInteractionFiles) {
-              let claimedPath = path.join(richInteractionRequestsDir, file);
-              try {
-                if (!canProcessIpcFile(sourceAgentFolder, 'rich-interaction')) {
-                  throw new Error('Rich interaction IPC rate limit exceeded');
-                }
-                const claimed = runnerControlPort.claimRequest(
-                  sourceAgentFolder,
-                  'rich-interactions',
-                  file,
-                );
-                claimedPath = claimed.claimedPath;
-                const request = parseRichInteractionIpcRequest(
-                  claimed.raw,
-                  sourceAgentFolder,
-                );
-                if (
-                  request.targetJid &&
-                  !folderTargetJids
-                    .get(sourceAgentFolder)
-                    ?.has(request.targetJid)
-                ) {
-                  throw new Error(
-                    'Rich interaction IPC target does not belong to the requesting agent folder',
-                  );
-                }
-                request.targetJid =
-                  request.targetJid || folderTargetJid.get(sourceAgentFolder);
-                if (
-                  inFlightInteractionIpc.size >= MAX_IN_FLIGHT_INTERACTION_IPC
-                ) {
-                  throw new Error(
-                    'Too many in-flight interaction IPC requests',
-                  );
-                }
-                const inFlightKey = interactionInFlightKey({
-                  sourceAgentFolder,
-                  kind: 'rich-interaction',
-                  threadId: request.threadId,
-                  requestId: request.requestId,
-                });
-                if (inFlightInteractionIpc.has(inFlightKey)) {
-                  throw new Error(
-                    'Rich interaction IPC request already in flight',
-                  );
-                }
-                inFlightInteractionIpc.add(inFlightKey);
-                void processRichInteractionIpc({
-                  request,
-                  sourceAgentFolder,
-                  deps,
-                  ipcBaseDir,
-                  file,
-                  claimedPath,
-                  logger,
-                }).finally(() => inFlightInteractionIpc.delete(inFlightKey));
-              } catch (err) {
-                logger.error(
-                  { file, sourceAgentFolder, err },
-                  'Error processing rich interaction IPC request',
-                );
-                runnerControlPort.archiveFailedRequest(
-                  sourceAgentFolder,
-                  file,
-                  claimedPath,
-                );
-              }
-            }
-          } else if (
-            processScope === 'all' &&
-            runnerControlPort.requestDirExists(
-              sourceAgentFolder,
-              'rich-interactions',
-            )
-          ) {
-            logger.warn(
-              { sourceAgentFolder, richInteractionRequestsDir },
-              'Ignoring untrusted rich interaction IPC requests directory',
-            );
-          }
-        } catch (err) {
-          logger.error(
-            { err, sourceAgentFolder },
-            'Error reading rich interaction IPC requests directory',
-          );
-        }
+        processRichInteractionRequestDirectory({
+          sourceAgentFolder,
+          processScope,
+          shouldProcessRequestLane,
+          folderTargetJid,
+          folderTargetJids,
+          inFlightInteractionIpc,
+          maxInFlightInteractionIpc: MAX_IN_FLIGHT_INTERACTION_IPC,
+          runnerControlPort,
+          deps,
+          ipcBaseDir,
+          logger,
+        });
 
         // Process AskUserQuestion request/response IPC for this group
         try {

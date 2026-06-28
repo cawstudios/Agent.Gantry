@@ -11,22 +11,14 @@ import {
 } from './agent-output-callbacks.js';
 import * as progress from './progress-updates.js';
 import { finalizeGroupAgentUserVisibleOutput } from './group-output-finalization.js';
-import {
-  formatMessages,
-  formatOutboundForChannel,
-} from '../messaging/router.js';
+import { formatMessages } from '../messaging/router.js';
 import type { AgentOutput } from './agent-spawn.js';
 import { handleSessionCommand } from '../session/session-commands.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';
 import { getGroupMemoryStatus } from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { settleDeliveryAttempt } from '../jobs/delivery.js';
-import {
-  createRuntimeResultSummaryAccumulator,
-  createRuntimeUserVisibleResultAccumulator,
-  createRuntimeUserVisibleStreamSanitizer,
-  resolveMemoryUserId,
-} from './session-resume-runtime.js';
+import { resolveMemoryUserId } from './session-resume-runtime.js';
 import {
   firstThreadQueueId,
   parseThreadQueueKey,
@@ -69,6 +61,7 @@ import {
 import { createGroupTurnOptionBuilders } from './group-turn-options.js';
 import { collectPendingMessagesSince } from './pending-message-replay.js';
 import { buildGroupProcessingConversationContext } from './group-processing-context.js';
+import { createGroupOutputBuffer } from './group-output-buffer.js';
 let streamingGenerationCounter = 0;
 const DEFAULT_TURN_APP_ID = 'default',
   PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
@@ -76,6 +69,26 @@ type ProgressHeartbeat = ReturnType<typeof startGroupProgressHeartbeats>;
 type ActiveTurnUiCleanup = {
   token: symbol;
   cancel: () => void | Promise<void>;
+};
+type GroupProcessOptions = {
+  queued?: boolean;
+  memoryContext?: {
+    userId?: string;
+    source?: 'message' | 'command';
+    threadId?: string | null;
+    recallQuery?: string;
+  };
+  existingRunId?: string;
+  existingRunLeaseToken?: string;
+  existingRunLeaseWorkerInstanceId?: string;
+  existingRunLeaseFencingVersion?: number;
+  finalRetry?: boolean;
+  onRunResult?: (result: GroupAgentRunResult) => void;
+  onFirstProgress?: (input: {
+    jid: string;
+    messageRef: string;
+  }) => Promise<void> | void;
+  onLiveStopActionToken?: (token: string) => Promise<void> | void;
 };
 const activeTurnUiCleanupByQueue = new Map<string, ActiveTurnUiCleanup>();
 export function createGroupProcessor(deps: GroupProcessingDeps) {
@@ -89,20 +102,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
   const runAgent = createGroupAgentRunner({ deps, ops });
   async function processGroupMessages(
     queueJid: string,
-    options: {
-      queued?: boolean;
-      existingRunId?: string;
-      existingRunLeaseToken?: string;
-      existingRunLeaseWorkerInstanceId?: string;
-      existingRunLeaseFencingVersion?: number;
-      finalRetry?: boolean;
-      onRunResult?: (result: GroupAgentRunResult) => void;
-      onFirstProgress?: (input: {
-        jid: string;
-        messageRef: string;
-      }) => Promise<void> | void;
-      onLiveStopActionToken?: (token: string) => Promise<void> | void;
-    } = {},
+    options: GroupProcessOptions = {},
   ): Promise<boolean> {
     const { chatJid, threadId: queueThreadId } = parseThreadQueueKey(queueJid);
     const turnAppId = appIdFromConversationJid(chatJid) ?? DEFAULT_TURN_APP_ID;
@@ -169,7 +169,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       finalizingGenerations: finalizingProgressGenerations,
       log: logger,
     });
-    const memoryUserId = resolveMemoryUserId(missedMessages);
+    const memoryUserId =
+      options.memoryContext?.userId ?? resolveMemoryUserId(missedMessages);
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
     );
@@ -519,7 +520,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     });
     let hadError = false;
     let outputSentToUser = false;
-    const userVisibleTranscript = createRuntimeResultSummaryAccumulator();
     let streamedTranscriptDeliveryStatus: 'none' | 'sent' | 'partially_sent' =
       'none';
     let sawRawOutput = false;
@@ -530,62 +530,6 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let outputCallbackError: unknown;
     const supportsStreamingChunks =
       deps.channelRuntime.supportsStreaming(chatJid);
-    let pendingOutputVisible = createRuntimeUserVisibleResultAccumulator();
-    let streamSanitizer = createRuntimeUserVisibleStreamSanitizer();
-    let pendingOutputRawChars = 0;
-    let pendingOutputHasParts = false;
-    const flushBufferedOutput = async (
-      reason: string,
-      options: { done?: boolean; terminal?: boolean } = {},
-    ) => {
-      if (!pendingOutputHasParts) return false;
-      const done = options.done ?? true;
-      const terminal = options.terminal ?? true;
-      const visibleOutput = pendingOutputVisible.snapshot();
-      const finalStreamDelta = streamSanitizer.finish();
-      const rawChars = pendingOutputRawChars;
-      pendingOutputVisible = createRuntimeUserVisibleResultAccumulator();
-      streamSanitizer = createRuntimeUserVisibleStreamSanitizer();
-      pendingOutputRawChars = 0;
-      pendingOutputHasParts = false;
-      const text = visibleOutput ? formatOutboundForChannel(visibleOutput) : '';
-      logger.info({ group: group.name }, `Agent output: ${rawChars} chars`);
-      if (!text) return false;
-      if (supportsStreamingChunks) {
-        const settlement = await settleDeliveryAttempt(
-          () =>
-            deps.channelRuntime.sendStreamingChunk(
-              chatJid,
-              finalStreamDelta,
-              buildStreamingOptions({ done }),
-            ),
-          { scope: 'runtime-streaming-output-final', target: chatJid },
-        ).catch((err) => {
-          logger.warn(
-            { err, group: group.name, reason },
-            'Failed to send finalized streaming output',
-          );
-          return 'not_delivered' as const;
-        });
-        applyDeliverySettlement(settlement, {
-          streamed: true,
-          terminal,
-        });
-      } else {
-        const messageOptions = await buildMessageOptions();
-        const settlement = await settleDeliveryAttempt(
-          () => sendMessageToChannel(text, messageOptions),
-          { scope: 'runtime-output-message-final', target: chatJid },
-        );
-        applyDeliverySettlement(settlement, {
-          streamed: false,
-          terminal,
-        });
-      }
-      userVisibleTranscript.append(`${text}\n`);
-      return true;
-    };
-    const finalizeStreamingOutput = flushBufferedOutput;
     const startNextStreamingMessage = () => {
       progressGeneration = streamGeneration = streamingGenerationCounter += 1;
       activeGenerationHasOutput = false;
@@ -655,6 +599,18 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       }
       if (settlement === 'delivery_incomplete') sawDeliveryIncomplete = true;
     };
+    const outputBuffer = createGroupOutputBuffer({
+      channelRuntime: deps.channelRuntime,
+      chatJid,
+      groupName: group.name,
+      supportsStreamingChunks,
+      buildStreamingOptions,
+      buildMessageOptions,
+      sendMessageToChannel,
+      applyDeliverySettlement,
+      log: logger,
+    });
+    const finalizeStreamingOutput = outputBuffer.flushBufferedOutput;
     let output: GroupAgentRunResult = 'error';
     const handleAgentOutput = async (result: AgentOutput) => {
       lastAgentProgressAt = currentTimeMs();
@@ -681,27 +637,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             : JSON.stringify(result.result);
         sawRawOutput = true;
         pendingIdleBoundary = true;
-        pendingOutputHasParts = true;
-        pendingOutputRawChars += raw.length;
-        pendingOutputVisible.append(raw);
-        if (supportsStreamingChunks) {
-          const safeDelta = streamSanitizer.append(raw);
-          if (safeDelta) {
-            const settlement = await settleDeliveryAttempt(
-              () =>
-                deps.channelRuntime.sendStreamingChunk(
-                  chatJid,
-                  safeDelta,
-                  buildStreamingOptions({ done: false }),
-                ),
-              { scope: 'runtime-streaming-output-live', target: chatJid },
-            );
-            applyDeliverySettlement(settlement, {
-              streamed: true,
-              terminal: false,
-            });
-          }
-        }
+        await outputBuffer.appendRawOutput(raw);
         resetIdleTimer();
       }
       if (result.interactionBoundary) {
@@ -830,7 +766,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     } else {
       const finalization = await finalizeGroupAgentUserVisibleOutput({
         streamedTranscriptDeliveryStatus,
-        boundedTranscript: userVisibleTranscript.snapshot(),
+        boundedTranscript: outputBuffer.transcriptSnapshot(),
         chatJid,
         activeThreadId,
         outputSentToUser,

@@ -20,8 +20,8 @@ describe('generative UI provider renderers', () => {
   it('uses the exact native-render fallback copy across provider renderers', () => {
     for (const file of [
       'apps/core/src/channels/rich-interaction.ts',
-      'apps/core/src/channels/slack/channel-delivery.ts',
-      'apps/core/src/channels/discord.ts',
+      'apps/core/src/channels/slack/rich-interaction.ts',
+      'apps/core/src/channels/discord-rich-interaction.ts',
     ]) {
       const source = read(file);
       expect(
@@ -37,6 +37,7 @@ describe('generative UI provider renderers', () => {
       read('apps/core/src/channels/rich-interaction.ts'),
       read('apps/core/src/channels/slack/channel-delivery.ts'),
       read('apps/core/src/channels/slack/channel-interactions.ts'),
+      read('apps/core/src/channels/slack/rich-interaction.ts'),
       read('apps/core/src/channels/slack/permission-blocks.ts'),
     ].join('\n');
 
@@ -54,6 +55,7 @@ describe('generative UI provider renderers', () => {
     const discord = [
       read('apps/core/src/channels/rich-interaction.ts'),
       read('apps/core/src/channels/discord.ts'),
+      read('apps/core/src/channels/discord-rich-interaction.ts'),
     ].join('\n');
 
     expect(discord).toContain('Open form');

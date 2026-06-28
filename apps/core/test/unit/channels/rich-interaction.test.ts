@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildDiscordRichInteractionFormModalResponse,
-  buildDiscordRichInteractionPayload,
-  buildSlackRichInteractionBlocks,
-  buildTeamsRichInteractionPayload,
-  renderTelegramRichInteractionHtml,
   RICH_INTERACTION_FALLBACK_COPY,
   richFallbackText,
 } from '@core/channels/rich-interaction.js';
+import {
+  buildDiscordRichInteractionFormModalResponse,
+  buildDiscordRichInteractionPayload,
+} from '@core/channels/discord-rich-interaction.js';
+import { buildSlackRichInteractionBlocks } from '@core/channels/slack/rich-interaction.js';
+import { buildTeamsRichInteractionPayload } from '@core/channels/teams-rich-interaction.js';
+import { renderTelegramRichInteractionHtml } from '@core/channels/telegram/rich-interaction.js';
 import { RICH_INTERACTION_NATIVE_FALLBACK_TEXT } from '@core/domain/types.js';
 import type { RichInteractionRequest } from '@core/domain/types.js';
 

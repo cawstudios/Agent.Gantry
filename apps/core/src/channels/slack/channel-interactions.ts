@@ -21,13 +21,7 @@ import {
   buildPermissionFullViewModalBlocks,
   buildPermissionReceiptBlocks,
 } from './permission-blocks.js';
-import {
-  RICH_INTERACTION_CANCEL_LABEL,
-  RICH_INTERACTION_OPEN_FORM_LABEL,
-  RICH_INTERACTION_REQUIRED_FIELDS_COPY,
-  RICH_INTERACTION_SUBMIT_LABEL,
-  RICH_INTERACTION_SUBMITTED_BY_COPY,
-} from '../rich-interaction.js';
+import { registerSlackRichFormHandlers } from './rich-interaction.js';
 import {
   buildTriggerPattern,
   triggerForRoute,
@@ -41,6 +35,7 @@ import {
 } from './native-stream.js';
 import { registerSlackMessageActionHandler } from './channel-message-action-handler.js';
 import { registerSlackUtilityHandlers } from './channel-utility-handlers.js';
+import { ingestSlackSlashCommand as ingestSlackSlashCommandEvent } from './slash-command-ingest.js';
 
 export abstract class SlackChannelInteractions extends SlackChannelState {
   protected async ingestSlackSlashCommand(command: {
@@ -51,41 +46,13 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
     trigger_id?: string;
     command_id?: string;
   }): Promise<void> {
-    const channelId = command.channel_id;
-    if (!channelId) return;
-    const jid = `sl:${channelId}`;
-    const chatName = await this.resolveChannelName(channelId);
-    await this.opts.onChatMetadata(
-      jid,
-      nowIso(),
-      chatName,
-      'slack',
-      this.isLikelyGroupConversation(channelId),
-    );
-    const group = this.opts.conversationRoutes()[jid];
-    if (!group && this.isLikelyGroupConversation(channelId)) return;
-    const text = command.text?.trim();
-    const content = text ? `/gantry ${text}` : '/gantry';
-    const id =
-      command.command_id ||
-      command.trigger_id ||
-      `gantry:${channelId}:${Date.now()}`;
-    await this.opts.onMessage(jid, {
-      id,
-      chat_jid: jid,
-      provider: 'slack',
-      sender: command.user_id || 'unknown',
-      sender_name:
-        (command.user_id
-          ? await this.resolveUserName(command.user_id)
-          : command.user_name) ||
-        command.user_name ||
-        command.user_id ||
-        'unknown',
-      content,
-      timestamp: nowIso(),
-      is_from_me: false,
-      external_message_id: id,
+    await ingestSlackSlashCommandEvent({
+      command,
+      opts: this.opts,
+      resolveChannelName: (channelId) => this.resolveChannelName(channelId),
+      resolveUserName: (userId) => this.resolveUserName(userId),
+      isLikelyGroupConversation: (channelId) =>
+        this.isLikelyGroupConversation(channelId),
     });
   }
 
@@ -349,9 +316,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         return;
       }
       const decision = decisionForMode(pending.request, mode, decidedBy);
-      await this.resolvePermissionPrompt(payload.requestId, {
-        ...decision,
-      });
+      await this.resolvePermissionPrompt(payload.requestId, decision);
     };
     for (const actionId of SLACK_PERMISSION_DECISION_ACTION_IDS) {
       this.app.action(actionId, handlePermissionDecision);
@@ -621,9 +586,6 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       const callbackChannelId = body.channel?.id || '';
       const userId = body.user?.id || '';
       if (!userId) return;
-      // Free-text "Other" only supports the in-memory pending question (the
-      // modal opens and submits within the same worker session); durable
-      // cross-restart free text is not modeled.
       if (!pending || pending.settled) return;
       if (!callbackChannelId || callbackChannelId !== pending.channelId) return;
       if (
@@ -738,97 +700,9 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       }
       await this.finalizeUserQuestionPrompt(pending, text, answeredBy);
     });
-    this.app.action('gantry_rich_form_open', async (args: any) => {
-      await args.ack();
-      const action = args.action as { value?: string };
-      const body = args.body as {
-        channel?: { id?: string };
-        message?: { ts?: string; thread_ts?: string };
-        trigger_id?: string;
-      };
-      if (!body.trigger_id) return;
-      const request = this.pendingRichForms.get(action.value || '');
-      if (!request) return;
-      const payload = request.descriptor.rich?.payload ?? {};
-      const fields = Array.isArray(payload.fields) ? payload.fields : [];
-      await this.app?.client.views.open({
-        trigger_id: body.trigger_id,
-        view: {
-          type: 'modal',
-          callback_id: 'gantry_rich_form_modal',
-          private_metadata: JSON.stringify({
-            channelId: body.channel?.id || '',
-            interactionId: request.descriptor.id,
-            threadTs: body.message?.thread_ts || body.message?.ts || '',
-          }),
-          title: {
-            type: 'plain_text',
-            text: (
-              request.descriptor.title || RICH_INTERACTION_OPEN_FORM_LABEL
-            ).slice(0, 24),
-          },
-          submit: { type: 'plain_text', text: RICH_INTERACTION_SUBMIT_LABEL },
-          close: { type: 'plain_text', text: RICH_INTERACTION_CANCEL_LABEL },
-          blocks: fields.length
-            ? fields.slice(0, 10).map((field, index) => {
-                const item =
-                  typeof field === 'object' && field !== null
-                    ? (field as Record<string, unknown>)
-                    : {};
-                return {
-                  type: 'input',
-                  block_id: `gantry_rich_form_${index}`,
-                  optional: item.required !== true,
-                  label: {
-                    type: 'plain_text',
-                    text: String(
-                      item.label || item.id || `Field ${index + 1}`,
-                    ).slice(0, 150),
-                  },
-                  element: {
-                    type: 'plain_text_input',
-                    action_id: 'value',
-                    multiline: item.type === 'textarea',
-                  },
-                };
-              })
-            : [
-                {
-                  type: 'section',
-                  text: {
-                    type: 'mrkdwn',
-                    text: RICH_INTERACTION_REQUIRED_FIELDS_COPY,
-                  },
-                },
-              ],
-        },
-      });
-    });
-    this.app.view('gantry_rich_form_modal', async (args: any) => {
-      await args.ack();
-      const body = args.body as {
-        user?: { id?: string; name?: string; username?: string };
-      };
-      const view = args.view as { private_metadata?: string };
-      let meta: {
-        channelId?: string;
-        interactionId?: string;
-        threadTs?: string;
-      } = {};
-      try {
-        meta = JSON.parse(view.private_metadata || '{}');
-      } catch {
-        return;
-      }
-      if (!meta.channelId) return;
-      if (meta.interactionId) this.pendingRichForms.delete(meta.interactionId);
-      const displayName =
-        body.user?.name || body.user?.username || body.user?.id || 'unknown';
-      await this.app?.client.chat.postMessage({
-        channel: meta.channelId,
-        text: `${RICH_INTERACTION_SUBMITTED_BY_COPY} ${displayName}.`,
-        ...(meta.threadTs ? { thread_ts: meta.threadTs } : {}),
-      });
+    registerSlackRichFormHandlers({
+      app: this.app,
+      pendingRichForms: this.pendingRichForms,
     });
     registerSlackMessageActionHandler(this.app, this.opts.onMessageAction);
   }

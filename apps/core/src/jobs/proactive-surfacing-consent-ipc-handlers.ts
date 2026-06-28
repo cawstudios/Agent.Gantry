@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type {
   ProactiveSurfacingOptIn,
   ProactiveSurfacingSubject,
-} from '../adapters/storage/postgres/repositories/proactive-surfacing-repository.postgres.js';
+} from '../domain/ports/proactive-surfacing-consent.js';
 import { memoryAgentIdForWorkspaceFolder } from '../memory/app-memory-boundaries.js';
 import { patternSubjectForScope } from '../shared/pattern-candidate-subject.js';
 import { nowIso } from '../shared/time/datetime.js';

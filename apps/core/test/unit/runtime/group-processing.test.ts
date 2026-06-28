@@ -1153,6 +1153,77 @@ describe('createGroupProcessor', () => {
       );
     });
 
+    it('does not dedupe string and object runtime event payloads together', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage({ timestamp: '1700000001' })];
+      const publishRuntimeEvent = vi.fn().mockResolvedValue(undefined);
+      const { deps } = setupHappyPath({ group, messages });
+      deps.publishRuntimeEvent = publishRuntimeEvent;
+
+      const errorOutput: AgentOutput = {
+        status: 'error',
+        result: null,
+        error: 'Sandbox runtime startup failed',
+        runtimeEvents: [
+          {
+            appId: 'app-one',
+            agentId: 'agent-one',
+            runId: 'run-one',
+            conversationId: 'group1@g.us',
+            eventType: 'sandbox.blocked',
+            payload: '{}',
+          },
+          {
+            appId: 'app-one',
+            agentId: 'agent-one',
+            runId: 'run-one',
+            conversationId: 'group1@g.us',
+            eventType: 'sandbox.blocked',
+            payload: {},
+          },
+        ],
+      };
+      mockSpawnAgent.mockResolvedValue(errorOutput);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const result = await processGroupMessages('group1@g.us');
+
+      expect(result).toBe(false);
+      expect(publishRuntimeEvent).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not fail the turn for non-JSON runtime event payloads', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const messages = [makeMessage({ timestamp: '1700000001' })];
+      const publishRuntimeEvent = vi.fn().mockResolvedValue(undefined);
+      const { deps } = setupHappyPath({ group, messages });
+      deps.publishRuntimeEvent = publishRuntimeEvent;
+
+      const successOutput: AgentOutput = {
+        status: 'success',
+        result: 'done',
+        runtimeEvents: [
+          {
+            appId: 'app-one',
+            agentId: 'agent-one',
+            runId: 'run-one',
+            conversationId: 'group1@g.us',
+            eventType: 'sandbox.blocked',
+            payload: 1n,
+          },
+        ],
+      };
+      mockSpawnAgent.mockResolvedValue(successOutput);
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      const result = await processGroupMessages('group1@g.us');
+
+      expect(result).toBe(true);
+      expect(publishRuntimeEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: 1n }),
+      );
+    });
+
     it('does not retry Model Access authentication failures', async () => {
       const group = makeGroup({ requiresTrigger: false });
       const messages = [makeMessage({ timestamp: '1700000001' })];
@@ -1401,6 +1472,16 @@ describe('createGroupProcessor', () => {
       const getBySubject =
         opts.getBySubject ?? vi.fn(async () => opts.optIn ?? null);
       const { deps } = setupHappyPath({ group });
+      deps.getAgentLockStatus = vi.fn(() => {
+        try {
+          const settings = mockGetRuntimeSettingsForConfig();
+          return settings.agents?.['lead-agent']?.accessPreset === 'locked'
+            ? 'locked'
+            : 'full';
+        } catch {
+          return 'unknown';
+        }
+      });
       deps.getPatternCandidateRepository = vi.fn(
         () => patternCandidateRepository as never,
       );

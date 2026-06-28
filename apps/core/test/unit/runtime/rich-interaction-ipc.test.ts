@@ -9,7 +9,7 @@ import { signIpcRequestPayload } from '@core/infrastructure/ipc/request-signing.
 import { computeIpcAuthToken } from '@core/runtime/ipc-auth.js';
 import { clearConsumedIpcRequestIds } from '@core/runtime/ipc-auth-validation.js';
 import { parseRichInteractionIpcRequest } from '@core/runtime/ipc-parsing.js';
-import { processRichInteractionIpc } from '@core/runtime/ipc-interaction-processing.js';
+import { processRichInteractionIpc } from '@core/runtime/ipc-rich-interaction-processing.js';
 import type { IpcDeps } from '@core/runtime/ipc-domain-types.js';
 
 function signedPayload(

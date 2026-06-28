@@ -1,6 +1,5 @@
 import path from 'path';
 import { InputFile } from 'grammy';
-
 import { resolveWorkspaceFolderPath } from '../../platform/workspace-folder.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ensurePrivateDirSync } from '../../shared/private-fs.js';
@@ -22,9 +21,7 @@ import {
   renderPermissionPromptHtml,
   renderUserQuestionPromptHtml,
 } from './html-render.js';
-
 import { TelegramChannelPolling } from './channel-polling.js';
-
 import {
   PendingUserQuestionState,
   TELEGRAM_INLINE_BUTTON_TEXT_MAX_BYTES,
@@ -36,14 +33,11 @@ import {
   resolveDurableTelegramUserQuestionOtherReply,
   sendTelegramUserQuestionOtherReplyNotice,
 } from './user-question-other-recovery.js';
-
 const TELEGRAM_PERMISSION_FULL_VIEW_INLINE_MAX = 3200;
-
 export interface TelegramDownloadedFile {
   filePath: string;
   storageRef: string;
 }
-
 export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
   protected pendingUserQuestionKey(
     requestId: string,
@@ -51,7 +45,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
   ): string {
     return `${requestId}:${questionIndex}`;
   }
-
   protected formatUserQuestionButtonLabel(
     optionLabel: string,
     optionIndex: number,
@@ -69,7 +62,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
     const safeLabel = truncateUtf8ToByteLimit(trimmedLabel, availableBytes);
     return `${prefix}${safeLabel}`;
   }
-
   protected buildUserQuestionKeyboard(
     requestId: string,
     questionIndex: number,
@@ -254,7 +246,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
         });
       });
   }
-
   private async sendSplitPermissionReviewMessages(input: {
     chatId: string;
     promptText: string;
@@ -271,7 +262,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
       });
     }
   }
-
   private async sendPermissionFullViewDocument(input: {
     chatId: string;
     request: PermissionApprovalRequest;
@@ -302,7 +292,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
     );
     return sent.some(Boolean);
   }
-
   private telegramFullViewDocumentChatIds(
     chatId: string,
     request: PermissionApprovalRequest,
@@ -323,11 +312,8 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
     const conversation = binding
       ? settings?.conversations[binding.conversation]
       : undefined;
-    // ponytail: group payload files go only to configured approver IDs; if no
-    // list is available, keep the group prompt inline-only rather than broadcasting.
     return [...new Set(conversation?.controlApprovers || [])].filter(Boolean);
   }
-
   private telegramConversationMatchesChat(
     conversation:
       | { providerConnection: string; externalId: string }
@@ -341,7 +327,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
     const externalId = conversation.externalId.trim();
     return externalId === chatId || externalId === `tg:${chatId}`;
   }
-
   protected async sendUserQuestionPromptMessage(input: {
     chatId: string;
     requestId: string;
@@ -555,11 +540,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
     }
   }
 
-  /**
-   * Correlate an inbound text reply to a pending "Other" free-text prompt.
-   * Returns true when the reply was consumed (handled or stale), false when it
-   * should fall through to normal message handling.
-   */
   protected async tryResolveUserQuestionOtherReply(input: {
     chatId: string;
     replyToMessageId: number;
@@ -599,7 +579,6 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
         )
       : false;
     if (!authorized) {
-      // Leave the prompt active so a control approver can still reply.
       await this.sendUserQuestionOtherReplyNotice(
         input.chatId,
         'Only a conversation control approver can answer.',
@@ -644,18 +623,12 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
       sanitizeErrorMessage: (err) => this.sanitizeErrorMessage(err),
     });
   }
-
-  /**
-   * Download a Telegram file to the group's attachments directory.
-   * Returns the downloaded file path and stable storage ref, or null on failure.
-   */
   protected async downloadFile(
     fileId: string,
     workspaceFolder: string,
     filename: string,
   ): Promise<TelegramDownloadedFile | null> {
     if (!this.bot) return null;
-
     try {
       const file = await this.bot.api.getFile(fileId);
       if (!file.file_path) {
@@ -670,19 +643,15 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
         );
         return null;
       }
-
       const groupDir = resolveWorkspaceFolderPath(workspaceFolder);
       const attachDir = path.join(groupDir, 'attachments');
       ensurePrivateDirSync(attachDir);
-
-      // Sanitize filename and add extension from Telegram's file_path if missing
       const tgExt = path.extname(safeFilePath);
       const localExt = path.extname(filename);
       const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
       const finalName = localExt ? safeName : `${safeName}${tgExt}`;
       const destPath = path.join(attachDir, finalName);
       const storageRef = path.posix.join('attachments', finalName);
-
       const encodedPath = safeFilePath
         .split('/')
         .map((segment) => encodeURIComponent(segment))
@@ -696,10 +665,8 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
         );
         return null;
       }
-
       const wrote = await writeTelegramFetchResponseToFile(resp, destPath);
       if (!wrote) return null;
-
       logger.info({ fileId, storageRef }, 'Telegram file downloaded');
       return { filePath: destPath, storageRef };
     } catch (err) {

@@ -1,32 +1,13 @@
 import { and, eq } from 'drizzle-orm';
 
+import type {
+  ProactiveSurfacingOptIn,
+  ProactiveSurfacingSubject,
+} from '../../../../domain/ports/proactive-surfacing-consent.js';
 import * as pgSchema from '../schema/schema.js';
 import type { CanonicalDb } from './canonical-graph-repository.postgres.js';
 
 const table = pgSchema.proactiveSurfacingOptInsPostgres;
-
-export interface ProactiveSurfacingSubject {
-  appId: string;
-  agentId: string;
-  subjectType: string;
-  subjectId: string;
-}
-
-export interface ProactiveSurfacingOptIn {
-  id: string;
-  appId: string;
-  agentId: string;
-  subjectType: string;
-  subjectId: string;
-  conversationJid: string | null;
-  proactiveSurfacingEnabled: boolean;
-  enabledAt: string | null;
-  optedOutAt: string | null;
-  enabledByActorId: string | null;
-  optedOutByActorId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export class PostgresProactiveSurfacingRepository {
   constructor(private readonly db: CanonicalDb) {}

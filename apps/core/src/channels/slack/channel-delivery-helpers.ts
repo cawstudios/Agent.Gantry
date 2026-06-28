@@ -32,7 +32,6 @@ import {
   clampSlackRetryDelayMs,
   slackRateLimitRetryDelayMs,
 } from './channel-retry-delay.js';
-
 type SlackPostMessagePayload = {
   channel: string;
   text: string;
@@ -57,7 +56,6 @@ async function waitForPostMessageRetry(delayMs: number): Promise<void> {
     setTimeout(resolve, clampSlackRetryDelayMs(delayMs)),
   );
 }
-
 export function isSlackPayloadTooLarge(err: unknown): boolean {
   const candidate = err as {
     status?: unknown;
@@ -81,7 +79,6 @@ export function isSlackPayloadTooLarge(err: unknown): boolean {
   ].filter((value): value is string => typeof value === 'string');
   return text.some((value) => /msg_too_long|too_long|payload/i.test(value));
 }
-
 export async function postSlackMessageWithRetry(
   app: App | null,
   payload: SlackPostMessagePayload,
