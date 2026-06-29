@@ -8,6 +8,10 @@ import type {
   ThinkingOverride,
 } from '../domain/types.js';
 import type {
+  ConversationContextHydrationRequest,
+  ConversationContextHydrationResult,
+} from '../domain/ports/conversation-context-hydration.js';
+import type {
   RuntimeAgentSessionRepository,
   RuntimeMessageRepository,
 } from '../domain/repositories/ops-repo.js';
@@ -32,6 +36,12 @@ import type { AgentHarness } from '../shared/agent-engine.js';
 import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
 import type { PatternCandidateRepository } from '../domain/ports/pattern-candidates.js';
 import type { AgentTodoRender } from '../domain/ports/task-lifecycle.js';
+import type { AgentLockStatus } from './proactive-surfacing-gate.js';
+
+export type {
+  ConversationContextHydrationRequest,
+  ConversationContextHydrationResult,
+};
 
 export type GroupProcessingRepository = RuntimeAgentSessionRepository &
   RuntimeMessageRepository;
@@ -51,8 +61,18 @@ export interface GroupProcessor {
         jid: string;
         messageRef: string;
       }) => Promise<void> | void;
+      onLiveStopActionToken?: (token: string) => Promise<void> | void;
     },
   ) => Promise<boolean>;
+}
+
+export interface ProactiveSurfacingConsentReader {
+  getBySubject(subject: {
+    appId: string;
+    agentId: string;
+    subjectType: string;
+    subjectId: string;
+  }): Promise<{ proactiveSurfacingEnabled: boolean } | null>;
 }
 
 export interface GroupProcessingDeps {
@@ -81,6 +101,9 @@ export interface GroupProcessingDeps {
       chatJid: string,
       render: AgentTodoRender,
     ) => Promise<boolean>;
+    hydrateConversationContext?: (
+      request: ConversationContextHydrationRequest,
+    ) => Promise<ConversationContextHydrationResult>;
     isControlApproverAllowed?: (input: {
       conversationJid: string;
       userId: string;
@@ -137,6 +160,10 @@ export interface GroupProcessingDeps {
   getToolRepository?: () => ToolCatalogRepository | undefined;
   getAsyncTaskRepository?: () => AsyncTaskRepository | undefined;
   getPatternCandidateRepository?: () => PatternCandidateRepository | undefined;
+  getProactiveSurfacingRepository?: () =>
+    | ProactiveSurfacingConsentReader
+    | undefined;
+  getAgentLockStatus?: (sourceAgentFolder: string) => AgentLockStatus;
   getSkillRepository?: () => SkillCatalogRepository | undefined;
   getMcpServerRepository?: () => McpServerRepository | undefined;
   getCapabilitySecretRepository?: () => CapabilitySecretRepository | undefined;

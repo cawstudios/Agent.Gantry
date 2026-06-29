@@ -87,11 +87,11 @@ import { configurePendingInteractionPermissionPersistence } from '../../applicat
 import { liveTurnScopeForQueue } from './live-recovery-coordinator.js';
 import {
   buildLiveAdmissionProcessor,
-  buildLiveTurnBrowserFinalizer,
   startLiveExecutionServices,
   type LiveExecutionServicesHandle,
   type RecoveryCoordinatorPort,
 } from './live-execution.js';
+import { buildLiveTurnBrowserFinalizer } from './live-turn-browser-finalizer.js';
 import { startWaitingStatusMonitor } from './live-execution-waiting-status.js';
 import type { ProcessRole } from './roles/process-role.js';
 import { buildLiveTurnRecoveryCapabilityGate } from './live-turn-recovery-capability-gate.js';
@@ -129,7 +129,6 @@ interface Deps {
   getLiveTurnCommandWakeupSource?: () =>
     | LiveTurnCommandWakeupSource
     | undefined;
-  /** Toolchain manifests for the live-turn recovery capability gate (fleet). */
   getRuntimeDependencyRepository?: () =>
     | RuntimeDependencyRepository
     | undefined;
@@ -157,13 +156,9 @@ export type RuntimeServicesOptions = {
   app: RuntimeApp;
   channelWiring: ChannelWiring;
   liveTurnsEnabled?: boolean;
-  /** Recovery lease manager; omitted single-process embeddings coordinate immediately. */
   recoveryCoordinator?: RecoveryCoordinatorPort;
-  /** Process role; persisted on the worker_instances row at registration. */
   processRole?: ProcessRole;
-  /** Whether this role admits/executes live turns + interaction callbacks. Default true. */
   liveExecution?: boolean;
-  /** Whether this role claims/runs scheduler jobs (the scheduler loop). Default true. */
   jobExecution?: boolean;
 };
 function makeDefaultDeps(): RuntimeServicesDefaults {
@@ -266,19 +261,10 @@ let activeWaitingStatusMonitor:
   | { oldestWaitingSeconds: () => number }
   | undefined;
 let activeLiveExecutionServices: LiveExecutionServicesHandle | undefined;
-/**
- * Oldest waiting live admission age in seconds (0 when none / this process is
- * not the recovery coordinator). Read by `/metrics`; the monitor runs only on
- * the coordinator, so a non-coordinator process reports 0.
- */
 export function getOldestWaitingLiveAdmissionSeconds(): number {
   return activeWaitingStatusMonitor?.oldestWaitingSeconds() ?? 0;
 }
 export function stopLiveTurnRecoveryLoop(): void {
-  // Graceful-drain choke point: stop the whole coordinator (recovery sweep AND
-  // the waiting-status monitor). Shared, idempotent stop path with the lease-loss
-  // `onLost` handler — the monitor interval clears and `activeWaitingStatusMonitor`
-  // resets exactly once whether teardown is lease loss OR SIGTERM drain.
   if (activeLiveExecutionServices) {
     activeLiveExecutionServices.stopRecovery();
     activeLiveExecutionServices = undefined;
@@ -503,6 +489,10 @@ export async function startRuntimeServices(
     renderAgentTodo: (jid, render) =>
       liveTurnsEnabled && liveExecution
         ? channelWiring.renderAgentTodo(jid, render)
+        : Promise.resolve(false),
+    renderRichInteraction: (jid, request) =>
+      liveTurnsEnabled && liveExecution
+        ? channelWiring.renderRichInteraction(jid, request)
         : Promise.resolve(false),
     mcpHostnameLookup: resolved.mcpHostnameLookup,
   });
@@ -1036,7 +1026,6 @@ export async function startRuntimeServices(
     },
     addReaction: (jid, messageRef, emoji) =>
       channelWiring.addReaction(jid, messageRef, emoji),
-    // Fleet-only queued-capacity UX; workstation recovery can replay old backlog.
     waitingStatus:
       liveTurns && resolved.getDeploymentMode() === 'fleet'
         ? {

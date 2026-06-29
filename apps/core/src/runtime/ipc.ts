@@ -31,7 +31,7 @@ import {
   type IpcRequestWakeupHint,
 } from './ipc-request-wakeup-registry.js';
 import { IpcWakeupScopeTracker } from './ipc-wakeup-scope.js';
-import type { RunnerControlPort } from './runner-control-port.js';
+import { processRichInteractionRequestDirectory } from './ipc-rich-interaction-directory.js';
 export type { IpcDeps } from './ipc-domain-types.js';
 export { processTaskIpc } from '../jobs/ipc-handler.js';
 export { validateIpcAuthRequest } from './ipc-auth-validation.js';
@@ -283,7 +283,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           'user-questions',
         );
 
-        // Process messages from this group's IPC directory
         try {
           if (
             shouldProcessRequestLane(sourceAgentFolder, 'messages') &&
@@ -307,7 +306,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 claimedPath = claimed.claimedPath;
                 const rawData = claimed.raw;
                 const data = parseIpcMessage(rawData, sourceAgentFolder);
-                // Authorization: verify this group can send to this chatJid
                 const targetGroup = groupRegistry[data.chatJid];
                 if (targetGroup && targetGroup.folder === sourceAgentFolder) {
                   const message = await resolveOwnedFileArtifactMessage({
@@ -366,7 +364,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process tasks from this group's IPC directory
         try {
           if (
             shouldProcessRequestLane(sourceAgentFolder, 'tasks') &&
@@ -391,7 +388,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 claimedPath = claimed.claimedPath;
                 rawTaskData = claimed.raw;
                 const data = parseTaskIpcData(rawTaskData, sourceAgentFolder);
-                // Pass source group identity to processTaskIpc for authorization
                 if (isLongRunningTask(data.type)) {
                   void processLongRunningTaskIpc({
                     data,
@@ -434,7 +430,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process memory request/response IPC for this group
         try {
           if (
             shouldProcessRequestLane(sourceAgentFolder, 'memory-requests') &&
@@ -520,7 +515,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           );
         }
 
-        // Process browser request/response IPC for this group
         if (shouldProcessRequestLane(sourceAgentFolder, 'browser-requests')) {
           processBrowserRequestDirectory({
             ipcBaseDir,
@@ -532,7 +526,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
           });
         }
 
-        // Process permission request/response IPC for this group
         try {
           if (
             shouldProcessRequestLane(
@@ -664,6 +657,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
             'Error reading permission IPC requests directory',
           );
         }
+
+        processRichInteractionRequestDirectory({
+          sourceAgentFolder,
+          processScope,
+          shouldProcessRequestLane,
+          folderTargetJid,
+          folderTargetJids,
+          inFlightInteractionIpc,
+          maxInFlightInteractionIpc: MAX_IN_FLIGHT_INTERACTION_IPC,
+          runnerControlPort,
+          deps,
+          ipcBaseDir,
+          logger,
+        });
 
         // Process AskUserQuestion request/response IPC for this group
         try {

@@ -6,6 +6,7 @@ import {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
   ProgressUpdateOptions,
+  RichInteractionRequest,
   StreamingChunkOptions,
   UserQuestionRequest,
   UserQuestionResponse,
@@ -14,7 +15,6 @@ import { PartialMessageDeliveryError } from '../../domain/messages/partial-deliv
 import type { AgentTodoRender } from '../../domain/ports/task-lifecycle.js';
 import { TelegramChannelConnect } from './channel-connect.js';
 import {
-  TELEGRAM_MEDIA_DRAIN_TIMEOUT_MS,
   TELEGRAM_MESSAGE_MAX_LENGTH,
   TELEGRAM_STREAM_CHUNK_MAX_LENGTH,
   TELEGRAM_USER_QUESTION_TIMEOUT_MS,
@@ -38,12 +38,9 @@ import { renderTelegramChannelAgentTodo } from './agent-todo-delivery.js';
 import { bindTelegramPermissionPromptMessage } from './prompt-binding.js';
 import { unescapeTelegramEscapedMarkdownV2 } from './markdown-v2-unescape.js';
 import { sendTelegramTyping } from './typing-indicator.js';
-
-function telegramReactionEmoji(emoji: string): string {
-  if (emoji === 'seen') return '👀';
-  if (emoji === 'running') return '⏳';
-  return emoji;
-}
+import { renderTelegramRichInteraction } from './rich-interaction.js';
+import { addTelegramReaction } from './reactions.js';
+import { disconnectTelegramDelivery } from './disconnect.js';
 
 export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
   private readonly reactionKeys = new Set<string>();
@@ -174,29 +171,32 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
     }
   }
 
+  async renderRichInteraction(
+    jid: string,
+    render: RichInteractionRequest,
+  ): Promise<boolean> {
+    if (!this.bot) return false;
+    return renderTelegramRichInteraction({
+      bot: this.bot,
+      jid,
+      render,
+      sendFallback: (text, options) => this.sendMessage(jid, text, options),
+    });
+  }
+
   async addReaction(
     jid: string,
     messageRef: string,
     emoji: string,
   ): Promise<void> {
     if (!this.bot) return;
-    const numericId = jid.replace(/^tg:/, '');
-    const messageId = Number.parseInt(messageRef, 10);
-    if (!Number.isFinite(messageId)) return;
-    const reaction = telegramReactionEmoji(emoji);
-    const key = `${jid}:${messageId}:${reaction}`;
-    if (this.reactionKeys.has(key)) return;
-    try {
-      await this.bot.api.setMessageReaction(
-        numericId,
-        messageId,
-        [{ type: 'emoji', emoji: reaction as never }],
-        { is_big: false },
-      );
-      this.reactionKeys.add(key);
-    } catch (err) {
-      logger.debug({ jid, messageRef, err }, 'Telegram reaction update failed');
-    }
+    await addTelegramReaction({
+      bot: this.bot,
+      jid,
+      messageRef,
+      emoji,
+      reactionKeys: this.reactionKeys,
+    });
   }
 
   async sendStreamingChunk(
@@ -333,7 +333,10 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
       : undefined;
     const key = `progress:${this.buildDraftStreamKey(jid, options.threadId)}`;
     this.loadPersistedProgressMessages();
-    const nextText = text.trim();
+    const actionOnly = Boolean(
+      options.actionOnly && options.actionAffordances?.length,
+    );
+    const nextText = actionOnly ? String.fromCharCode(8288) : text.trim();
     if (options.done) {
       this.markProgressGenerationDone(key, options.generation);
     } else if (
@@ -352,7 +355,7 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
       options,
     });
     if (!prepared.accepted) return;
-    let existing = prepared.existing;
+    const existing = prepared.existing;
     if (!nextText) {
       if (options.done) {
         this.activeProgressMessages.delete(key);
@@ -723,51 +726,21 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
   async disconnect(): Promise<void> {
     this.isStopping = true;
     this.clearPollingRetryTimer();
-    for (const streamState of this.activeDraftStreams.values()) {
-      streamState.closeStream();
-    }
-    this.activeDraftStreams.clear();
-    this.activeGroupStreams.clear();
-    this.streamGenerationByJid.clear();
-    this.sealedStreamGenerationByJid.clear();
-    this.activeProgressMessages.clear();
-    const mediaDrained = await this.mediaIngestionQueue.waitForIdle(
-      TELEGRAM_MEDIA_DRAIN_TIMEOUT_MS,
-    );
-    if (!mediaDrained) {
-      logger.warn(
-        { timeoutMs: TELEGRAM_MEDIA_DRAIN_TIMEOUT_MS },
-        'Timed out waiting for Telegram media ingestion queue to drain',
-      );
-    }
-    for (const [
-      requestId,
-      pending,
-    ] of this.pendingPermissionPrompts.entries()) {
-      clearTimeout(pending.timer);
-      pending.resolve({
-        approved: false,
-        decidedBy: 'system',
-        reason: 'Telegram channel disconnected',
-      });
-      this.pendingPermissionPrompts.delete(requestId);
-      this.pendingPermissionCallbackIds.delete(pending.callbackId);
-    }
-    for (const [key, pending] of this.pendingUserQuestions.entries()) {
-      clearTimeout(pending.timer);
-      pending.resolve({
-        selected: pending.multiSelect ? [] : '',
-        answeredBy: 'system',
-      });
-      this.pendingUserQuestions.delete(key);
-    }
-    if (this.bot) {
-      this.bot.stop();
-      this.bot = null;
-      this.draftStreamApi = null;
-      await this.releasePollingLease();
-      logger.info('Telegram bot stopped');
-    }
+    const disconnected = await disconnectTelegramDelivery({
+      bot: this.bot,
+      activeDraftStreams: this.activeDraftStreams,
+      activeGroupStreams: this.activeGroupStreams,
+      streamGenerationByJid: this.streamGenerationByJid,
+      sealedStreamGenerationByJid: this.sealedStreamGenerationByJid,
+      activeProgressMessages: this.activeProgressMessages,
+      mediaIngestionQueue: this.mediaIngestionQueue,
+      pendingPermissionPrompts: this.pendingPermissionPrompts,
+      pendingPermissionCallbackIds: this.pendingPermissionCallbackIds,
+      pendingUserQuestions: this.pendingUserQuestions,
+      releasePollingLease: () => this.releasePollingLease(),
+    });
+    this.bot = disconnected.bot;
+    this.draftStreamApi = disconnected.draftStreamApi;
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

@@ -32,7 +32,6 @@ import {
 } from './provider-session-access-fingerprint.js';
 import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
-import { isRuntimeEventType } from '../domain/events/runtime-event-types.js';
 import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
 import { resolveExecutionRoute } from '../shared/model-execution-route.js';
 import type { ExecutionProviderId } from '../domain/sessions/sessions.js';
@@ -41,6 +40,10 @@ import {
   loadPatternsContext,
   markPatternsContextSurfaced,
 } from '../shared/pattern-candidate-block.js';
+import {
+  patternSubjectForScope,
+  type PatternSubjectScope,
+} from '../shared/pattern-candidate-subject.js';
 import { memoryAgentIdForWorkspaceFolder } from '../memory/app-memory-boundaries.js';
 import {
   executionProviderIdForCandidate,
@@ -48,6 +51,15 @@ import {
   runFamilyFailoverLoop,
   publishRunFailoverEvent,
 } from './failover-candidate-loop.js';
+import { outcomeForPatternCandidateStatus } from './proactive-surfacing-metrics.js';
+import {
+  proactiveSurfacingAllowed,
+  publishProactiveSurfacingOutcomeEvent,
+} from './proactive-surfacing-gate.js';
+import {
+  forwardRuntimeEvents,
+  RUNTIME_EVENT_TYPES,
+} from './runtime-event-forwarding.js';
 import { isMissingProviderSessionError } from './failover-eligibility.js';
 import { logger, redactString } from '../infrastructure/logging/logger.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
@@ -56,9 +68,7 @@ const DEFAULT_TURN_APP_ID = 'default';
 const MEMORY_REVIEW_APPROVER_CACHE_TTL_MS = 60_000;
 const WORKSPACE_FOLDER_INPUT_KEY = `workspace${'Folder'}`;
 const memoryReviewApproverCache = new Map<string, [boolean, number]>();
-
 export type GroupAgentRunResult = 'success' | 'error' | 'stopped';
-
 function redactRuntimeError(error: string | undefined): string | undefined {
   return error ? redactString(error) : undefined;
 }
@@ -76,34 +86,6 @@ function hasAsyncTaskRepository(deps: GroupProcessingDeps): boolean {
   } catch {
     return false;
   }
-}
-
-function runtimeEventDedupKey(input: {
-  eventType: string;
-  appId?: string;
-  agentId?: string;
-  runId?: string;
-  jobId?: string;
-  conversationId?: string;
-  threadId?: string | null;
-  payload: unknown;
-}): string {
-  let payload: string;
-  try {
-    payload = JSON.stringify(input.payload) ?? 'undefined';
-  } catch {
-    payload = String(input.payload);
-  }
-  return [
-    input.eventType,
-    input.appId ?? '',
-    input.agentId ?? '',
-    input.runId ?? '',
-    input.jobId ?? '',
-    input.conversationId ?? '',
-    input.threadId ?? '',
-    payload,
-  ].join('\u001f');
 }
 
 async function memoryReviewerApproverAllowed(
@@ -170,13 +152,6 @@ export function createGroupAgentRunner(input: {
     );
     const agentHarness = deps.getSelectedAgentHarness(group.folder);
     const turnAppId = appIdFromConversationJid(chatJid) ?? DEFAULT_TURN_APP_ID;
-    // Configured-first model-family failover candidates for THIS turn. [] means
-    // no override (keep pre-failover behavior); candidates[0] is the existing
-    // single-rewrite default, passed as the model so spawn uses that member.
-    //
-    // This must happen before session/turn context lookup: family aliases do
-    // not resolve through defaultModelStatusSelection(), so provider-session
-    // lookup has to be keyed by the first concrete candidate's execution lane.
     const failoverCandidates = await resolveTurnFailoverCandidates({
       requestedModel: group.agentConfig?.model,
       appId: turnAppId,
@@ -188,18 +163,12 @@ export function createGroupAgentRunner(input: {
       resolveRuntimeExecutionProviderId(
         deps.executionAdapter,
       ) as ExecutionProviderId;
-    // Live-turn lease execution provider must match the runner's engine-resolved
-    // route. The engine is derived from the resolved model's provider.
     const liveTurnRoute = initialModelSelection.model
       ? resolveExecutionRoute({
           entry: initialModelSelection.model,
           agentHarness,
         })
       : undefined;
-    // Per-candidate during model-family failover: starts at the chat-default
-    // model's provider and is reassigned to the active candidate's provider when
-    // a failover advances. Closures below capture this binding by reference so
-    // provider-session persistence/expiry follow the candidate actually running.
     let executionProviderId = firstModel
       ? executionProviderIdForCandidate(firstModel, undefined, agentHarness)
       : liveTurnRoute?.ok
@@ -310,49 +279,6 @@ export function createGroupAgentRunner(input: {
       latestProviderSessionId = nextSessionId;
       await updateRunProviderMetadata({ providerSessionId: nextSessionId });
     };
-    const forwardRuntimeEvents = async (output: AgentOutput) => {
-      if (output.runtimeEvents?.length && deps.publishRuntimeEvent) {
-        for (const event of output.runtimeEvents) {
-          if (!isRuntimeEventType(event.eventType)) continue;
-          const appId = event.appId ?? runtimeAppId;
-          if (!appId) continue;
-          const eventKey = runtimeEventDedupKey({
-            eventType: event.eventType,
-            appId,
-            agentId: event.agentId ?? turnContext?.agentId,
-            runId: event.runId ?? runState.runId,
-            jobId: event.jobId,
-            conversationId: event.conversationId ?? chatJid,
-            threadId: event.threadId ?? sessionThreadId,
-            payload: event.payload,
-          });
-          if (forwardedRuntimeEventKeys.has(eventKey)) continue;
-          forwardedRuntimeEventKeys.add(eventKey);
-          await deps.publishRuntimeEvent({
-            appId: appId as never,
-            ...((event.agentId ?? turnContext?.agentId)
-              ? {
-                  agentId: (event.agentId ?? turnContext?.agentId) as never,
-                }
-              : {}),
-            ...((event.runId ?? runState.runId)
-              ? { runId: (event.runId ?? runState.runId) as never }
-              : {}),
-            ...(event.jobId ? { jobId: event.jobId as never } : {}),
-            conversationId: (event.conversationId ?? chatJid) as never,
-            ...((event.threadId ?? sessionThreadId)
-              ? {
-                  threadId: (event.threadId ?? sessionThreadId) as never,
-                }
-              : {}),
-            eventType: event.eventType,
-            actor: event.actor ?? 'runner',
-            responseMode: event.responseMode ?? 'none',
-            payload: event.payload,
-          });
-        }
-      }
-    };
     const wrappedOnOutput = async (output: AgentOutput) => {
       await persistProviderSessionFromOutput(output);
       if (output.usage) {
@@ -384,7 +310,16 @@ export function createGroupAgentRunner(input: {
       if (output.status !== 'error' && output.result) {
         streamedResult.append(String(output.result));
       }
-      await forwardRuntimeEvents(output);
+      await forwardRuntimeEvents({
+        output,
+        publishRuntimeEvent: deps.publishRuntimeEvent,
+        runtimeAppId,
+        turnAgentId: turnContext?.agentId,
+        runId: runState.runId,
+        chatJid,
+        sessionThreadId,
+        forwardedKeys: forwardedRuntimeEventKeys,
+      });
       if (
         output.compactBoundary &&
         turnContext?.agentSessionId &&
@@ -452,8 +387,7 @@ export function createGroupAgentRunner(input: {
         'Expired provider session because runtime access projection changed',
       );
     }
-    const patternCandidateRepo = deps.getPatternCandidateRepository?.();
-    const patternsContext = await loadPatternsContext(patternCandidateRepo, {
+    const surfacingScope = {
       appId: runtimeAppId,
       agentId:
         turnContext?.agentId ?? memoryAgentIdForWorkspaceFolder(group.folder),
@@ -461,7 +395,42 @@ export function createGroupAgentRunner(input: {
       conversationId: chatJid,
       conversationKind: group.conversationKind,
       userId: options?.memoryContext?.userId,
-    });
+    };
+    const patternCandidateRepo = deps.getPatternCandidateRepository?.();
+    const surfacingGate = await proactiveSurfacingAllowed(deps, surfacingScope);
+    let patternsContext = { block: '', surfacedCandidateIds: [] as string[] };
+    if (surfacingGate.allowed) {
+      try {
+        patternsContext = await loadPatternsContext(
+          patternCandidateRepo,
+          surfacingScope,
+        );
+      } catch {
+        publishProactiveSurfacingOutcomeEvent({
+          publish: deps.publishRuntimeEvent,
+          appId: runtimeAppId,
+          agentId: turnContext?.agentId,
+          runId: runState.runId,
+          conversationId: chatJid,
+          threadId: sessionThreadId,
+          subjectId: surfacingGate.subjectId,
+          candidates: [],
+          outcome: 'skipped_error',
+        });
+      }
+    } else if (surfacingGate.failClosedOutcome) {
+      publishProactiveSurfacingOutcomeEvent({
+        publish: deps.publishRuntimeEvent,
+        appId: runtimeAppId,
+        agentId: turnContext?.agentId,
+        runId: runState.runId,
+        conversationId: chatJid,
+        threadId: sessionThreadId,
+        subjectId: surfacingGate.subjectId,
+        candidates: [],
+        outcome: surfacingGate.failClosedOutcome,
+      });
+    }
     const memoryContextBlock = [
       turnContext?.memoryContextBlock,
       patternsContext.block,
@@ -567,6 +536,9 @@ export function createGroupAgentRunner(input: {
                     options.existingRunLeaseFencingVersion,
                 }
               : {}),
+            ...(options?.liveStopActionToken
+              ? { liveStopActionToken: options.liveStopActionToken }
+              : {}),
             [WORKSPACE_FOLDER_INPUT_KEY]: group.folder,
           } as Parameters<typeof runAgentImpl>[1],
           (proc, runHandle) => {
@@ -622,10 +594,6 @@ export function createGroupAgentRunner(input: {
           ...(firstModel ? { model: firstModel } : {}),
         });
       }
-      // Live model-family failover: while NO visible output has streamed and the
-      // error is provider-specific, advance to the next configured candidate and
-      // re-invoke with that model and NO resume id (a different provider must not
-      // resume the prior provider's session). Streamed-output read fresh each iter.
       output = await runFamilyFailoverLoop({
         candidates: failoverCandidates,
         initialOutput: output,
@@ -652,7 +620,16 @@ export function createGroupAgentRunner(input: {
         log: (message) =>
           logger.warn({ group: group.name }, redactString(message)),
       });
-      await forwardRuntimeEvents(output);
+      await forwardRuntimeEvents({
+        output,
+        publishRuntimeEvent: deps.publishRuntimeEvent,
+        runtimeAppId,
+        turnAgentId: turnContext?.agentId,
+        runId: runState.runId,
+        chatJid,
+        sessionThreadId,
+        forwardedKeys: forwardedRuntimeEventKeys,
+      });
       if (output.status === 'error') {
         if (isStoppedByRequest(output)) {
           logger.warn({ group: group.name }, 'Agent runner stopped by request');
@@ -699,6 +676,33 @@ export function createGroupAgentRunner(input: {
         patternCandidateRepo,
         patternsContext.surfacedCandidateIds,
       );
+      try {
+        const surfacedSubject = patternSubjectForScope(surfacingScope);
+        if (surfacedSubject && patternCandidateRepo) {
+          for (const id of patternsContext.surfacedCandidateIds) {
+            const candidate = await patternCandidateRepo.getById(id);
+            if (!candidate) continue;
+            publishProactiveSurfacingOutcomeEvent({
+              publish: deps.publishRuntimeEvent,
+              appId: runtimeAppId,
+              agentId: turnContext?.agentId,
+              runId: runState.runId,
+              conversationId: chatJid,
+              threadId: sessionThreadId,
+              subjectId: surfacedSubject.subjectId,
+              candidates: [
+                {
+                  signature: candidate.signature,
+                  status: candidate.candidateStatus,
+                },
+              ],
+              outcome: outcomeForPatternCandidateStatus(
+                candidate.candidateStatus,
+              ),
+            });
+          }
+        }
+      } catch {}
       return 'success';
     } catch (err) {
       logger.error({ group: group.name, err }, 'Agent error');

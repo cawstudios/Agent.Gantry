@@ -4,6 +4,10 @@ export function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function sha256Base64Url(value: string): string {
+  return createHash('sha256').update(value).digest('base64url');
+}
+
 export function stableSha256Json(value: unknown): string {
   return sha256Hex(canonicalJson(value));
 }

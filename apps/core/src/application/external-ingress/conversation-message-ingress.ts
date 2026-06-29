@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import type { NewMessage } from '../../domain/types.js';
 import type {
   Conversation,
@@ -19,6 +17,7 @@ import type {
 } from '../../domain/repositories/ops-repo.js';
 import type { AppId } from '../../domain/app/app.js';
 import type { LiveAdmissionWorkItemEnqueueResult } from '../../domain/ports/live-turns.js';
+import { sha256Base64Url } from '../../shared/stable-hash.js';
 import { ApplicationError } from '../common/application-error.js';
 
 export type ConversationMessageQueueIntent = {
@@ -333,8 +332,5 @@ function resolveRuntimeThreadIdFromCanonical(
 }
 
 function stableExternalIngressMessageId(parts: string[]): string {
-  return `external-ingress:${createHash('sha256')
-    .update(parts.join('\0'))
-    .digest('base64url')
-    .slice(0, 32)}`;
+  return `external-ingress:${sha256Base64Url(parts.join('\0')).slice(0, 32)}`;
 }

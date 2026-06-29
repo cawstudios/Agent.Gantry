@@ -21,6 +21,7 @@ import { ConversationRoute, ThinkingOverride } from '../../domain/types.js';
 import { RemoteMcpDnsValidationCache } from '../../application/mcp/mcp-server-policy.js';
 import { createGroupProcessor } from '../../runtime/group-processing.js';
 import type { GroupProcessingDeps } from '../../runtime/group-processing-types.js';
+import { resolveAgentLockStatus } from '../../config/profiles.js';
 import { listAvailableGroups } from '../../runtime/group-registry.js';
 import { GroupQueue } from '../../runtime/group-queue.js';
 import { parseThreadQueueKey } from '../../shared/thread-queue-key.js';
@@ -507,6 +508,14 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       renderAgentTodo: (chatJid, render) =>
         channelRuntime.renderAgentTodo?.(chatJid, render) ??
         Promise.resolve(false),
+      hydrateConversationContext: (request) =>
+        channelRuntime.hydrateConversationContext?.(request) ??
+        Promise.resolve({
+          providerId: 'unknown',
+          attempted: false,
+          skipped: true,
+          reason: 'unsupported',
+        }),
       isControlApproverAllowed: (input) =>
         channelRuntime.isControlApproverAllowed?.(input) ??
         Promise.resolve(false),
@@ -557,6 +566,9 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     getAsyncTaskRepository: () => getRuntimeStorage().repositories.asyncTasks,
     getPatternCandidateRepository: () =>
       getRuntimeStorage().repositories.patternCandidates,
+    getProactiveSurfacingRepository: () =>
+      getRuntimeStorage().repositories.proactiveSurfacing,
+    getAgentLockStatus: resolveAgentLockStatus,
     getSkillRepository: () => getRuntimeStorage().repositories.skills,
     getMcpServerRepository: () => getRuntimeStorage().repositories.mcpServers,
     getCapabilitySecretRepository: () =>

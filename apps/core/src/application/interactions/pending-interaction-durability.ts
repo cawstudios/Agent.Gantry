@@ -47,10 +47,6 @@ interface InteractionDurabilityBackend {
 }
 let backend: InteractionDurabilityBackend | null = null;
 let permissionPersistence: PermissionPersistenceBackend | null = null;
-/**
- * Wired by the storage runtime when Postgres comes up. Without a backend the
- * durability hooks no-op (storage-less local fallback).
- */
 export function configurePendingInteractionDurability(
   next: InteractionDurabilityBackend | null,
 ): void {
@@ -70,11 +66,6 @@ export function pendingInteractionIdempotencyKey(input: {
   return [input.kind, input.sourceAgentFolder, input.requestId].join(':');
 }
 
-/**
- * Durable record for a permission/question prompt, created BEFORE the
- * provider prompt renders. Survives provider and control-plane restarts: the
- * idempotency key makes a restart-driven re-prompt reuse the same record.
- */
 export async function recordPendingInteractionRequested(input: {
   kind: PendingInteractionKind;
   sourceAgentFolder: string;
@@ -167,9 +158,6 @@ export async function resolvePendingInteractionRecord(input: {
     }
   }
 
-  // Persist the live-turn command before marking the pending row resolved. A
-  // crash after the row transition must not leave the runner blocked with no
-  // durable command to replay.
   if (input.runId && active.liveTurns && liveTurnDelivery) {
     try {
       const delivered = await enqueueResolvedInteractionCommand({
@@ -665,10 +653,6 @@ async function activeRunLeaseForInteraction(input: {
   }
 }
 
-/**
- * Transient, run-scoped authority: bound to the run's active lease and
- * expiring with it. Never written to durable permission state.
- */
 export async function recordRunScopedTransientGrant(input: {
   appId?: string | null;
   runId: string;

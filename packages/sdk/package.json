@@ -6,12 +6,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vrknetha/gantry.git",
+    "url": "git+https://github.com/cawstudios/Agent.Gantry.git",
     "directory": "packages/sdk"
   },
-  "homepage": "https://github.com/vrknetha/gantry/tree/main/packages/sdk",
+  "homepage": "https://github.com/cawstudios/Agent.Gantry/tree/main/packages/sdk",
   "bugs": {
-    "url": "https://github.com/vrknetha/gantry/issues"
+    "url": "https://github.com/cawstudios/Agent.Gantry/issues"
   },
   "keywords": [
     "gantry",

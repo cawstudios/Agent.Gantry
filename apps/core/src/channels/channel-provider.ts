@@ -13,6 +13,7 @@ import {
   ProgressSink,
   PermissionApprovalRequest,
   ConversationRoute,
+  RichInteractionSurface,
   StreamingSink,
   StreamingStateSink,
   TypingSink,
@@ -21,6 +22,15 @@ import type { RuntimeSettings } from '../config/settings/runtime-settings.js';
 import type { RuntimeLeasePort } from '../domain/ports/runtime-lease.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
 import type { AgentTodoSink } from '../domain/ports/task-lifecycle.js';
+import type {
+  ConversationContextHydrationRequest,
+  ConversationContextHydrationResult,
+} from '../domain/ports/conversation-context-hydration.js';
+
+export type {
+  ConversationContextHydrationRequest,
+  ConversationContextHydrationResult,
+} from '../domain/ports/conversation-context-hydration.js';
 
 export const CHANNEL_STREAM_UPDATE_INTERVAL_MS = {
   slack: 550,
@@ -63,9 +73,17 @@ export type ChannelAdapter = ChannelLifecyclePort &
       MessageReactionSink &
       GroupDiscoverySource &
       InteractionSurface &
+      RichInteractionSurface &
       PlanReviewSurface &
-      AgentTodoSink
+      AgentTodoSink &
+      ConversationContextHydrationSink
   >;
+
+export interface ConversationContextHydrationSink {
+  hydrateConversationContext(
+    request: ConversationContextHydrationRequest,
+  ): Promise<ConversationContextHydrationResult>;
+}
 
 export type ChannelFactory = (
   opts: ChannelOpts,

@@ -6,6 +6,7 @@ import {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
   ProgressUpdateOptions,
+  RichInteractionRequest,
   StreamingChunkOptions,
   UserQuestionRequest,
   UserQuestionResponse,
@@ -18,11 +19,6 @@ import {
   formatOutboundForChannel,
   stripInternalTagsPreserveWhitespace,
 } from '../../messaging/router.js';
-import {
-  buildPermissionPromptParts,
-  permissionButtonLabel,
-  permissionDecisionOptions,
-} from '../permission-interaction.js';
 import {
   disconnectSlackDelivery,
   loadPersistedSlackProgress,
@@ -48,23 +44,9 @@ import { slackThreadTsFromThreadId } from './thread-ts.js';
 import { renderSlackAgentTodo } from './agent-todo-delivery.js';
 import { connectSlackApp } from './channel-connect.js';
 import { requestSlackPermissionApproval } from './permission-approval-delivery.js';
+import { renderSlackRichInteraction } from './rich-interaction.js';
+import { addSlackReaction } from './reactions.js';
 const SLACK_STREAM_SNIPPET_FALLBACK_MIN_PARTS = 4;
-
-function slackReactionName(emoji: string): string {
-  if (emoji === 'seen') return 'eyes';
-  if (emoji === 'running') return 'hourglass_flowing_sand';
-  return emoji.replace(/^:+|:+$/g, '');
-}
-
-function isSlackAlreadyReactedError(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'data' in err &&
-    typeof (err as { data?: { error?: unknown } }).data?.error === 'string' &&
-    (err as { data: { error: string } }).data.error === 'already_reacted'
-  );
-}
 
 export abstract class SlackChannelDelivery extends SlackChannelInteractions {
   private interactionCallbacksEnabled = true;
@@ -124,24 +106,15 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
   ): Promise<void> {
     if (!this.app) return;
     const parsed = this.parseJid(jid);
-    if (!parsed || !messageRef.trim()) return;
-    const name = slackReactionName(emoji);
-    const key = `${jid}:${messageRef}:${name}`;
-    if (this.reactionKeys.has(key)) return;
-    try {
-      await this.app.client.reactions.add({
-        channel: parsed.channelId,
-        timestamp: messageRef,
-        name,
-      });
-      this.reactionKeys.add(key);
-    } catch (err) {
-      if (isSlackAlreadyReactedError(err)) {
-        this.reactionKeys.add(key);
-        return;
-      }
-      logger.debug({ jid, messageRef, err }, 'Slack reaction update failed');
-    }
+    if (!parsed) return;
+    await addSlackReaction({
+      app: this.app,
+      jid,
+      channelId: parsed.channelId,
+      messageRef,
+      emoji,
+      reactionKeys: this.reactionKeys,
+    });
   }
 
   async renderAgentTodo(
@@ -162,6 +135,23 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
       render,
       todoKey,
       pendingTodos: this.pendingTodos,
+    });
+  }
+
+  async renderRichInteraction(
+    jid: string,
+    render: RichInteractionRequest,
+  ): Promise<boolean> {
+    if (!this.app) return false;
+    const parsed = this.parseJid(jid);
+    if (!parsed) return false;
+    return renderSlackRichInteraction({
+      app: this.app,
+      jid,
+      channelId: parsed.channelId,
+      render,
+      pendingRichForms: this.pendingRichForms,
+      sendFallback: (text, options) => this.sendMessage(jid, text, options),
     });
   }
 

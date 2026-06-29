@@ -5,6 +5,7 @@ import type {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
   ProgressUpdateOptions,
+  RichInteractionRequest,
   StreamingChunkOptions,
   UserQuestionRequest,
   UserQuestionResponse,
@@ -31,6 +32,10 @@ import type {
   AgentTodoCardStatus,
   AgentTodoRender,
 } from '../../domain/ports/task-lifecycle.js';
+import type {
+  ConversationContextHydrationRequest,
+  ConversationContextHydrationResult,
+} from '../../channels/channel-provider.js';
 
 export type ChannelWiringRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository;
@@ -183,6 +188,13 @@ export interface ChannelWiring {
     request: UserQuestionRequest,
   ) => Promise<UserQuestionResponse>;
   renderAgentTodo: (jid: string, render: AgentTodoRender) => Promise<boolean>;
+  renderRichInteraction: (
+    jid: string,
+    request: RichInteractionRequest,
+  ) => Promise<boolean>;
+  hydrateConversationContext?: (
+    request: ConversationContextHydrationRequest,
+  ) => Promise<ConversationContextHydrationResult>;
   finalizeAgentTodo: (
     jid: string,
     input: {
@@ -199,3 +211,8 @@ export interface ChannelWiring {
   }) => Promise<boolean>;
   disconnectChannels: () => Promise<void>;
 }
+
+export type {
+  ConversationContextHydrationRequest,
+  ConversationContextHydrationResult,
+};

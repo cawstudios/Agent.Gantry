@@ -21,14 +21,11 @@ import {
   buildPermissionFullViewModalBlocks,
   buildPermissionReceiptBlocks,
 } from './permission-blocks.js';
+import { registerSlackRichFormHandlers } from './rich-interaction.js';
 import {
   buildTriggerPattern,
   triggerForRoute,
 } from '../../shared/trigger-pattern.js';
-import {
-  SLACK_NATIVE_APPEND_MAX_LENGTH,
-  splitSlackTextByCodeUnits,
-} from './text-limits.js';
 import { SLACK_PERMISSION_DECISION_ACTION_IDS } from './permission-action-id.js';
 import { nowIso } from '../../shared/time/datetime.js';
 import {
@@ -38,6 +35,7 @@ import {
 } from './native-stream.js';
 import { registerSlackMessageActionHandler } from './channel-message-action-handler.js';
 import { registerSlackUtilityHandlers } from './channel-utility-handlers.js';
+import { ingestSlackSlashCommand as ingestSlackSlashCommandEvent } from './slash-command-ingest.js';
 
 export abstract class SlackChannelInteractions extends SlackChannelState {
   protected async ingestSlackSlashCommand(command: {
@@ -48,41 +46,13 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
     trigger_id?: string;
     command_id?: string;
   }): Promise<void> {
-    const channelId = command.channel_id;
-    if (!channelId) return;
-    const jid = `sl:${channelId}`;
-    const chatName = await this.resolveChannelName(channelId);
-    await this.opts.onChatMetadata(
-      jid,
-      nowIso(),
-      chatName,
-      'slack',
-      this.isLikelyGroupConversation(channelId),
-    );
-    const group = this.opts.conversationRoutes()[jid];
-    if (!group && this.isLikelyGroupConversation(channelId)) return;
-    const text = command.text?.trim();
-    const content = text ? `/gantry ${text}` : '/gantry';
-    const id =
-      command.command_id ||
-      command.trigger_id ||
-      `gantry:${channelId}:${Date.now()}`;
-    await this.opts.onMessage(jid, {
-      id,
-      chat_jid: jid,
-      provider: 'slack',
-      sender: command.user_id || 'unknown',
-      sender_name:
-        (command.user_id
-          ? await this.resolveUserName(command.user_id)
-          : command.user_name) ||
-        command.user_name ||
-        command.user_id ||
-        'unknown',
-      content,
-      timestamp: nowIso(),
-      is_from_me: false,
-      external_message_id: id,
+    await ingestSlackSlashCommandEvent({
+      command,
+      opts: this.opts,
+      resolveChannelName: (channelId) => this.resolveChannelName(channelId),
+      resolveUserName: (userId) => this.resolveUserName(userId),
+      isLikelyGroupConversation: (channelId) =>
+        this.isLikelyGroupConversation(channelId),
     });
   }
 
@@ -346,9 +316,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         return;
       }
       const decision = decisionForMode(pending.request, mode, decidedBy);
-      await this.resolvePermissionPrompt(payload.requestId, {
-        ...decision,
-      });
+      await this.resolvePermissionPrompt(payload.requestId, decision);
     };
     for (const actionId of SLACK_PERMISSION_DECISION_ACTION_IDS) {
       this.app.action(actionId, handlePermissionDecision);
@@ -618,9 +586,6 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
       const callbackChannelId = body.channel?.id || '';
       const userId = body.user?.id || '';
       if (!userId) return;
-      // Free-text "Other" only supports the in-memory pending question (the
-      // modal opens and submits within the same worker session); durable
-      // cross-restart free text is not modeled.
       if (!pending || pending.settled) return;
       if (!callbackChannelId || callbackChannelId !== pending.channelId) return;
       if (
@@ -734,6 +699,10 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         return;
       }
       await this.finalizeUserQuestionPrompt(pending, text, answeredBy);
+    });
+    registerSlackRichFormHandlers({
+      app: this.app,
+      pendingRichForms: this.pendingRichForms,
     });
     registerSlackMessageActionHandler(this.app, this.opts.onMessageAction);
   }

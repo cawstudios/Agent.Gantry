@@ -4,6 +4,7 @@ import { logger } from '../infrastructure/logging/logger.js';
 import type {
   MessageSendOptions,
   ProgressUpdateOptions,
+  RichInteractionRequest,
   StreamingChunkOptions,
 } from '../domain/types.js';
 import {
@@ -18,6 +19,7 @@ import {
 } from '../adapters/storage/postgres/runtime-store.js';
 import { adaptSessionControlPort } from '../control/server/session-control-port.js';
 import { nowIso } from '../shared/time/datetime.js';
+import { richFallbackText } from './rich-interaction.js';
 
 function canonicalTextMetadata(text: string): {
   lengthChars: number;
@@ -150,9 +152,32 @@ export async function createAppChannel(
         text,
         threadId: options?.threadId ?? null,
         done: options?.done === true,
+        actionOnly: options?.actionOnly === true,
+        actionAffordances: options?.done
+          ? []
+          : (options?.actionAffordances ?? []),
         orderedEnvelope: orderedEnvelope('progress'),
         canonicalText: canonicalTextMetadata(text),
       });
+    },
+    async renderRichInteraction(
+      jid: string,
+      render: RichInteractionRequest,
+    ): Promise<boolean> {
+      const fallbackText = richFallbackText(render);
+      const result = await emitSessionEvent(
+        jid,
+        RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
+        {
+          kind: 'rich_interaction',
+          descriptor: render.descriptor,
+          fallbackText,
+          threadId: render.threadId ?? null,
+          orderedEnvelope: orderedEnvelope('rich_interaction'),
+          canonicalText: canonicalTextMetadata(fallbackText),
+        },
+      );
+      return result.emitted;
     },
   };
 }
