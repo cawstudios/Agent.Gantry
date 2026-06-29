@@ -135,6 +135,8 @@ function capabilityGuidancePrompt(
       : '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through Gantry-owned browser_* tools.',
     '- Memory tools store durable evidence only; temporary task state does not belong in memory.',
     '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation. Use todo_update for any multi-step task: publish a short plan and keep it current as items move pending -> inProgress -> completed. It renders as one live, in-place list per channel, so avoid repeated generic progress chatter unless there is a concrete blocker, decision, or result to share. It is display-only, non-authority state and does not grant tools or trigger work.',
+    '- Use render_status, render_facts, render_list, render_table, render_form, render_media, or render_progress when structured output should appear as native rich UI. Use send_message for plain narrative text.',
+    '- There is no generic Workflow tool. Do not mention or search for one; use the mounted Gantry tools that fit the task.',
     '- Gantry delegation is unavailable until a delegated-task executor is mounted. Do not claim delegated work started unless a real Gantry delegation tool returns a handle.',
     '- Final answers use adaptive receipts: pure chat answers need no receipt; work with no tools, changes, delegation, or blocker may use only Completed: <short outcome>; delegated work must include the full receipt with Used, Changed, Delegated, and Needs attention.',
     '- Do not delegate risky execution, secret handling, config edits, permission changes, or work requiring tools the parent run cannot use.',
@@ -152,7 +154,6 @@ function capabilityGuidancePrompt(
   }
   return baseline.join('\n');
 }
-
 const OPERATING_GUIDANCE_HEAD = [
   '# Operating guidance',
   '',
@@ -187,9 +188,9 @@ const OPERATING_GUIDANCE_HEAD = [
   '- Use memory tools for durable memory, not for temporary notes.',
   '- If memory is missing, stale, or uncertain, say so directly.',
   '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation; after that, do not send repeated generic progress chatter.',
+  '- Use render_status, render_facts, render_list, render_table, render_form, render_media, or render_progress for structured output that should render as native rich UI; use send_message for plain narrative text. There is no generic Workflow tool. Do not mention or search for one; use the mounted Gantry tools that fit the task.',
   '- Use ask_user_question for genuine either/or decisions the user must make: 2-4 short options (1-5 words), set single- or multi-select intentionally. It renders as native buttons, cards, or inline keyboards per channel. Use a normal message for open-ended input the agent can act on directly.',
 ];
-
 const FULL_TOOL_ACCESS_GUIDANCE = [
   '- Use available actions first. If the action is missing, request the reviewed capability. If setup is missing, request source setup through the Gantry access flow.',
   '- When capability_status shows an MCP source as ready, use it: inspect with mcp_list_tools, fetch one-tool schema with mcp_describe_tool when needed, call approved immediate actions with mcp_call_tool, and use async_mcp_call for long-running or parallel MCP work instead of requesting the same access again or using command/browser fallback.',
@@ -208,7 +209,6 @@ const FULL_TOOL_ACCESS_GUIDANCE = [
   '- When access is approved, tell the user the plain result: requested, approved, installed, available now, needs setup, blocked by policy, or paused. Do not quote raw tool ids, MCP tool ids, task ids, or status blocks unless the user asks for technical details.',
   '- Use admin_permission_list (read-only) to review current permissions, suggest cleanup of unused or overly broad access, or spot missing access; report findings in plain language.',
 ];
-
 const OPERATING_GUIDANCE_COMMUNICATION = [
   '',
   '## Communication',
@@ -680,7 +680,7 @@ export function defaultAgentsPromptMarkdown(
           // No scheduler line: scheduler_* tools are not mounted for locked
           // agents, so the default profile must not describe them.
           'How you get things done:',
-          '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation; for multi-step work, use todo_update instead of repeated generic progress messages; use ask_user_question for genuine either/or decisions the user must make.',
+          '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation; for multi-step work, use todo_update instead of repeated generic progress messages; use render_* rich UI tools for structured status, facts, lists, tables, forms, media, or progress; use ask_user_question for genuine either/or decisions the user must make. There is no generic Workflow tool.',
           '- Work only with the tools and knowledge currently available in this session.',
           '',
           'When something blocks you:',
@@ -690,7 +690,7 @@ export function defaultAgentsPromptMarkdown(
         ]
       : [
           'How you get things done:',
-          '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation; for multi-step work, use todo_update instead of repeated generic progress messages; use ask_user_question for genuine either/or decisions the user must make.',
+          '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation; for multi-step work, use todo_update instead of repeated generic progress messages; use render_* rich UI tools for structured status, facts, lists, tables, forms, media, or progress; use ask_user_question for genuine either/or decisions the user must make. There is no generic Workflow tool.',
           '- Request reviewed access with request_access (target.kind=capability for durable access, target.kind=tool for exact Gantry tools such as AgentDelegation, target.kind=run_command with temporaryOnly for a scoped one-off command).',
           '- Add capabilities with request_skill_install, request_skill_proposal, request_skill_dependency_install, or request_mcp_server; bind and restart with register_agent and service_restart.',
           '- Manage recurring work with the scheduler_* tools (for example scheduler_upsert_job, scheduler_run_now, scheduler_list_jobs).',

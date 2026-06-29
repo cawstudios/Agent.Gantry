@@ -7,7 +7,7 @@ const TELEGRAM_ACTION_CALLBACK_BY_KIND: Record<
   scheduler_run_now: 'retry',
   scheduler_pause_job: 'pause',
   scheduler_open: 'open',
-  live_turn_stop: 'stop',
+  live_turn_stop: '',
 };
 const TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64;
 
@@ -34,14 +34,9 @@ export function telegramActionReplyMarkup(actions?: MessageActionAffordance[]):
   | undefined {
   const buttons = (actions ?? [])
     .map((action) => {
+      if (action.kind === 'live_turn_stop') return null;
       const code = TELEGRAM_ACTION_CALLBACK_BY_KIND[action.kind];
       if (!code || !action.label.trim()) return null;
-      if (action.kind === 'live_turn_stop') {
-        return {
-          text: action.label.trim(),
-          callback_data: `lt:stop:${action.actionToken}`,
-        };
-      }
       const callbackData = telegramSchedulerActionCallback(action);
       if (!callbackData) return null;
       return {

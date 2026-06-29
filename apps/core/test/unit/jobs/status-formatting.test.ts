@@ -30,7 +30,7 @@ describe('job status formatting', () => {
       runId: 'cb7f3c0a-c8f8-40eb-82f0-3b21d2cfc342',
       runShortId: 3,
       runStatus: 'completed',
-      summary: 'Memory dreaming completed: 3 promoted, 4 sent to review.',
+      summary: 'Memory dreaming needs attention: 4 sent to review.',
       nextRun: '2026-05-20T21:45:00.000Z',
       retryCount: 0,
       durationMs: 311_000,
@@ -39,7 +39,7 @@ describe('job status formatting', () => {
     expect(message).toContain('**📝 Needs memory review**');
     expect(message).toContain('· Memory Dreaming');
     expect(message).toContain(
-      'Completed: Memory dreaming completed: 3 promoted, 4 sent to review.',
+      'Completed: Memory dreaming needs attention: 4 sent to review.',
     );
     expect(message).toContain('Used: none reported');
     expect(message).toContain('Changed: none');

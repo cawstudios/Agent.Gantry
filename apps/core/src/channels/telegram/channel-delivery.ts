@@ -333,9 +333,10 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
       : undefined;
     const key = `progress:${this.buildDraftStreamKey(jid, options.threadId)}`;
     this.loadPersistedProgressMessages();
-    const actionOnly = Boolean(
-      options.actionOnly && options.actionAffordances?.length,
-    );
+    const hasActionMarkup = options.actionAffordances
+      ? Boolean(telegramActionReplyMarkup(options.actionAffordances))
+      : false;
+    const actionOnly = Boolean(options.actionOnly && hasActionMarkup);
     const nextText = actionOnly ? String.fromCharCode(8288) : text.trim();
     if (options.done) {
       this.markProgressGenerationDone(key, options.generation);
@@ -356,6 +357,20 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
     });
     if (!prepared.accepted) return;
     const existing = prepared.existing;
+    if (options.done && nextText === 'Done.') {
+      if (existing?.messageId) {
+        await clearProgressActions({
+          api: this.bot.api,
+          chatId: numericId,
+          messageId: existing.messageId,
+          text: existing.lastText,
+          editReplyMarkup: { reply_markup: { inline_keyboard: [] } },
+        }).catch(() => undefined);
+      }
+      this.activeProgressMessages.delete(key);
+      this.persistProgressMessages();
+      return;
+    }
     if (!nextText) {
       if (options.done) {
         this.activeProgressMessages.delete(key);

@@ -249,7 +249,8 @@ describe('PromptProfileService', () => {
     expect(prompt).toContain('scheduler_upsert_job');
     expect(prompt).toContain('request_skill_proposal');
     expect(prompt).toContain('request_access target.kind=capability');
-    expect(prompt).toContain('Credential Center');
+    expect(prompt).toContain('render_status, render_facts');
+    expect(prompt).toContain('There is no generic Workflow tool');
     expect(prompt).toContain('admin_permission_list');
     expect(prompt).toContain(
       'first send one short natural acknowledgement with send_message',

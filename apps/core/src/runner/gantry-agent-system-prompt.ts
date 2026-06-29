@@ -42,6 +42,7 @@ const TOOL_STATES = [
 
 const PUBLIC_CATALOG = [
   'Communication: send_message, ask_user_question',
+  'Rich UI: render_status, render_facts, render_list, render_table, render_form, render_media, render_progress',
   'Web: WebSearch, WebRead, Browser',
   'Files: FileSearch, FileRead, FileEdit, FileWrite, file',
   'Memory: memory_search, memory_save, reviewed memory tools',
@@ -200,6 +201,8 @@ function gantryControlSection(): string {
     '## Gantry Control',
     'For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation.',
     'For multi-step work, then use todo_update to show a short visible plan and update item status as work moves pending -> inProgress -> completed.',
+    'Use render_* rich UI tools for structured status, facts, lists, tables, forms, media, or progress that should render natively; keep send_message for plain narrative.',
+    'There is no generic Workflow tool; do not mention or search for one.',
     'Avoid repeated generic progress chatter; keep progress in todo_update unless there is a concrete blocker, decision, or result to share.',
     'Use ask_user_question for decision-blocking questions.',
     'If Gantry mounts async_run_command or async_mcp_call, use it for approved long-running work. If Gantry mounts delegate_task, use task_get/task_list/task_message/task_cancel to inspect, steer, and cancel delegated work.',

@@ -206,7 +206,7 @@ describe('jobs/execution-notifications', () => {
       runId: 'run-1',
       runShortId: 7,
       runStatus: 'completed',
-      summary: 'Memory dreaming completed: 3 promoted, 4 sent to review.',
+      summary: 'Memory dreaming needs attention: 4 sent to review.',
       nextRun: '2026-05-15T21:45:00.000Z',
       retryCount: 0,
       pauseReason: null,
@@ -227,7 +227,7 @@ describe('jobs/execution-notifications', () => {
     );
     const message = String(sendMessage.mock.calls[0]?.[1]);
     expect(message).toContain(
-      'Memory dreaming completed: 3 promoted, 4 sent to review.',
+      'Memory dreaming needs attention: 4 sent to review.',
     );
     expect(message).toContain(
       'Needs attention: 4 memory changes need your review.',
@@ -245,7 +245,7 @@ describe('jobs/execution-notifications', () => {
       runShortId: 8,
       runStatus: 'completed',
       summary:
-        'Memory dreaming completed with no memory changes. 7 pending memory reviews need review.',
+        'Memory dreaming needs attention: 7 pending memory reviews need review.',
       nextRun: null,
       retryCount: 0,
       pauseReason: null,
@@ -268,7 +268,7 @@ describe('jobs/execution-notifications', () => {
       updateLifecycleNotification.mock.calls[0]?.[0].summaryMessage,
     );
     expect(summaryMessage).toContain(
-      'Memory dreaming completed with no memory changes. 7 pending memory reviews need review.',
+      'Memory dreaming needs attention: 7 pending memory reviews need review.',
     );
     expect(summaryMessage).toContain(
       'Needs attention: 7 memory changes need your review.',

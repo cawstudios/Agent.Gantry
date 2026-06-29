@@ -10,9 +10,9 @@ import {
   RICH_INTERACTION_REQUIRED_FIELDS_COPY,
   RICH_INTERACTION_SUBMIT_LABEL,
   RICH_INTERACTION_SUBMITTED_BY_COPY,
+  richArrayItems,
   richFallbackText,
   richSlackEscape,
-  richTextLines,
   richTruncate,
 } from '../rich-interaction.js';
 
@@ -20,7 +20,6 @@ export function buildSlackRichInteractionBlocks(
   input: RichInteractionRequest,
 ): Array<Record<string, unknown>> {
   const item = richDescriptor(input);
-  const richLines = richTextLines(input);
   const blocks: Array<Record<string, unknown>> = [
     {
       type: 'header',
@@ -31,22 +30,7 @@ export function buildSlackRichInteractionBlocks(
       },
     },
   ];
-  const body = richLines.slice(1).join('\n');
-  if (body) {
-    blocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: richTruncate(richSlackEscape(body), 2900) },
-    });
-  }
-  if (item.details?.length) {
-    blocks.push({
-      type: 'section',
-      fields: item.details.slice(0, 10).map((detail) => ({
-        type: 'mrkdwn',
-        text: `*${richSlackEscape(detail.label)}*\n${richSlackEscape(detail.value)}`,
-      })),
-    });
-  }
+  blocks.push(...slackRichPayloadBlocks(input));
   if (item.actions?.length) {
     blocks.push({
       type: 'actions',
@@ -98,6 +82,295 @@ export function buildSlackRichInteractionBlocks(
     );
   }
   return blocks;
+}
+
+function slackRichPayloadBlocks(
+  input: RichInteractionRequest,
+): Array<Record<string, unknown>> {
+  const item = richDescriptor(input);
+  const payload = item.rich?.payload ?? {};
+  const bodyBlocks = item.body
+    ? [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: richTruncate(richSlackEscape(item.body), 2900),
+          },
+        },
+      ]
+    : [];
+  switch (item.rich?.kind) {
+    case 'status':
+      return [
+        ...bodyBlocks,
+        slackStatusBlock(payload.status ?? payload.state, payload.body),
+      ];
+    case 'facts':
+      return [
+        ...bodyBlocks,
+        ...fieldSections(
+          richArrayItems(payload.facts).map((fact) => ({
+            label: scalarText(fact.label) || 'Fact',
+            value: scalarText(fact.value) || '-',
+          })),
+        ),
+        ...detailFieldSections(input),
+      ];
+    case 'list':
+      return [
+        ...bodyBlocks,
+        slackListBlock(richArrayItems(payload.items), payload.ordered === true),
+      ];
+    case 'table':
+      return [...bodyBlocks, slackTableBlock(payload)];
+    case 'progress':
+      return [
+        ...bodyBlocks,
+        slackProgressBlock(
+          scalarText(payload.label),
+          typeof payload.value === 'number' ? payload.value : undefined,
+          payload.done === true,
+        ),
+      ];
+    case 'media':
+      return [
+        ...bodyBlocks,
+        slackSection(
+          richArrayItems(payload.items)
+            .slice(0, 10)
+            .map((mediaItem) => {
+              const label =
+                scalarText(mediaItem.caption) ||
+                scalarText(mediaItem.alt) ||
+                scalarText(mediaItem.mime_type) ||
+                'Media';
+              const url = scalarText(mediaItem.url);
+              return url
+                ? `• <${richSlackEscape(url)}|${richSlackEscape(label)}>`
+                : `• ${richSlackEscape(label)}`;
+            })
+            .join('\n'),
+          false,
+        ),
+      ];
+    case 'form':
+      return [
+        ...bodyBlocks,
+        slackSection(
+          richArrayItems(payload.fields)
+            .slice(0, 10)
+            .map((field) => {
+              const label = scalarText(field.label || field.id) || 'Field';
+              const type = scalarText(field.type) || 'text';
+              return `• *${richSlackEscape(label)}* (${richSlackEscape(type)})`;
+            })
+            .join('\n'),
+        ),
+      ];
+    default:
+      return [
+        ...bodyBlocks,
+        ...detailFieldSections(input),
+        ...(bodyBlocks.length || item.details?.length
+          ? []
+          : [slackSection(richFallbackText(input))]),
+      ];
+  }
+}
+
+function slackSection(text: string, escape = true): Record<string, unknown> {
+  return {
+    type: 'section',
+    text: {
+      type: 'mrkdwn',
+      text: richTruncate(
+        escape ? richSlackEscape(text || '-') : text || '-',
+        2900,
+      ),
+    },
+  };
+}
+
+function fieldSections(
+  fields: Array<{ label: string; value: string }>,
+): Array<Record<string, unknown>> {
+  const sections: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < fields.length; index += 10) {
+    const slice = fields.slice(index, index + 10);
+    if (!slice.length) continue;
+    sections.push({
+      type: 'section',
+      fields: slice.map((field) => ({
+        type: 'mrkdwn',
+        text: `*${richSlackEscape(field.label)}*\n${richSlackEscape(field.value)}`,
+      })),
+    });
+  }
+  return sections;
+}
+
+function detailFieldSections(
+  input: RichInteractionRequest,
+): Array<Record<string, unknown>> {
+  return fieldSections(
+    (richDescriptor(input).details ?? []).slice(0, 10).map((detail) => ({
+      label: detail.label,
+      value: detail.value,
+    })),
+  );
+}
+
+function scalarText(value: unknown): string {
+  return ['string', 'number', 'boolean'].includes(typeof value)
+    ? String(value)
+    : '';
+}
+
+function slackStatusBlock(
+  statusValue: unknown,
+  bodyValue: unknown,
+): Record<string, unknown> {
+  const status = scalarText(statusValue);
+  const body = scalarText(bodyValue);
+  const elements: Array<Record<string, unknown>> = [];
+  if (status) {
+    elements.push(
+      { type: 'emoji', name: slackStatusEmojiName(status) },
+      { type: 'text', text: ` ${status}`, style: { bold: true } },
+    );
+  }
+  if (body)
+    elements.push({ type: 'text', text: `${status ? '\n' : ''}${body}` });
+  return slackRichTextSectionBlock(elements);
+}
+
+function slackStatusEmojiName(status: string): string {
+  return status === 'success'
+    ? 'white_check_mark'
+    : status === 'warning'
+      ? 'warning'
+      : status === 'error'
+        ? 'x'
+        : 'information_source';
+}
+
+function slackListBlock(
+  items: Array<Record<string, unknown>>,
+  ordered: boolean,
+): Record<string, unknown> {
+  const elements = items.slice(0, 30).map(slackListItem).filter(Boolean);
+  if (!elements.length) return slackSection('-');
+  return {
+    type: 'rich_text',
+    elements: [
+      {
+        type: 'rich_text_list',
+        style: ordered ? 'ordered' : 'bullet',
+        elements,
+      },
+    ],
+  };
+}
+
+function slackListItem(
+  item: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const title = scalarText(item.text) || scalarText(item.title);
+  const detail = scalarText(item.detail) || scalarText(item.description);
+  if (!title && !detail) return undefined;
+  const elements: Array<Record<string, unknown>> = [];
+  if (title) {
+    elements.push({
+      type: 'text',
+      text: richTruncate(title, 300),
+      ...(detail ? { style: { bold: true } } : {}),
+    });
+  }
+  if (detail) {
+    elements.push({
+      type: 'text',
+      text: richTruncate(title ? ` - ${detail}` : detail, 500),
+    });
+  }
+  return { type: 'rich_text_section', elements };
+}
+
+function slackTableBlock(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const columns = richArrayItems(payload.columns).slice(0, 6);
+  const rows = richArrayItems(payload.rows).slice(0, 12);
+  const labels = columns
+    .map((column) => {
+      const key = scalarText(column.key);
+      return key ? { key, label: scalarText(column.label) || key } : undefined;
+    })
+    .filter((column): column is { key: string; label: string } =>
+      Boolean(column),
+    );
+  if (!labels.length || !rows.length) return slackSection('-');
+  return {
+    type: 'table',
+    column_settings: labels.map((column) => ({
+      is_wrapped: true,
+      ...(rows.every((row) => typeof row[column.key] === 'number')
+        ? { align: 'right' }
+        : {}),
+    })),
+    rows: [
+      labels.map((column) => slackRawTextCell(column.label)),
+      ...rows.map((row) =>
+        labels.map((column) => slackTableCell(row[column.key])),
+      ),
+    ],
+  };
+}
+
+function slackRawTextCell(value: string): Record<string, unknown> {
+  return { type: 'raw_text', text: richTruncate(value || '-', 300) };
+}
+
+function slackTableCell(value: unknown): Record<string, unknown> {
+  return slackRawTextCell(scalarText(value) || '-');
+}
+
+function slackProgressBlock(
+  label: string,
+  value: number | undefined,
+  done: boolean,
+): Record<string, unknown> {
+  const normalized = done ? 100 : Math.max(0, Math.min(100, value ?? 0));
+  const filled = Math.round(normalized / 10);
+  const empty = 10 - filled;
+  const elements: Array<Record<string, unknown>> = [];
+  if (label) elements.push({ type: 'text', text: `${label}\n` });
+  for (let index = 0; index < filled; index += 1) {
+    elements.push({ type: 'emoji', name: 'large_green_square' });
+  }
+  for (let index = 0; index < empty; index += 1) {
+    elements.push({ type: 'emoji', name: 'white_large_square' });
+  }
+  elements.push({
+    type: 'text',
+    text: ` ${normalized}%`,
+    style: { bold: true },
+  });
+  return slackRichTextSectionBlock(elements);
+}
+
+function slackRichTextSectionBlock(
+  elements: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    type: 'rich_text',
+    elements: [
+      {
+        type: 'rich_text_section',
+        elements: elements.length ? elements : [{ type: 'text', text: '-' }],
+      },
+    ],
+  };
 }
 
 export async function renderSlackRichInteraction(input: {

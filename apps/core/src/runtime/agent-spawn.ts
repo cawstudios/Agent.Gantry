@@ -778,7 +778,18 @@ export async function spawnAgent(
       await closeEgressGateway(egressGateway);
     }
     await hostCredentials.revoke?.();
-    preparedExecution.cleanup();
+    try {
+      preparedExecution.cleanup();
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          group: group.name,
+          executionProviderId: preparedExecution.providerId,
+        },
+        'Failed to clean prepared execution runtime',
+      );
+    }
     revokeIpcResponseSigningKey(
       ipcAuth.responseKeyId,
       group.folder,

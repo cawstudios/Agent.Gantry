@@ -3070,6 +3070,47 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.LINKEDIN_ACCESS_TOKEN).toBeUndefined();
   });
 
+  it('does not fail a completed run when prepared runtime cleanup fails', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    mockMaterializeClaudeRuntime.mockImplementation(async (input: any) => ({
+      claudeConfigDir: `${input.groupDir}/.llm-runtime/claude`,
+      protectedFilesystemDenyReadPaths: [
+        `${input.groupDir}/.llm-runtime/claude/settings.json`,
+        input.runtimeSettingsPath,
+      ],
+      protectedFilesystemDenyWritePaths: [
+        `${input.groupDir}/.llm-runtime/claude`,
+        input.runtimeSettingsPath,
+      ],
+      protectedFilesystemPaths: [
+        `${input.groupDir}/.llm-runtime/claude`,
+        input.runtimeSettingsPath,
+      ],
+      cleanup: vi.fn(() => {
+        throw new Error('cleanup failed');
+      }),
+    }));
+
+    const resultPromise = spawnTestAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done before cleanup',
+    });
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group: 'Test Group',
+        executionProviderId: 'anthropic:claude-agent-sdk',
+        err: expect.any(Error),
+      }),
+      'Failed to clean prepared execution runtime',
+    );
+  });
+
   it('filters authority and loader env from selected skill secrets', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     const resultPromise = spawnTestAgent(

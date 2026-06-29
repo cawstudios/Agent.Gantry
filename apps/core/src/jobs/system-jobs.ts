@@ -434,34 +434,20 @@ function formatMemoryDreamingOutcome(
       : 'Memory dreaming failed.';
     return appendPendingReviewNotice(base, pendingReviews);
   }
-  const promoted = numericSummaryValue(run.summary, 'promoted') ?? 0;
-  const updated = numericSummaryValue(run.summary, 'updated') ?? 0;
   const needsReview = numericSummaryValue(run.summary, 'needsReview') ?? 0;
   const pendingReviews =
     numericSummaryValue(run.summary, 'pendingReviews') ?? needsReview;
-  const skipped = numericSummaryValue(run.summary, 'skipped') ?? 0;
   const blocked = numericSummaryValue(run.summary, 'blocked') ?? 0;
-  const changes: string[] = [];
-  if (promoted > 0) changes.push(`${promoted} promoted`);
-  if (updated > 0) changes.push(`${updated} updated`);
-  if (needsReview > 0) changes.push(`${needsReview} sent to review`);
-  if (changes.length > 0) {
-    return appendPendingReviewNotice(
-      `Memory dreaming completed: ${changes.join(', ')}.`,
-      pendingReviews,
-      needsReview,
-    );
+  const issues: string[] = [];
+  if (needsReview > 0) issues.push(`${needsReview} sent to review`);
+  if (pendingReviews > needsReview) {
+    issues.push(pendingMemoryReviewNotice(pendingReviews));
   }
-  if (skipped > 0 || blocked > 0) {
-    return appendPendingReviewNotice(
-      `Memory dreaming completed with no memory changes; ${skipped} skipped, ${blocked} blocked.`,
-      pendingReviews,
-    );
+  if (blocked > 0) issues.push(`${blocked} blocked`);
+  if (issues.length > 0) {
+    return `Memory dreaming needs attention: ${issues.join(', ')}.`;
   }
-  return appendPendingReviewNotice(
-    'Memory dreaming completed with no memory changes.',
-    pendingReviews,
-  );
+  return 'Memory dreaming completed.';
 }
 
 function appendPendingReviewNotice(

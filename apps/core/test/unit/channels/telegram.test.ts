@@ -406,12 +406,10 @@ describe('TelegramChannel', () => {
       expect.stringContaining('⏳ Searching the web · 2m 14s'),
       expect.objectContaining({
         message_thread_id: 42,
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: 'Stop', callback_data: 'lt:stop:stop-token-1' }],
-          ],
-        },
       }),
+    );
+    expect(currentBot().api.sendMessage.mock.calls[0]?.[2]).not.toHaveProperty(
+      'reply_markup',
     );
     expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
       2,
@@ -1731,7 +1729,7 @@ describe('TelegramChannel', () => {
       });
     });
 
-    it('routes Telegram live stop action buttons through the message action callback', async () => {
+    it('omits Telegram live stop action buttons but still routes stale callbacks', async () => {
       const opts = createTestOpts({ onMessageAction: vi.fn() } as any);
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1745,13 +1743,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         'Working\\.\\.\\.',
-        expect.objectContaining({
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: 'Stop', callback_data: 'lt:stop:token-1' }],
-            ],
-          },
-        }),
+        expect.not.objectContaining({ reply_markup: expect.anything() }),
       );
 
       const callbackCtx = {
@@ -2422,29 +2414,25 @@ describe('TelegramChannel', () => {
         'Working on it...',
         expect.objectContaining({
           parse_mode: 'MarkdownV2',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: 'Stop', callback_data: 'lt:stop:token-1' }],
-            ],
-          },
         }),
       );
+      expect(
+        currentBot().api.sendMessage.mock.calls[0]?.[2],
+      ).not.toHaveProperty('reply_markup');
       expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
         '-1001234567890',
         987,
         'Still working (1m 00s)...',
         expect.objectContaining({
           parse_mode: 'MarkdownV2',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: 'Stop', callback_data: 'lt:stop:token-1' }],
-            ],
-          },
         }),
       );
+      expect(
+        currentBot().api.editMessageText.mock.calls[0]?.[3],
+      ).not.toHaveProperty('reply_markup');
     });
 
-    it('sends action-only progress with a Stop button and no status copy', async () => {
+    it('drops action-only progress when Telegram has no renderable actions', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -2460,18 +2448,39 @@ describe('TelegramChannel', () => {
         ],
       });
 
+      expect(currentBot().api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('suppresses terminal Done progress without posting a Done message', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendProgressUpdate('tg:100200300', 'Working on it...');
+      await channel.sendProgressUpdate('tg:100200300', 'Done.', {
+        done: true,
+      });
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(1);
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
-        '-1001234567890',
-        String.fromCharCode(8288),
+        '100200300',
+        'Working on it...',
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+      );
+      expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
+        '100200300',
+        987,
+        'Working on it...',
         expect.objectContaining({
           parse_mode: 'MarkdownV2',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: 'Stop', callback_data: 'lt:stop:token-1' }],
-            ],
-          },
+          reply_markup: { inline_keyboard: [] },
         }),
       );
+      expect(
+        currentBot().api.editMessageText.mock.calls.some(
+          (call) => call[2] === 'Done.',
+        ),
+      ).toBe(false);
     });
 
     it('clears progress state on done and starts a fresh message next run', async () => {
@@ -2565,6 +2574,39 @@ describe('TelegramChannel', () => {
           987,
           'Done again.',
           expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+        );
+      } finally {
+        if (savedHome === undefined) delete process.env.GANTRY_HOME;
+        else process.env.GANTRY_HOME = savedHome;
+        fs.rmSync(runtimeHome, { recursive: true, force: true });
+      }
+    });
+
+    it('clears restored Telegram progress buttons on connect', async () => {
+      const runtimeHome = fs.mkdtempSync('/tmp/gantry-tg-progress-');
+      const savedHome = process.env.GANTRY_HOME;
+      process.env.GANTRY_HOME = runtimeHome;
+      try {
+        const first = new TelegramChannel('test-token', createTestOpts());
+        await first.connect();
+        await first.sendProgressUpdate('tg:100200300', 'Still working...', {
+          generation: 4,
+          actionAffordances: [
+            { kind: 'live_turn_stop', label: 'Stop', actionToken: 'token-1' },
+          ],
+        });
+
+        const second = new TelegramChannel('test-token', createTestOpts());
+        await second.connect();
+
+        expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
+          '100200300',
+          987,
+          'Still working...',
+          expect.objectContaining({
+            parse_mode: 'MarkdownV2',
+            reply_markup: { inline_keyboard: [] },
+          }),
         );
       } finally {
         if (savedHome === undefined) delete process.env.GANTRY_HOME;

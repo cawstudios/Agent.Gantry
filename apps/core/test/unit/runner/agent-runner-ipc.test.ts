@@ -772,6 +772,62 @@ export async function* query({ prompt, options }) {
   }
 
   appendRecord(call);
+  if (process.env.TEST_STRUCTURED_THEN_STREAM_SUCCESS_RESULT === '1') {
+    const finalAnswer =
+      '**Claude Tag** is Anthropic product detail text that was already streamed to the user before the SDK result arrived. ' +
+      'It is long enough to avoid being confused with a short operational error.';
+    yield {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: "I'll search for that." }] },
+    };
+    yield {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: finalAnswer },
+      },
+    };
+    yield {
+      type: 'result',
+      subtype: 'success',
+      result: finalAnswer,
+    };
+    if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
+      setTimeout(() => {
+        fs.mkdirSync(process.env.GANTRY_IPC_INPUT_DIR, { recursive: true });
+        fs.writeFileSync(path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'), '');
+      }, 20);
+    }
+    return;
+  }
+  if (process.env.TEST_STRUCTURED_THEN_STREAM_CREDENTIAL_RESULT === '1') {
+    const finalAnswer =
+      'The provider returned invalid api key text after visible output was already streamed. ' +
+      'This must still be treated as a runtime failure.';
+    yield {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: "I'll check that." }] },
+    };
+    yield {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: finalAnswer },
+      },
+    };
+    yield {
+      type: 'result',
+      subtype: 'success',
+      result: finalAnswer,
+    };
+    if (process.env.TEST_EXIT_AFTER_QUERY === '1') {
+      setTimeout(() => {
+        fs.mkdirSync(process.env.GANTRY_IPC_INPUT_DIR, { recursive: true });
+        fs.writeFileSync(path.join(process.env.GANTRY_IPC_INPUT_DIR, '_close'), '');
+      }, 20);
+    }
+    return;
+  }
   if (process.env.TEST_COMPACT_BOUNDARY === '1') {
     yield { type: 'system', subtype: 'compact_boundary', uuid: 'compact-1' };
   }
@@ -2030,6 +2086,65 @@ describe('agent-runner IPC lifecycle', () => {
         GANTRY_APP_ID: 'app-runner-test',
         GANTRY_AGENT_ID: 'agent:team',
       });
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'separates structured acknowledgements from streamed answers',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(
+        fixture,
+        baseInput(),
+        {
+          TEST_STRUCTURED_THEN_STREAM_SUCCESS_RESULT: '1',
+          TEST_EXIT_AFTER_QUERY: '1',
+        },
+        RUNNER_IPC_TEST_TIMEOUT_MS,
+      );
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const outputs = readRunnerOutputs(result.stdout);
+      expect(outputs).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ status: 'error' })]),
+      );
+      const visibleResults = outputs
+        .map((output) => output.result)
+        .filter((value): value is string => typeof value === 'string');
+      expect(visibleResults).toEqual([
+        "I'll search for that.",
+        expect.stringMatching(/^\n\n\*\*Claude Tag\*\*/),
+      ]);
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'keeps streamed credential result text as a terminal failure',
+    async () => {
+      const fixture = createRunnerFixture();
+
+      const result = await runRunner(
+        fixture,
+        baseInput(),
+        {
+          TEST_STRUCTURED_THEN_STREAM_CREDENTIAL_RESULT: '1',
+          TEST_EXIT_AFTER_QUERY: '1',
+        },
+        RUNNER_IPC_TEST_TIMEOUT_MS,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(readRunnerOutputs(result.stdout)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            status: 'error',
+            error: expect.stringContaining('invalid api key'),
+          }),
+        ]),
+      );
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

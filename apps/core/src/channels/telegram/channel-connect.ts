@@ -23,10 +23,30 @@ import {
   registerTelegramBotCommands,
 } from './bot-setup.js';
 import { registerTelegramMediaHandlers } from './media-ingestion.js';
+import { clearProgressActions } from './progress-message-actions.js';
 
 const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
 
 export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
+  private async clearRestoredProgressActions(): Promise<void> {
+    this.loadPersistedProgressMessages();
+    for (const [key, state] of this.activeProgressMessages.entries()) {
+      if (!state.restored || !state.messageId) continue;
+      await clearProgressActions({
+        api: this.bot!.api,
+        chatId: state.chatId,
+        messageId: state.messageId,
+        text: state.lastText,
+        editReplyMarkup: { reply_markup: { inline_keyboard: [] } },
+      }).catch((err) =>
+        logger.debug(
+          { key, err: this.sanitizeErrorMessage(err) },
+          'Failed to clear restored Telegram progress actions',
+        ),
+      );
+    }
+  }
+
   async connect(
     options: { inbound?: boolean; interactionCallbacks?: boolean } = {},
   ): Promise<void> {
@@ -644,6 +664,7 @@ export abstract class TelegramChannelConnect extends TelegramChannelPrompts {
       );
     });
 
+    await this.clearRestoredProgressActions();
     this.startPolling();
   }
 }

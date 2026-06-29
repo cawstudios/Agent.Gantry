@@ -180,7 +180,7 @@ describe('system memory dreaming jobs', () => {
     expect(triggerDreaming.mock.calls[0]?.[0].timeoutMs).toBeGreaterThan(
       200_000,
     );
-    expect(result).toBe('Memory dreaming completed with no memory changes.');
+    expect(result).toBe('Memory dreaming completed.');
   });
 
   it('propagates scheduler deadlines through the maintenance queue and dreaming service', async () => {
@@ -221,7 +221,7 @@ describe('system memory dreaming jobs', () => {
     );
   });
 
-  it('returns a user-facing dreaming outcome summary', async () => {
+  it('reports only actionable memory dreaming issues', async () => {
     const triggerDreaming = vi.fn().mockResolvedValue({
       runId: 'dream-1',
       status: 'completed',
@@ -250,8 +250,40 @@ describe('system memory dreaming jobs', () => {
     });
 
     expect(result).toBe(
-      'Memory dreaming completed: 2 promoted, 1 updated, 3 sent to review.',
+      'Memory dreaming needs attention: 3 sent to review, 5 blocked.',
     );
+  });
+
+  it('does not include memory change counts when no action is needed', async () => {
+    const triggerDreaming = vi.fn().mockResolvedValue({
+      runId: 'dream-1',
+      status: 'completed',
+      summary: {
+        promoted: 2,
+        updated: 1,
+        needsReview: 0,
+        pendingReviews: 0,
+        skipped: 4,
+        blocked: 0,
+      },
+    });
+    const { _setMemoryMaintenanceQueueForTests, handleSystemJob } =
+      await loadSystemJobs(triggerDreaming);
+    _setMemoryMaintenanceQueueForTests({
+      enqueueAndWait: vi.fn(async (_group, task) => {
+        await task();
+        return { queued: true, deduped: false, reason: 'queued' };
+      }),
+      getPendingCount: vi.fn(() => 0),
+    });
+
+    const result = await handleSystemJob(makeJob(), {
+      folder: 'agent-a',
+      conversationId: 'sl:C123',
+      conversationKind: 'channel',
+    });
+
+    expect(result).toBe('Memory dreaming completed.');
   });
 
   it('surfaces existing pending memory reviews even when the run has no new changes', async () => {
@@ -284,7 +316,7 @@ describe('system memory dreaming jobs', () => {
     });
 
     expect(result).toBe(
-      'Memory dreaming completed with no memory changes. 7 pending memory reviews need review.',
+      'Memory dreaming needs attention: 7 pending memory reviews need review.',
     );
   });
 
