@@ -14,9 +14,11 @@ import {
 import { readEnvFile } from '@core/config/env/file.js';
 import { envFilePath } from '@core/config/settings/runtime-home.js';
 import {
+  configureDesiredSettingsStorageProvider,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@core/config/settings/runtime-settings.js';
+import { settingsToRevisionDocument } from '@core/config/settings/settings-import-service.js';
 import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
 
 const groupsStore = vi.hoisted(() => new Map<string, any>());
@@ -116,6 +118,7 @@ vi.mock('@core/cli/runtime-group-db.js', () => ({
 const runtimeHomes: string[] = [];
 
 afterEach(() => {
+  configureDesiredSettingsStorageProvider(undefined);
   vi.restoreAllMocks();
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -138,6 +141,68 @@ function mockRuntimeSecretStorage(runtimeHome: string) {
     storeRuntimeSecretInput,
   }));
   return storeRuntimeSecretInput;
+}
+
+function configureStaleDesiredSettingsStorage(
+  runtimeHome: string,
+  options: {
+    configureProvider?: typeof configureDesiredSettingsStorageProvider;
+    loadSettings?: typeof loadRuntimeSettings;
+  } = {},
+) {
+  const configureProvider =
+    options.configureProvider ?? configureDesiredSettingsStorageProvider;
+  const loadSettings = options.loadSettings ?? loadRuntimeSettings;
+  vi.stubEnv('GANTRY_DATABASE_URL', 'postgres://localhost/gantry');
+  vi.stubEnv('SECRET_ENCRYPTION_KEY', strongEncryptionKey);
+  vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-valid-token');
+  vi.stubEnv('SLACK_APP_TOKEN', 'xapp-valid-token');
+  let revisionReadCount = 0;
+  configureProvider(async () => ({
+    ops: {
+      getAllConversationRoutes: async () => ({}),
+      setConversationRoute: async (jid: string, group: any) => {
+        groupsStore.set(jid, group);
+      },
+    } as never,
+    repositories: {
+      tools: {
+        listTools: async () => [],
+        getTool: async () => null,
+        saveTool: async () => undefined,
+      },
+      mcpServers: {
+        getServer: async () => null,
+      },
+      skills: {
+        getSkillById: async () => null,
+        listSkills: async () => [],
+      },
+    } as never,
+    settingsRevisions: {
+      getLatestSettingsRevision: vi.fn(async () => {
+        revisionReadCount += 1;
+        return {
+          id: `settings-revision:${revisionReadCount}`,
+          appId: 'default',
+          revision: revisionReadCount,
+          settingsDocument:
+            revisionReadCount === 1
+              ? settingsToRevisionDocument(loadSettings(runtimeHome))
+              : settingsToRevisionDocument({
+                  ...loadSettings(runtimeHome),
+                  agent: {
+                    ...loadSettings(runtimeHome).agent,
+                    name: 'Changed Elsewhere',
+                  },
+                }),
+          createdAt: new Date(0).toISOString(),
+          createdBy: 'test',
+        };
+      }),
+    } as never,
+    close: async () => undefined,
+  }));
 }
 
 describe('cli slack helpers', () => {
@@ -632,6 +697,91 @@ describe('cli slack helpers', () => {
     );
   });
 
+  it('does not publish a Slack route when provider connect hits a stale desired settings write', async () => {
+    vi.resetModules();
+    const runtimeHome = makeRuntimeHome();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            team: 'My Workspace',
+            team_id: 'T123',
+            user_id: 'U123',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            url: 'wss://example.slack.test/socket',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            channel: { id: 'C0123456789', name: 'ops-room' },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.doMock('@clack/prompts', () => ({
+      isCancel: () => false,
+      note: vi.fn(),
+      password: vi
+        .fn()
+        .mockResolvedValueOnce('xoxb-valid-token')
+        .mockResolvedValueOnce('xapp-valid-token'),
+      select: vi.fn(async () => 'gantry'),
+      text: vi.fn().mockResolvedValueOnce('U123'),
+      outro: vi.fn(),
+      log: {
+        success: vi.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+      },
+    }));
+    vi.doMock('@core/cli/slack-connect-chat-picker.js', () => ({
+      chooseSlackChatForConnect: vi.fn(async () => ({
+        type: 'selected',
+        chatJid: 'sl:C0123456789',
+      })),
+    }));
+    mockRuntimeSecretStorage(runtimeHome);
+    const runtimeSettings =
+      await import('@core/config/settings/runtime-settings.js');
+    configureStaleDesiredSettingsStorage(runtimeHome, {
+      configureProvider:
+        runtimeSettings.configureDesiredSettingsStorageProvider,
+      loadSettings: runtimeSettings.loadRuntimeSettings,
+    });
+
+    const { runSlackConnectCommand } = await import('@core/cli/slack.js');
+    await expect(runSlackConnectCommand(runtimeHome)).rejects.toThrow(
+      'Settings mutation is based on stale settings; reload latest desired state and retry.',
+    );
+
+    expect(groupsStore.has('sl:C0123456789')).toBe(false);
+    const settings = runtimeSettings.loadRuntimeSettings(runtimeHome);
+    expect(settings.conversations.slack_default_c0123456789).toBeUndefined();
+  });
+
   it('seeds AGENTS.md and SOUL.md FileArtifacts when registering the main group', async () => {
     const runtimeHome = makeRuntimeHome();
 
@@ -731,6 +881,79 @@ describe('cli slack helpers', () => {
         externalId: 'C0123456789',
         controlApprovers: ['U123'],
         senderPolicy: { allow: '*', mode: 'trigger' },
+      }),
+    );
+  });
+
+  it('does not publish a Slack route when the desired settings write is stale', async () => {
+    const runtimeHome = makeRuntimeHome();
+    configureStaleDesiredSettingsStorage(runtimeHome);
+
+    await expect(
+      registerSlackMainGroup({
+        runtimeHome,
+        chatJid: 'sl:C0123456789',
+        displayName: 'Kai Slack',
+        conversationDisplayName: 'recruiting-demo',
+        approverIds: ['U123'],
+      }),
+    ).rejects.toThrow(
+      'Settings mutation is based on stale settings; reload latest desired state and retry.',
+    );
+
+    expect(groupsStore.has('sl:C0123456789')).toBe(false);
+    const settings = loadRuntimeSettings(runtimeHome);
+    expect(settings.conversations.slack_default_c0123456789).toBeUndefined();
+  });
+
+  it('keeps desired Slack binding authority over stale live route projection', async () => {
+    const runtimeHome = makeRuntimeHome();
+
+    const firstRegistration = await registerSlackMainGroup({
+      runtimeHome,
+      chatJid: 'sl:C0123456789',
+      displayName: 'Kai Slack',
+      conversationDisplayName: 'recruiting-demo',
+      approverIds: ['U123'],
+    });
+    expect(firstRegistration.folder).toBe('main_agent');
+
+    groupsStore.set('sl:C0123456789', {
+      name: 'Stale Agent',
+      folder: 'main_agent_2',
+      trigger: '@stale',
+      added_at: '2026-01-01T00:00:00.000Z',
+      requiresTrigger: false,
+    });
+
+    const secondRegistration = await registerSlackMainGroup({
+      runtimeHome,
+      chatJid: 'sl:C0123456789',
+      displayName: 'Kai Slack',
+      conversationDisplayName: 'recruiting-demo',
+      approverIds: ['U123'],
+    });
+
+    expect(secondRegistration.folder).toBe('main_agent');
+    expect(groupsStore.get('sl:C0123456789')).toEqual(
+      expect.objectContaining({
+        name: 'Kai Slack',
+        folder: 'main_agent',
+        trigger: '@Kai Slack',
+        requiresTrigger: true,
+      }),
+    );
+    const settings = loadRuntimeSettings(runtimeHome);
+    expect(settings.agents.main_agent).toBeTruthy();
+    expect(settings.agents.main_agent_2).toBeUndefined();
+    const binding = Object.values(settings.bindings).find(
+      (candidate) => candidate.conversation === 'slack_default_c0123456789',
+    );
+    expect(binding).toEqual(
+      expect.objectContaining({
+        agent: 'main_agent',
+        trigger: '@Kai Slack',
+        requiresTrigger: true,
       }),
     );
   });

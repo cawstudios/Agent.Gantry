@@ -19,7 +19,8 @@ import {
 } from './main-agent.js';
 import {
   ensureConfiguredConversationBinding,
-  loadRuntimeSettings,
+  loadDesiredRuntimeSettingsForWrite,
+  type RuntimeSettings,
   writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import { chooseSlackChatForConnect } from './slack-connect-chat-picker.js';
@@ -30,6 +31,8 @@ import {
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
+import { configuredSlackRouteSeed } from './slack-registration.js';
+import type { ConversationRoute } from '../domain/types.js';
 
 export interface SlackTokenValidation {
   ok: boolean;
@@ -375,51 +378,92 @@ export async function registerSlackMainGroup(options: {
   const db = await openRuntimeGroupDb(options.runtimeHome);
   try {
     const existing = await db.getAllConversationRoutes();
-    const existingGroup = existing[options.chatJid];
-    const folder =
-      existingGroup?.folder ||
-      allocateDefaultAgentFolder(options.runtimeHome, existing);
-
-    const groupName = normalizeDefaultAgentName(options.displayName);
-
-    const route = {
-      name: groupName,
-      folder,
-      trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: existingGroup?.added_at || nowIso(),
-      requiresTrigger: true,
-      agentConfig: existingGroup?.agentConfig,
-    };
-    await db.setConversationRoute(options.chatJid, route);
-
-    const settings = loadRuntimeSettings(options.runtimeHome);
+    const settings = await loadDesiredRuntimeSettingsForWrite({
+      runtimeHome: options.runtimeHome,
+    });
     const previousSettings = structuredClone(settings);
-    ensureConfiguredConversationBinding(settings, {
-      agentId: folder,
-      agentName: groupName,
-      agentFolder: folder,
-      jid: options.chatJid,
-      displayName: options.conversationDisplayName || options.displayName,
-      trigger: route.trigger,
-      requiresTrigger: true,
+    const registration = prepareSlackMainGroupRegistration({
+      runtimeHome: options.runtimeHome,
+      settings,
+      existingRoutes: existing,
+      chatJid: options.chatJid,
+      displayName: options.displayName,
+      conversationDisplayName: options.conversationDisplayName,
       approverIds: options.approverIds,
     });
-    await writeDesiredRuntimeSettings({
+    const { reconciled } = await writeDesiredRuntimeSettings({
       runtimeHome: options.runtimeHome,
       settings,
       previousSettings,
     });
+    if (!reconciled) {
+      await db.setConversationRoute(options.chatJid, registration.route);
+    }
 
     await new PromptProfileService({
       fileArtifactStore: () => db.getFileArtifactStore(),
       mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),
       mirrorFileExists: createProfileFileMirrorExists(options.runtimeHome),
-    }).ensureAgentDefaults({ agentFolder: folder, agentName: groupName });
+    }).ensureAgentDefaults({
+      agentFolder: registration.folder,
+      agentName: registration.groupName,
+    });
 
-    return { folder, groupName };
+    return {
+      folder: registration.folder,
+      groupName: registration.groupName,
+    };
   } finally {
     await db.close();
   }
+}
+
+function prepareSlackMainGroupRegistration(input: {
+  runtimeHome: string;
+  settings: RuntimeSettings;
+  existingRoutes: Record<string, ConversationRoute>;
+  chatJid: string;
+  displayName: string;
+  conversationDisplayName?: string;
+  approverIds?: string[];
+}): {
+  folder: string;
+  groupName: string;
+  route: ConversationRoute;
+} {
+  const settingsSeed = configuredSlackRouteSeed(input.settings, input.chatJid);
+  const existingGroup = input.existingRoutes[input.chatJid];
+  const folder =
+    settingsSeed?.folder ||
+    existingGroup?.folder ||
+    allocateDefaultAgentFolder(input.runtimeHome, input.existingRoutes);
+  const groupName = normalizeDefaultAgentName(
+    settingsSeed?.groupName || input.displayName,
+  );
+  const route = {
+    name: groupName,
+    folder,
+    trigger:
+      settingsSeed?.trigger ||
+      existingGroup?.trigger ||
+      defaultTriggerForAgentName(groupName),
+    added_at: settingsSeed?.addedAt || existingGroup?.added_at || nowIso(),
+    requiresTrigger: true,
+    agentConfig: settingsSeed?.agentConfig || existingGroup?.agentConfig,
+  };
+
+  ensureConfiguredConversationBinding(input.settings, {
+    agentId: folder,
+    agentName: groupName,
+    agentFolder: folder,
+    jid: input.chatJid,
+    displayName: input.conversationDisplayName || input.displayName,
+    trigger: route.trigger,
+    requiresTrigger: true,
+    approverIds: input.approverIds,
+  });
+
+  return { folder, groupName, route };
 }
 
 async function promptForValue(options: {
@@ -542,75 +586,84 @@ export async function runSlackConnectCommand(
     return 1;
   }
   const approverIds = parseSlackApproverIds(approverInput || '');
-  let registeredFolder = '';
-  let conversationRouteName = '';
+  let registration:
+    | ReturnType<typeof prepareSlackMainGroupRegistration>
+    | undefined;
   let conversationDisplayName = '';
+  let db: Awaited<ReturnType<typeof openRuntimeGroupDb>> | undefined;
 
-  if (normalizedChatJid) {
-    const access = await verifySlackChatAccess({
-      botToken: botTokenInput,
-      chatJid: normalizedChatJid,
-      sendTestMessage: false,
-    });
-    if (!access.ok) {
-      p.log.error(access.message);
-      if (access.nextAction) p.log.info(access.nextAction);
-      return 1;
+  try {
+    if (normalizedChatJid) {
+      const access = await verifySlackChatAccess({
+        botToken: botTokenInput,
+        chatJid: normalizedChatJid,
+        sendTestMessage: false,
+      });
+      if (!access.ok) {
+        p.log.error(access.message);
+        if (access.nextAction) p.log.info(access.nextAction);
+        return 1;
+      }
+      conversationDisplayName = access.chatTitle || normalizedChatJid;
+      db = await openRuntimeGroupDb(runtimeHome);
     }
-    conversationDisplayName = access.chatTitle || normalizedChatJid;
 
-    const registered = await registerSlackMainGroup({
+    await Promise.all([botSecret.persist(), appSecret.persist()]);
+    const settings = await loadDesiredRuntimeSettingsForWrite({ runtimeHome });
+    const previousSettings = structuredClone(settings);
+    settings.providers.slack.enabled = true;
+    const providerConnectionId =
+      settings.providers.slack.defaultConnection || 'slack_default';
+    settings.providers.slack.defaultConnection = providerConnectionId;
+    settings.providerConnections[providerConnectionId] = {
+      provider: 'slack',
+      label:
+        settings.providerConnections[providerConnectionId]?.label ||
+        'Slack Default',
+      runtimeSecretRefs: {
+        ...(settings.providerConnections[providerConnectionId]
+          ?.runtimeSecretRefs || {}),
+        bot_token: botSecret.ref,
+        app_token: appSecret.ref,
+      },
+    };
+    if (normalizedChatJid && db) {
+      registration = prepareSlackMainGroupRegistration({
+        runtimeHome,
+        settings,
+        existingRoutes: await db.getAllConversationRoutes(),
+        chatJid: normalizedChatJid,
+        displayName: settings.agent.name,
+        conversationDisplayName,
+        approverIds,
+      });
+    }
+    const { reconciled } = await writeDesiredRuntimeSettings({
       runtimeHome,
-      chatJid: normalizedChatJid,
-      displayName: loadRuntimeSettings(runtimeHome).agent.name,
-      conversationDisplayName,
-      approverIds,
+      settings,
+      previousSettings,
     });
-    registeredFolder = registered.folder;
-    conversationRouteName = registered.groupName;
+    if (registration && db && !reconciled) {
+      await db.setConversationRoute(normalizedChatJid, registration.route);
+    }
 
-    p.log.success(
-      `Registered ${registered.groupName} for Slack conversation ${normalizedChatJid} in folder ${registered.folder}.`,
-    );
+    if (registration && db) {
+      const activeDb = db;
+      await new PromptProfileService({
+        fileArtifactStore: () => activeDb.getFileArtifactStore(),
+        mirrorProfileFile: createProfileFileMirrorWriter(runtimeHome),
+        mirrorFileExists: createProfileFileMirrorExists(runtimeHome),
+      }).ensureAgentDefaults({
+        agentFolder: registration.folder,
+        agentName: registration.groupName,
+      });
+      p.log.success(
+        `Registered ${registration.groupName} for Slack conversation ${normalizedChatJid} in folder ${registration.folder}.`,
+      );
+    }
+  } finally {
+    await db?.close();
   }
-
-  await Promise.all([botSecret.persist(), appSecret.persist()]);
-  const settings = loadRuntimeSettings(runtimeHome);
-  const previousSettings = structuredClone(settings);
-  settings.providers.slack.enabled = true;
-  const providerConnectionId =
-    settings.providers.slack.defaultConnection || 'slack_default';
-  settings.providers.slack.defaultConnection = providerConnectionId;
-  settings.providerConnections[providerConnectionId] = {
-    provider: 'slack',
-    label:
-      settings.providerConnections[providerConnectionId]?.label ||
-      'Slack Default',
-    runtimeSecretRefs: {
-      ...(settings.providerConnections[providerConnectionId]
-        ?.runtimeSecretRefs || {}),
-      bot_token: botSecret.ref,
-      app_token: appSecret.ref,
-    },
-  };
-  if (registeredFolder) {
-    ensureConfiguredConversationBinding(settings, {
-      agentId: registeredFolder,
-      agentName: conversationRouteName || settings.agent.name,
-      agentFolder: registeredFolder,
-      jid: normalizedChatJid,
-      displayName:
-        conversationDisplayName || conversationRouteName || settings.agent.name,
-      trigger: `@${conversationRouteName || settings.agent.name}`,
-      requiresTrigger: true,
-      approverIds,
-    });
-  }
-  await writeDesiredRuntimeSettings({
-    runtimeHome,
-    settings,
-    previousSettings,
-  });
 
   if (normalizedChatJid) {
     p.outro('Slack connected. Secret stored encrypted in Gantry.');
