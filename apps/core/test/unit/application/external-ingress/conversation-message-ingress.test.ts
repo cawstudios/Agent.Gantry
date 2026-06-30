@@ -131,6 +131,27 @@ describe('ConversationMessageIngressModule', () => {
     );
   });
 
+  it('returns not found and does not persist when no route resolves', async () => {
+    const { module, ops } = makeModule({
+      resolveRoute: () => null,
+    });
+
+    await expect(
+      module.acceptMessage({
+        appId: 'app-one',
+        invocationId: 'invocation-1',
+        conversationId: 'conversation:tg:-100',
+        message: 'Run this',
+        senderId: 'external-system',
+      }),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      message: 'Conversation is not configured for runtime routing',
+    });
+    expect(ops.storeChatMetadata).not.toHaveBeenCalled();
+    expect(ops.storeMessage).not.toHaveBeenCalled();
+  });
+
   it('adds a seen reaction when ingress provides a native message ref', async () => {
     const addReaction = vi.fn(async () => undefined);
     const { module, ops } = makeModule({

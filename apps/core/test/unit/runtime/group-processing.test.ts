@@ -5681,6 +5681,40 @@ describe('createGroupProcessor', () => {
       );
     });
 
+    it('thread-only /model and /thinking overrides update the resolved agent route', async () => {
+      const wholeRouteKey = 'sl:C123::agent:agent%3Atriage';
+      const threadedQueueKey = 'sl:C123::thread:1700.1';
+      const { capturedDeps, deps } = await captureSessionDeps({
+        queueJid: threadedQueueKey,
+        group: makeGroup({ folder: 'triage' }),
+        messages: [
+          makeMessage({
+            chat_jid: 'sl:C123',
+            content: '/model sonnet',
+            thread_id: '1700.1',
+          }),
+        ],
+        registeredJids: [wholeRouteKey],
+      });
+      const setGroupModelOverride = capturedDeps.setGroupModelOverride as (
+        v: string | undefined,
+      ) => Promise<void>;
+      const setGroupThinkingOverride =
+        capturedDeps.setGroupThinkingOverride as (v: unknown) => Promise<void>;
+
+      await setGroupModelOverride('sonnet');
+      await setGroupThinkingOverride({ mode: 'disabled' });
+
+      expect(deps.setGroupModelOverride).toHaveBeenCalledWith(
+        wholeRouteKey,
+        'sonnet',
+      );
+      expect(deps.setGroupThinkingOverride).toHaveBeenCalledWith(
+        wholeRouteKey,
+        { mode: 'disabled' },
+      );
+    });
+
     it('getGroupThinkingOverride returns the group agentConfig.thinking', async () => {
       const group = makeGroup({
         agentConfig: { thinking: { mode: 'enabled' } },

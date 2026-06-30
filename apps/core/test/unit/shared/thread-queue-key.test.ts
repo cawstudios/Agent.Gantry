@@ -38,6 +38,18 @@ describe('thread queue keys', () => {
     });
   });
 
+  it('ignores malformed or empty agent key suffixes', () => {
+    expect(parseAgentThreadQueueKey('sl:C123::agent:')).toEqual({
+      chatJid: 'sl:C123',
+    });
+    expect(parseAgentThreadQueueKey('sl:C123::agent:%20%20')).toEqual({
+      chatJid: 'sl:C123',
+    });
+    expect(parseAgentThreadQueueKey('sl:C123::agent:%E0%A4%A')).toEqual({
+      chatJid: 'sl:C123',
+    });
+  });
+
   it('finds bare and agent-qualified routes for a provider conversation', () => {
     const routes = {
       'sl:C123': { folder: 'main' },
@@ -166,6 +178,23 @@ describe('thread queue keys', () => {
       findConversationRouteForQueue(
         routes,
         makeAgentThreadQueueKey('sl:C123', 'agent:alpha'),
+        (route) => `agent:${route.folder}`,
+      ),
+    ).toBe(qualified);
+  });
+
+  it('resolves duplicate bare and agent-qualified aliases for unqualified queues', () => {
+    const legacy = { folder: 'alpha', name: 'legacy' };
+    const qualified = { folder: 'alpha', name: 'qualified' };
+    const routes = {
+      'sl:C123': legacy,
+      [makeAgentThreadQueueKey('sl:C123', 'agent:alpha')]: qualified,
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        'sl:C123',
         (route) => `agent:${route.folder}`,
       ),
     ).toBe(qualified);

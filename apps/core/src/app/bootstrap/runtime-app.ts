@@ -30,6 +30,7 @@ import {
   setGroupThinkingOverride as setGroupThinkingOverrideEntry,
 } from '../../runtime/group-registry.js';
 import { GroupQueue } from '../../runtime/group-queue.js';
+import { conversationRouteKeysForRemoval } from '../../runtime/conversation-route-removal.js';
 import {
   findConversationRouteForQueue,
   makeAgentThreadQueueKey,
@@ -441,15 +442,12 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   }
 
   async function unregisterConversationRoute(jid: string): Promise<void> {
-    const routeKey = Object.hasOwn(conversationRoutes, jid)
-      ? jid
-      : Object.keys(conversationRoutes).find(
-          (key) => parseAgentThreadQueueKey(key).chatJid === jid,
-        );
-    if (!routeKey) return;
-    delete conversationRoutes[routeKey];
-    queue.stopGroup(routeKey);
-    await ops().deleteConversationRoute(routeKey);
+    const routeKeys = conversationRouteKeysForRemoval(conversationRoutes, jid);
+    for (const routeKey of routeKeys) {
+      delete conversationRoutes[routeKey];
+      queue.stopGroup(routeKey);
+      await ops().deleteConversationRoute(routeKey);
+    }
   }
 
   async function setGroupModelOverride(

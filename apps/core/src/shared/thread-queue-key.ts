@@ -151,6 +151,18 @@ export function findConversationRouteForQueue<T>(
       matches[0]?.route
     );
   }
+  const routeIdentities = new Set(
+    matches.map(
+      (candidate) =>
+        `${candidate.routeAgentId}::${candidate.routeThreadId ?? ''}`,
+    ),
+  );
+  if (routeIdentities.size === 1) {
+    return (
+      matches.find((candidate) => candidate.routeKeyHasAgent)?.route ??
+      matches[0]?.route
+    );
+  }
   return matches.length === 1 ? matches[0]?.route : undefined;
 }
 

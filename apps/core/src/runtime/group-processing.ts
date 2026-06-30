@@ -19,14 +19,11 @@ import { getGroupMemoryStatus } from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { settleDeliveryAttempt } from '../jobs/delivery.js';
 import { resolveMemoryUserId } from './session-resume-runtime.js';
-import {
-  firstThreadQueueId,
-  makeAgentThreadQueueKey,
-  parseAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+import { firstThreadQueueId } from '../shared/thread-queue-key.js';
 import { formatElapsed } from './time-format.js';
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { getConfiguredModelProvidersForApp } from '../adapters/storage/postgres/runtime-store.js';
+import { resolveGroupProcessingRouteContext } from './command-override-route-key.js';
 import { memoryScopeForConversationKind } from './group-run-context.js';
 import { getGroupBrowserStatus } from './group-browser-status.js';
 import {
@@ -54,7 +51,6 @@ import {
   type GroupAgentRunResult,
 } from './group-agent-runner.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
-import { appIdFromConversationJid } from '../shared/app-conversation-jid.js';
 import {
   isModelAccessAuthFailure,
   sendModelAccessAuthFailureNotice,
@@ -64,8 +60,7 @@ import { collectPendingMessagesSince } from './pending-message-replay.js';
 import { buildGroupProcessingConversationContext } from './group-processing-context.js';
 import { createGroupOutputBuffer } from './group-output-buffer.js';
 let streamingGenerationCounter = 0;
-const DEFAULT_TURN_APP_ID = 'default',
-  PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
+const PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
 type ProgressHeartbeat = ReturnType<typeof startGroupProgressHeartbeats>;
 type ActiveTurnUiCleanup = {
   token: symbol;
@@ -105,15 +100,11 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     queueJid: string,
     options: GroupProcessOptions = {},
   ): Promise<boolean> {
-    const { chatJid, threadId, agentId } = parseAgentThreadQueueKey(queueJid);
-    const routeKey = makeAgentThreadQueueKey(chatJid, agentId, threadId);
-    const turnAppId = appIdFromConversationJid(chatJid) ?? DEFAULT_TURN_APP_ID;
-    const group = deps.getGroup(chatJid, threadId, agentId);
-    if (!group) return true;
-    const commandOverrideRouteKey =
-      threadId && agentId && !deps.getRegisteredJids().has(routeKey)
-        ? makeAgentThreadQueueKey(chatJid, agentId)
-        : routeKey;
+    const routeContext = resolveGroupProcessingRouteContext(deps, queueJid);
+    if (!routeContext) return true;
+    const { chatJid, threadId, agentId, routeKey, turnAppId, group } =
+      routeContext;
+    const { commandOverrideRouteKey } = routeContext;
     if (!deps.channelRuntime.hasChannel(chatJid)) {
       logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
       return true;

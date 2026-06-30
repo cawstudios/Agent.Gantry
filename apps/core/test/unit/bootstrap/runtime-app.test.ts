@@ -267,25 +267,34 @@ describe('runtime app credential binding', () => {
     expect(capturedDeps?.getGroup('sl:C123')).toBeUndefined();
   });
 
-  it('unregisters an exact bare route before agent-qualified fallbacks', async () => {
+  it('unregisters all routes for a bare provider conversation', async () => {
     const { createRuntimeApp } = await loadRuntimeApp();
     const deleteConversationRoute = vi.fn(async () => undefined);
     const app = createRuntimeApp({
       opsRepository: { deleteConversationRoute } as any,
     });
     const alpha = makeGroup({ folder: 'alpha' });
+    const beta = makeGroup({ folder: 'beta' });
     const defaultRoute = makeGroup({ folder: 'default' });
     const alphaKey = makeAgentThreadQueueKey('sl:C123', 'agent:alpha');
+    const betaThreadKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:beta',
+      'T1',
+    );
 
     app.setConversationRoutesForTest({
       [alphaKey]: alpha,
+      [betaThreadKey]: beta,
       'sl:C123': defaultRoute,
     });
 
     await app.unregisterConversationRoute('sl:C123');
 
-    expect(app.getConversationRoutes()).toEqual({ [alphaKey]: alpha });
+    expect(app.getConversationRoutes()).toEqual({});
     expect(deleteConversationRoute).toHaveBeenCalledWith('sl:C123');
+    expect(deleteConversationRoute).toHaveBeenCalledWith(alphaKey);
+    expect(deleteConversationRoute).toHaveBeenCalledWith(betaThreadKey);
   });
 
   it('unregisters one agent-qualified route without deleting sibling routes', async () => {

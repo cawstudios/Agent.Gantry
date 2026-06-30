@@ -7,6 +7,7 @@ import {
   normalizeProviderId,
   providerIdForJid as resolveProviderIdForJid,
 } from '../../../../channels/provider-registry.js';
+import { agentIdForFolder as canonicalAgentIdForFolder } from '../../../../domain/agent/agent-folder-id.js';
 import * as pgSchema from '../schema/schema.js';
 
 export const CANONICAL_APP_ID = 'default';
@@ -42,7 +43,7 @@ export function conversationIdForJid(jid: string): string {
 }
 
 export function agentIdForFolder(folder: string): string {
-  return `agent:${folder}`;
+  return canonicalAgentIdForFolder(folder);
 }
 
 export function configVersionIdForAgent(agentId: string): string {

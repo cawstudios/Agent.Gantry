@@ -33,7 +33,6 @@ import {
 } from '../session/session-commands.js';
 import type { SessionCommand } from '../session/session-commands.js';
 import {
-  findConversationRoutesForChat,
   makeAgentThreadQueueKey,
   normalizeThreadQueueId,
   parseAgentThreadQueueKey,
@@ -126,7 +125,14 @@ async function resolveConversationRoute(
       (!selectedAgentId ||
         agentIdForFolder(persistedRoute.folder) === selectedAgentId)
     ) {
+      const persistedKey = parseAgentThreadQueueKey(routeKey);
       conversationRoutes[routeKey] = persistedRoute;
+      const canonicalRouteKey = makeAgentThreadQueueKey(
+        persistedKey.chatJid,
+        agentIdForFolder(persistedRoute.folder),
+        persistedKey.threadId,
+      );
+      conversationRoutes[canonicalRouteKey] = persistedRoute;
       return persistedRoute;
     }
   }
@@ -467,6 +473,15 @@ export async function recoverPendingMessages(
     }
   }
   const dedupedRoutes = Object.fromEntries(routesByChatAgentThread.values());
+  const exactRouteThreadsByChat = new Map<string, Set<string>>();
+  for (const [routeKey] of Object.entries(dedupedRoutes)) {
+    const parsed = parseAgentThreadQueueKey(routeKey);
+    if (!parsed.threadId) continue;
+    const exactThreads =
+      exactRouteThreadsByChat.get(parsed.chatJid) ?? new Set<string>();
+    exactThreads.add(parsed.threadId);
+    exactRouteThreadsByChat.set(parsed.chatJid, exactThreads);
+  }
   for (const [routeKey, group] of routesByChatAgentThread.values()) {
     const parsedRoute = parseAgentThreadQueueKey(routeKey);
     const { chatJid } = parsedRoute;
@@ -478,12 +493,14 @@ export async function recoverPendingMessages(
       ? [parsedRoute.threadId]
       : await opsRepository.getMessageThreadIds(chatJid);
     for (const threadId of threadIds) {
-      const globallySelectedRouteKeys = new Set(
-        findConversationRoutesForChat(dedupedRoutes, chatJid, threadId).map(
-          ([key]) => key,
-        ),
-      );
-      if (!globallySelectedRouteKeys.has(routeKey)) continue;
+      // Thread-scoped routes own provider threads globally; recovery must match live admission.
+      if (
+        !parsedRoute.threadId &&
+        threadId &&
+        exactRouteThreadsByChat.get(chatJid)?.has(threadId)
+      ) {
+        continue;
+      }
       const selectedRoute = selectConversationRouteEntry(
         dedupedRoutes,
         chatJid,

@@ -1,8 +1,10 @@
 import { resolveConversationBrowserProfile } from '../../shared/browser-profile-scope.js';
 import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
-import { parseAgentThreadQueueKey } from '../../shared/thread-queue-key.js';
 import { getProfile } from '../../runtime/browser-profiles.js';
-import { parseThreadQueueKey } from '../../shared/thread-queue-key.js';
+import {
+  parseAgentThreadQueueKey,
+  parseThreadQueueKey,
+} from '../../shared/thread-queue-key.js';
 import {
   consumeBrowserProfileActivity,
   isBrowserProfileSyncEnabled,

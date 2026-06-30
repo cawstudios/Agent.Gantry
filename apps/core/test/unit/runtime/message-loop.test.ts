@@ -638,6 +638,11 @@ describe('thread queue routing', () => {
     ).resolves.toBe('completed');
 
     expect(getConversationRoute).toHaveBeenCalledWith('app:app-one:conv-new');
+    expect(
+      routes[makeAgentThreadQueueKey('app:app-one:conv-new', 'agent:main')],
+    ).toMatchObject({
+      folder: 'main',
+    });
     expect(routes['app:app-one:conv-new']).toMatchObject({
       folder: 'main',
     });
