@@ -694,6 +694,13 @@
       "when": 1783924932751,
       "tag": "0101_drop_run_permission_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1784000000000,
+      "tag": "0102_person_identity_management",
+      "breakpoints": true
     }
   ]
 }
