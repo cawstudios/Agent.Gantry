@@ -30,12 +30,8 @@ const MEMORY_IPC_ACTION_ORDER = [
 ] as const satisfies readonly GantryMemoryIpcAction[];
 
 const MEMORY_IPC_ACTION_SET = new Set<string>(MEMORY_IPC_ACTION_ORDER);
-const DEFAULT_MEMORY_IPC_ACTIONS = [
-  'memory_search',
-  'memory_save',
-  'continuity_summary',
-  'procedure_save',
-] as const satisfies readonly GantryMemoryIpcAction[];
+const DEFAULT_MEMORY_IPC_ACTIONS =
+  [] as const satisfies readonly GantryMemoryIpcAction[];
 
 const REVIEWER_MEMORY_REVIEW_IPC_ACTIONS = [
   'memory_review_pending',

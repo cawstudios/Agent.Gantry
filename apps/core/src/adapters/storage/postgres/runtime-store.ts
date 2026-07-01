@@ -20,6 +20,12 @@ import type { WorkerCoordinationRepository } from '../../../domain/ports/worker-
 import { configurePendingInteractionDurability } from '../../../application/interactions/pending-interaction-durability.js';
 import { ModelCredentialService } from '../../../application/model-credentials/model-credential-service.js';
 import { logger } from '../../../infrastructure/logging/logger.js';
+import {
+  type IdentityResolveInput,
+  type IdentityResolveResult,
+  PersonIdentityService,
+} from '../../../application/identity/person-identity-service.js';
+import { PostgresPersonIdentityRepository } from './repositories/person-identity-repository.postgres.js';
 
 let runtime: StorageRuntime | null = null;
 
@@ -111,6 +117,14 @@ export async function getConfiguredModelProvidersForApp(
   return new ModelCredentialService(
     getRuntimeStorage().repositories.modelCredentials,
   ).getConfiguredModelProviders({ appId: appId as never });
+}
+
+export async function resolveRuntimePersonIdentity(
+  input: IdentityResolveInput,
+): Promise<IdentityResolveResult> {
+  return new PersonIdentityService(
+    new PostgresPersonIdentityRepository(getRuntimeStorage().service.db),
+  ).resolve(input);
 }
 
 export async function tryAcquireRuntimeAdvisoryLease(

@@ -25,7 +25,10 @@ export type Scope =
   | 'ingresses:read'
   | 'ingresses:write'
   | 'memory:read'
-  | 'memory:admin';
+  | 'memory:admin'
+  | 'identity:resolve'
+  | 'people:read'
+  | 'people:admin';
 
 export type ApiKeyRecord = {
   kid: string;
@@ -57,6 +60,9 @@ export const CONTROL_API_SCOPES: readonly Scope[] = [
   'ingresses:write',
   'memory:read',
   'memory:admin',
+  'identity:resolve',
+  'people:read',
+  'people:admin',
 ];
 
 function isApiKeyJsonEntry(value: unknown): value is {

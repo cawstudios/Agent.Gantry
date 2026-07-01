@@ -23,6 +23,16 @@ import type {
 import { parseSessionSseEvent } from './session-events.js';
 import { createIngressesClient } from './ingresses.js';
 import { querySuffix } from './query-string.js';
+import {
+  createIdentityClient,
+  createPeopleClient,
+  type IdentityEvidenceType,
+  type IdentityResolveInput,
+  type PersonAliasInput,
+  type PersonAliasVerificationStatus,
+  type PersonMergeConflictResolution,
+  type PersonMergeInput,
+} from './people.js';
 export type { RuntimeSettingsResponse } from './settings.js';
 import * as mcpServerClients from './mcp-servers.js';
 import { jobListQuery } from './job-list-query.js';
@@ -64,6 +74,14 @@ export type {
 export type ResponseMode = 'sse' | 'webhook' | 'both' | 'none';
 export type MemorySubjectType = 'user' | 'group' | 'channel' | 'common';
 export type DreamPhase = 'light' | 'rem' | 'deep' | 'all';
+export type {
+  IdentityEvidenceType,
+  IdentityResolveInput,
+  PersonAliasInput,
+  PersonAliasVerificationStatus,
+  PersonMergeConflictResolution,
+  PersonMergeInput,
+};
 
 /** The deployment process role a Gantry runtime serves as. */
 export type ProcessRole = 'all' | 'control' | 'live-worker' | 'job-worker';
@@ -287,11 +305,15 @@ export class GantryClient {
     this.transport.request<T>(options);
   readonly ingresses: ReturnType<typeof createIngressesClient>;
   readonly models: ReturnType<typeof createModelsClient>;
+  readonly identity: ReturnType<typeof createIdentityClient>;
+  readonly people: ReturnType<typeof createPeopleClient>;
 
   constructor(options: ClientOptions) {
     this.transport = new Transport(options);
     this.ingresses = createIngressesClient(this.transport);
     this.models = createModelsClient(this.transport);
+    this.identity = createIdentityClient(this.request);
+    this.people = createPeopleClient(this.request);
   }
 
   health() {

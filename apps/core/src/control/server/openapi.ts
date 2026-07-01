@@ -112,6 +112,7 @@ export const GANTRY_OPENAPI_DOCUMENT = {
     { name: 'Models', description: 'Provider-neutral model catalog.' },
     { name: 'Providers', description: 'Provider connections.' },
     { name: 'Conversations', description: 'Conversations and bindings.' },
+    { name: 'People', description: 'App-scoped person identity and aliases.' },
     { name: 'Jobs', description: 'Scheduled and manual agent jobs.' },
     { name: 'Runs', description: 'Job run history and events.' },
     { name: 'Webhooks', description: 'Outbound callback delivery.' },

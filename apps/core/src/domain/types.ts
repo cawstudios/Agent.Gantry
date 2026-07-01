@@ -65,6 +65,9 @@ export interface ConversationRoute {
   agentConfig?: AgentConfig;
   requiresTrigger?: boolean;
   conversationKind?: 'dm' | 'channel';
+  providerConnectionId?: string;
+  senderIdentityEvidenceType?: 'provider_user' | 'web_user';
+  systemSenderIds?: string[];
 }
 
 export interface NewMessage {

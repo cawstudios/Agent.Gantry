@@ -14,6 +14,7 @@ import {
 export interface CanonicalBindingRecord {
   id: string;
   agentId: string;
+  providerConnectionId: string;
   conversationId: string;
   threadId: string | null;
   status: string;
@@ -40,7 +41,24 @@ function routeMemorySubject(
     kind: 'conversation',
     appId: CANONICAL_APP_ID,
     conversationId,
-    ...(group.agentConfig ? { route: { agentConfig: group.agentConfig } } : {}),
+    ...((group.agentConfig ||
+      group.senderIdentityEvidenceType ||
+      group.systemSenderIds?.length)
+      ? {
+          route: {
+            ...(group.agentConfig ? { agentConfig: group.agentConfig } : {}),
+            ...(group.senderIdentityEvidenceType
+              ? {
+                  senderIdentityEvidenceType:
+                    group.senderIdentityEvidenceType,
+                }
+              : {}),
+            ...(group.systemSenderIds?.length
+              ? { systemSenderIds: group.systemSenderIds }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -131,6 +149,7 @@ export class PostgresCanonicalBindingRepository {
       .select({
         id: b.id,
         agentId: b.agentId,
+        providerConnectionId: b.providerConnectionId,
         conversationId: b.conversationId,
         threadId: b.threadId,
         status: b.status,
@@ -168,7 +187,11 @@ export function bindingRowToGroup(
     {},
   );
   const routeSubject = parseJson<{
-    route?: { agentConfig?: ConversationRoute['agentConfig'] };
+    route?: {
+      agentConfig?: ConversationRoute['agentConfig'];
+      senderIdentityEvidenceType?: ConversationRoute['senderIdentityEvidenceType'];
+      systemSenderIds?: ConversationRoute['systemSenderIds'];
+    };
   }>(row.memorySubjectJson, {});
   const jid =
     externalRef.jid ||
@@ -193,6 +216,16 @@ export function bindingRowToGroup(
       added_at: row.createdAt,
       requiresTrigger: row.requiresTrigger,
       conversationKind,
+      providerConnectionId: row.providerConnectionId,
+      ...(routeSubject.route?.senderIdentityEvidenceType
+        ? {
+            senderIdentityEvidenceType:
+              routeSubject.route.senderIdentityEvidenceType,
+          }
+        : {}),
+      ...(routeSubject.route?.systemSenderIds?.length
+        ? { systemSenderIds: routeSubject.route.systemSenderIds }
+        : {}),
       ...(agentConfig ? { agentConfig } : {}),
     },
   };

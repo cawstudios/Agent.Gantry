@@ -18,6 +18,7 @@ import { handleMemoryRoutes } from '@core/control/server/routes/memory.js';
 import { handleMcpServerRoutes } from '@core/control/server/routes/mcp-servers.js';
 import { handleModelRoutes } from '@core/control/server/routes/models.js';
 import { handleOpenApiRoutes } from '@core/control/server/routes/openapi.js';
+import { handlePeopleRoutes } from '@core/control/server/routes/people.js';
 import { handleProviderConversationRoutes } from '@core/control/server/routes/provider-conversation-routes.js';
 import { handleRunRoutes } from '@core/control/server/routes/runs.js';
 import { handleSessionRoutes } from '@core/control/server/routes/sessions.js';
@@ -64,6 +65,7 @@ const expectedControlRoutes = [
   'POST /v1/guided-actions/preview',
   'POST /v1/guided-actions/execute',
   'GET /v1/health',
+  'POST /v1/identity/resolve',
   'GET /v1/status',
   'GET /v1/inventory',
   'GET /v1/ingresses',
@@ -100,6 +102,12 @@ const expectedControlRoutes = [
   'PATCH /v1/models/defaults',
   'POST /v1/models/preview',
   'GET /v1/provider-connections',
+  'GET /v1/people',
+  'GET /v1/people/{personId}',
+  'POST /v1/people/{personId}/aliases',
+  'DELETE /v1/people/{personId}/aliases/{aliasId}',
+  'POST /v1/people/{personId}/merge',
+  'POST /v1/people/{personId}/merge:preview',
   'POST /v1/provider-connections',
   'DELETE /v1/provider-connections/{providerConnectionId}',
   'GET /v1/provider-connections/{providerConnectionId}',
@@ -267,6 +275,7 @@ async function isRecognizedByRuntime(method: string, pathname: string) {
     () => handleCapabilityCatalogRoutes(req, res, ctx, pathname),
     () => handleSessionRoutes(req, res, ctx, url, pathname),
     () => handleProviderConversationRoutes(req, res, ctx, url, pathname),
+    () => handlePeopleRoutes(req, res, ctx, url, pathname),
     () => handleMemoryRoutes(req, res, ctx, url, pathname),
     () => handleModelRoutes(req, res, ctx, pathname),
     () => handleCredentialRoutes(req, res, ctx, pathname),

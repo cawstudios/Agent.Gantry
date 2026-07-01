@@ -17,10 +17,17 @@ import { resolveRuntimeExecutionProviderId } from './execution-provider-id.js';
 import type { AgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter.js';
 
 type ArchiveSessionInput = Parameters<typeof archiveCurrentRuntimeSession>[0];
+type MemoryUserIdValue = string | undefined | (() => Promise<string | undefined>);
 type SenderPolicyGroup = {
   folder: string;
   requiresTrigger?: boolean;
 };
+
+async function readMemoryUserId(
+  value: MemoryUserIdValue,
+): Promise<string | undefined> {
+  return typeof value === 'function' ? value() : value;
+}
 
 export function createAdvanceCursorHandler(input: {
   queueJid: string;
@@ -44,11 +51,12 @@ export function createArchiveCurrentSessionHandler(input: {
   chatJid: string;
   threadId: string | null;
   defaultScope: 'user' | 'group';
-  memoryUserId?: string;
+  memoryUserId?: MemoryUserIdValue;
   collectMemory?: SessionMemoryCollector;
   executionAdapter?: Pick<AgentExecutionAdapter, 'id'>;
 }) {
   return async (cause: ArchiveSessionInput['cause'] = 'new-session') => {
+    const memoryUserId = await readMemoryUserId(input.memoryUserId);
     await archiveCurrentRuntimeSession({
       ops: input.ops(),
       appId: input.appId,
@@ -57,7 +65,7 @@ export function createArchiveCurrentSessionHandler(input: {
       threadId: input.threadId,
       cause,
       defaultScope: input.defaultScope,
-      memoryUserId: input.memoryUserId,
+      memoryUserId,
       executionProviderId: resolveRuntimeExecutionProviderId(
         input.executionAdapter,
       ),
@@ -73,11 +81,12 @@ export function createPrepareSessionArchiveHandler(input: {
   chatJid: string;
   threadId: string | null;
   defaultScope: 'user' | 'group';
-  memoryUserId?: string;
+  memoryUserId?: MemoryUserIdValue;
   collectMemory?: SessionMemoryCollector;
   executionAdapter?: Pick<AgentExecutionAdapter, 'id'>;
 }) {
   return async (_cause: 'new-session') => {
+    const memoryUserId = await readMemoryUserId(input.memoryUserId);
     const ops = input.ops();
     const turnContext = await ops.getAgentTurnContext?.({
       appId: input.appId,
@@ -88,7 +97,7 @@ export function createPrepareSessionArchiveHandler(input: {
       conversationJid: input.chatJid,
       threadId: input.threadId,
       conversationKind: input.group.conversationKind,
-      memoryUserId: input.memoryUserId,
+      memoryUserId,
       hydrateMemory: false,
     });
     if (!turnContext?.agentSessionId || !input.collectMemory) {
@@ -117,7 +126,7 @@ export function createSessionArchiveHandlers(
 export function createSaveProcedureHandler(input: {
   folder: string;
   conversationId: string;
-  userId?: string;
+  userId?: MemoryUserIdValue;
   defaultScope: 'user' | 'group';
   threadId?: string | null;
   isAdminWrite: boolean;
@@ -126,7 +135,7 @@ export function createSaveProcedureHandler(input: {
     saveGroupProcedureMemory({
       folder: input.folder,
       conversationId: input.conversationId,
-      userId: input.userId,
+      userId: await readMemoryUserId(input.userId),
       defaultScope: input.defaultScope,
       threadId: input.threadId,
       isAdminWrite: input.isAdminWrite,

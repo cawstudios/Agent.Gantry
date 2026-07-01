@@ -1154,7 +1154,8 @@ describe('agent-spawn timeout behavior', () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
 
-    expect(
+    expect(allowedActions).toEqual([]);
+    expect(() =>
       parseMemoryIpcRequest(
         createSignedIpcRequestEnvelope(
           env.GANTRY_MEMORY_IPC_AUTH_TOKEN,
@@ -1162,21 +1163,7 @@ describe('agent-spawn timeout behavior', () => {
         ),
         testGroup.folder,
       ),
-    ).toMatchObject({
-      requestId: 'mem-spawn-chat-scope',
-      context: {
-        chatJid: 'tg:trusted-chat',
-        threadId: 'thread-a',
-        userId: 'user-a',
-        defaultScope: 'user',
-      },
-      allowedActions: [
-        'memory_search',
-        'memory_save',
-        'continuity_summary',
-        'procedure_save',
-      ],
-    });
+    ).toThrow(/not allowed/);
 
     expect(() =>
       parseMemoryIpcRequest(

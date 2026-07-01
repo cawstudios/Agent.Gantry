@@ -150,18 +150,29 @@ describe('agent capability composition', () => {
     for (const tool of DANGEROUS_DEFAULT_TOOLS) {
       expect(profile.allowedTools).not.toContain(tool);
     }
-    expect(profile.allowedTools).toContain('mcp__gantry__continuity_summary');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_search');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_save');
+    expect(profile.allowedTools).not.toContain(
+      'mcp__gantry__continuity_summary',
+    );
+    expect(profile.allowedTools).not.toContain('mcp__gantry__procedure_save');
     expect(profile.allowedTools).not.toContain(
       'mcp__gantry__memory_review_pending',
     );
     expect(profile.allowedTools).not.toContain(
       'mcp__gantry__memory_review_decision',
     );
-    expect(selectedMemoryIpcActions([])).toContain('continuity_summary');
+    expect(selectedMemoryIpcActions([])).toEqual([]);
     expect(selectedMemoryIpcActions([])).not.toContain('memory_review_pending');
     expect(selectedMemoryIpcActions([])).not.toContain(
       'memory_review_decision',
     );
+    expect(
+      selectedGantryMcpToolNames(['mcp__gantry__continuity_summary']),
+    ).toContain('continuity_summary');
+    expect(
+      selectedMemoryIpcActions(['mcp__gantry__continuity_summary']),
+    ).toEqual(['continuity_summary']);
     for (const tool of UNAVAILABLE_DEFAULT_TOOLS) {
       expect(profile.allowedTools).not.toContain(tool);
     }
@@ -411,7 +422,7 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).not.toContain('Agent');
     expect(profile.allowedTools).toContain('Read');
-    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_search');
     expect(profile.allowedTools).not.toContain('Browser');
   });
 
@@ -427,7 +438,7 @@ describe('agent capability composition', () => {
     expect(profile.availableTools).toEqual(DEVELOPER_AVAILABLE_TOOLS);
     expect(profile.allowedTools).not.toContain('Read');
     expect(profile.allowedTools).not.toContain('Agent');
-    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_search');
     expect(profile.allowedTools).not.toContain('Browser');
   });
 
@@ -447,9 +458,9 @@ describe('agent capability composition', () => {
 
     expect(profile.allowedTools).not.toContain('Browser');
     expect(profile.availableTools).not.toContain('Browser');
-    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
-    expect(profile.allowedTools).toContain('mcp__gantry__memory_save');
-    expect(profile.allowedTools).toContain('mcp__gantry__procedure_save');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_search');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_save');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__procedure_save');
     expect(profile.allowedTools).not.toContain(
       'mcp__gantry__scheduler_list_jobs',
     );
@@ -486,15 +497,7 @@ describe('agent capability composition', () => {
         'mcp__gantry__memory_demote',
         'mcp__gantry__procedure_patch',
       ]),
-    ).toEqual([
-      'memory_search',
-      'memory_save',
-      'memory_patch',
-      'memory_demote',
-      'continuity_summary',
-      'procedure_save',
-      'procedure_patch',
-    ]);
+    ).toEqual(['memory_patch', 'memory_demote', 'procedure_patch']);
   });
 
   it('keeps memory review tools out of the user-facing runner', () => {
@@ -538,14 +541,7 @@ describe('agent capability composition', () => {
       selectedMemoryIpcActions([], {
         memoryReviewerIsControlApprover: true,
       }),
-    ).toEqual([
-      'memory_search',
-      'memory_save',
-      'continuity_summary',
-      'memory_review_pending',
-      'memory_review_decision',
-      'procedure_save',
-    ]);
+    ).toEqual(['memory_review_pending', 'memory_review_decision']);
   });
 
   it('keeps scoped RunCommand available but does not project it as SDK always-allowed', () => {
@@ -895,8 +891,10 @@ describe('agent capability composition', () => {
     // Safe baseline tools remain available.
     expect(profile.allowedTools).toContain('mcp__gantry__send_message');
     expect(profile.allowedTools).toContain('mcp__gantry__ask_user_question');
-    expect(profile.allowedTools).toContain('mcp__gantry__memory_search');
-    expect(profile.allowedTools).toContain('mcp__gantry__continuity_summary');
+    expect(profile.allowedTools).not.toContain('mcp__gantry__memory_search');
+    expect(profile.allowedTools).not.toContain(
+      'mcp__gantry__continuity_summary',
+    );
     expect(profile.allowedTools).toContain('mcp__gantry__agent_profile_read');
 
     // Env projection: selected admin env is separate; tool list excludes authority.

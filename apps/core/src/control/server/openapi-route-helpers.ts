@@ -44,12 +44,14 @@ export const query = (name: string, description: string): JsonSchema => ({
 
 export const ids = {
   agent: id('agentId', 'Agent id.'),
+  alias: id('aliasId', 'Person alias id.'),
   capability: id('capabilityId', 'Capability id.'),
   conversation: id('conversationId', 'Conversation id.'),
   file: id('filePath', 'Skill-relative file path.'),
   ingress: id('ingressId', 'Ingress id.'),
   job: id('jobId', 'Job id.'),
   memory: id('memoryId', 'Memory item id.'),
+  person: id('personId', 'Person id.'),
   modelCredentialProvider: id('providerId', 'Model credential provider id.'),
   profileFileKind: id('kind', 'Profile file kind (soul | agents).'),
   providerConnection: id('providerConnectionId', 'Provider connection id.'),
