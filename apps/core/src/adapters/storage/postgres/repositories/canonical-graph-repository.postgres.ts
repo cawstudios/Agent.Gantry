@@ -359,7 +359,7 @@ export class PostgresCanonicalGraphRepository {
         appId: CANONICAL_APP_ID,
         userId,
         provider: input.providerId,
-        providerAccountId: input.providerAccountId,
+        providerConnectionId: input.providerAccountId,
         externalUserId,
         displayName: input.displayName ?? externalUserId,
         createdAt: now,

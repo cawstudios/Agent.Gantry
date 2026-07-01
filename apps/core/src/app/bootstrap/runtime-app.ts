@@ -56,6 +56,7 @@ import {
   getRuntimeRepositories,
   getRuntimeSkillArtifactStore,
   getRuntimeStorage,
+  resolveRuntimePersonIdentity,
 } from '../../adapters/storage/postgres/runtime-store.js';
 import type { ProcessRole } from './roles/process-role.js';
 import { applyHostCapacityToQueuePolicy } from '../../shared/host-capacity.js';
@@ -636,6 +637,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       options.skillArtifactStore ?? getRuntimeSkillArtifactStore,
     collectSessionMemory:
       options.collectSessionMemory ?? collectRuntimeSessionMemory,
+    resolvePersonIdentity: resolveRuntimePersonIdentity,
     publishRuntimeEvent: options.publishRuntimeEvent,
     executionAdapter,
     executionAdapters,

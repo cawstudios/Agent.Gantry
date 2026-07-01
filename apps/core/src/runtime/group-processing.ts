@@ -28,6 +28,7 @@ import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { getConfiguredModelProvidersForApp } from '../adapters/storage/postgres/runtime-store.js';
 import { resolveGroupProcessingRouteContext } from './command-override-route-key.js';
 import { memoryScopeForConversationKind } from './group-run-context.js';
+import { resolveCanonicalMemoryPersonId } from './group-person-identity.js';
 import { getGroupBrowserStatus } from './group-browser-status.js';
 import {
   handleFailure,
@@ -158,11 +159,32 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       finalizingGenerations: finalizingProgressGenerations,
       log: logger,
     });
-    const memoryUserId =
-      options.memoryContext?.userId ?? resolveMemoryUserId(missedMessages);
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
     );
+    const rawMemoryUserId =
+      options.memoryContext?.userId ?? resolveMemoryUserId(missedMessages);
+    let memoryUserIdPromise: Promise<string | undefined> | null = null;
+    const resolveActionMemoryUserId = async (): Promise<string | undefined> => {
+      if (defaultMemoryScope !== 'user') return undefined;
+      if (!memoryUserIdPromise) {
+        memoryUserIdPromise = resolveCanonicalMemoryPersonId({
+          resolvePersonIdentity: deps.resolvePersonIdentity,
+          publishRuntimeEvent: deps.publishRuntimeEvent,
+          appId: turnAppId,
+          rawUserId: rawMemoryUserId,
+          defaultScope: defaultMemoryScope,
+          conversationKind: group.conversationKind ?? 'channel',
+          messages: missedMessages,
+          chatJid,
+          threadId: activeThreadId,
+          providerConnectionId: group.providerConnectionId,
+          identityEvidenceType: group.senderIdentityEvidenceType,
+          systemSenderIds: group.systemSenderIds,
+        });
+      }
+      return memoryUserIdPromise;
+    };
     const modelStatus = createRuntimeModelStatusAccess(
       group.folder,
       activeThreadId,
@@ -186,7 +208,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           group,
           chatJid,
           queueJid,
-          memoryUserId,
+          memoryUserId: resolveActionMemoryUserId,
           activeThreadId,
           missedMessages,
           existingRunId: options.existingRunId,
@@ -246,28 +268,29 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           chatJid,
           threadId: activeThreadId ?? null,
           defaultScope: defaultMemoryScope,
-          memoryUserId,
+          memoryUserId: resolveActionMemoryUserId,
           collectMemory: collectSessionMemory,
           deps,
         }),
-        clearCurrentSession: () =>
+        clearCurrentSession: async () =>
           deps.clearSession(group.folder, activeThreadId, {
             appId: turnAppId,
             conversationJid: chatJid,
             providerAccountId: group.providerAccountId,
             conversationKind: group.conversationKind,
-            memoryUserId,
+            memoryUserId: await resolveActionMemoryUserId(),
           }),
         stopCurrentRun: () => deps.queue.stopGroup?.(queueJid) ?? false,
-        runMemoryDreaming: () =>
+        runMemoryDreaming: async () =>
           runDreamingForGroup({
             folder: group.folder,
             conversationId: chatJid,
-            userId: memoryUserId,
+            userId: await resolveActionMemoryUserId(),
             activeThreadId,
             defaultScope: defaultMemoryScope,
           }),
         getMemoryStatus: async () => {
+          const memoryUserId = await resolveActionMemoryUserId();
           const memory = config.getRuntimeSettingsForConfig().memory;
           return getGroupMemoryStatus(
             {
@@ -291,7 +314,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         saveProcedure: createSaveProcedureHandler({
           folder: group.folder,
           conversationId: chatJid,
-          userId: memoryUserId,
+          userId: resolveActionMemoryUserId,
           defaultScope: defaultMemoryScope,
           threadId: activeThreadId,
           isAdminWrite: true,
@@ -319,6 +342,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       if (replay.hasMore) deps.queue.enqueueMessageCheck(queueJid);
       return true;
     }
+    const memoryUserId = await resolveActionMemoryUserId();
     await notifyFirstProgress();
     const { prompt, recallQuery } =
       await buildGroupProcessingConversationContext({
