@@ -113,7 +113,6 @@ export const SyncMcpCapabilityRequestSchema = z.object({
   agentId: z.string().min(1),
   capabilityId: z.string().min(1),
   dryRun: z.boolean().optional(),
-  syncedBy: z.string().optional(),
 });
 export type SyncMcpCapabilityRequest = z.infer<
   typeof SyncMcpCapabilityRequestSchema

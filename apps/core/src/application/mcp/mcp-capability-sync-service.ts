@@ -46,6 +46,7 @@ export interface McpCapabilitySyncResult {
   approvedToolsBefore: string[];
   addedTools: string[];
   changed: boolean;
+  inventoryTruncated?: boolean;
   warning?: string;
 }
 
@@ -173,6 +174,15 @@ export class McpCapabilitySyncService {
         `Capability ${input.capabilityId} is not bound to MCP server ${server.name}.`,
       );
     }
+    if (sourceScope.allowedToolPatterns.length === 0) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        [
+          `Capability ${input.capabilityId} does not declare reviewed MCP tool patterns for ${server.name}.`,
+          'Refusing to infer whole-source access; update the capability source metadata with allowedToolPatterns before syncing.',
+        ].join(' '),
+      );
+    }
     if (!input.dryRun && diagnostics.inventoryTruncated) {
       throw new ApplicationError(
         'INVALID_REQUEST',
@@ -219,12 +229,12 @@ export class McpCapabilitySyncService {
       approvedToolsBefore: diagnostics.approvedTools,
       addedTools,
       changed: !input.dryRun && addedTools.length > 0,
-      ...(input.dryRun && addedTools.length > 0
-        ? {
-            warning:
-              'Dry run only. Re-run without dryRun to update the reviewed capability bindings.',
-          }
-        : {}),
+      ...(diagnostics.inventoryTruncated ? { inventoryTruncated: true } : {}),
+      ...syncWarning({
+        dryRun: input.dryRun,
+        addedTools,
+        inventoryTruncated: diagnostics.inventoryTruncated === true,
+      }),
     };
   }
 
@@ -307,6 +317,25 @@ export class McpCapabilitySyncService {
       createdAt: now as never,
     });
   }
+}
+
+function syncWarning(input: {
+  dryRun: boolean;
+  addedTools: readonly string[];
+  inventoryTruncated: boolean;
+}): { warning?: string } {
+  const warnings: string[] = [];
+  if (input.dryRun && input.addedTools.length > 0) {
+    warnings.push(
+      'Dry run only. Re-run without dryRun to update the reviewed capability bindings.',
+    );
+  }
+  if (input.inventoryTruncated) {
+    warnings.push(
+      'MCP source inventory was truncated; this dry-run preview may be incomplete and non-dry-run sync will be refused.',
+    );
+  }
+  return warnings.length > 0 ? { warning: warnings.join(' ') } : {};
 }
 
 function mcpCapabilitySourceScopeForServer(

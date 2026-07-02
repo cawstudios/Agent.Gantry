@@ -279,8 +279,6 @@ describe('mcp CLI', () => {
       '--capability',
       'itops.access.manage',
       '--dry-run',
-      '--by',
-      'ops-admin',
     ]);
 
     expect(code).toBe(0);
@@ -292,7 +290,6 @@ describe('mcp CLI', () => {
           agentId: 'agent:main',
           capabilityId: 'itops.access.manage',
           dryRun: true,
-          syncedBy: 'ops-admin',
         },
       },
     ]);

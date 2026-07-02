@@ -217,7 +217,6 @@ export const extensionOpenApiSchemas: Record<string, JsonSchema> = {
       agentId: { type: 'string' },
       capabilityId: { type: 'string' },
       dryRun: { type: 'boolean' },
-      syncedBy: { type: 'string' },
     },
   },
   McpCapabilitySyncResponse: {
@@ -241,6 +240,7 @@ export const extensionOpenApiSchemas: Record<string, JsonSchema> = {
       approvedToolsBefore: stringArray,
       addedTools: stringArray,
       changed: { type: 'boolean' },
+      inventoryTruncated: { type: 'boolean' },
       warning: { type: 'string' },
     },
   },

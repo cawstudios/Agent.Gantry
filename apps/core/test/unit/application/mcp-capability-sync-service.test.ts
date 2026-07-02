@@ -31,7 +31,10 @@ function server(): McpServerDefinition {
   };
 }
 
-function capabilityTool(input?: { includeSource?: boolean }): ToolCatalogItem {
+function capabilityTool(input?: {
+  includeSource?: boolean;
+  allowedToolPatterns?: string[];
+}): ToolCatalogItem {
   const capability = {
     capabilityId: 'itops.access.manage',
     version: '1',
@@ -53,7 +56,7 @@ function capabilityTool(input?: { includeSource?: boolean }): ToolCatalogItem {
           source: {
             source: 'mcp',
             serverName: 'itops',
-            allowedToolPatterns: ['itops_*'],
+            allowedToolPatterns: input?.allowedToolPatterns ?? ['itops_*'],
           },
         }),
   };
@@ -249,6 +252,38 @@ describe('McpCapabilitySyncService', () => {
     expect(repositories.mcpServers.appendAuditEvent).not.toHaveBeenCalled();
   });
 
+  it('refuses to sync MCP capabilities with empty reviewed source tool patterns', async () => {
+    vi.spyOn(McpToolProxy.prototype, 'listTools').mockResolvedValue({
+      servers: [
+        {
+          name: 'itops',
+          tools: [{ name: 'itops_get_connector_health', description: '' }],
+        },
+      ],
+      limit: 50,
+      total: 1,
+      diagnostics: { remoteListTruncated: false },
+    } as never);
+    const { repositories, service } = serviceWithRepos({
+      tool: capabilityTool({ allowedToolPatterns: [] }),
+    });
+
+    await expect(
+      service.sync({
+        appId,
+        agentId,
+        serverId: 'mcp:itops' as never,
+        capabilityId: 'itops.access.manage',
+        dryRun: false,
+        egressDenylist: [],
+      }),
+    ).rejects.toThrow(
+      'Capability itops.access.manage does not declare reviewed MCP tool patterns for itops.',
+    );
+    expect(repositories.tools.saveTool).not.toHaveBeenCalled();
+    expect(repositories.mcpServers.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
   it('refuses to mutate reviewed capability bindings from truncated MCP inventory', async () => {
     vi.spyOn(McpToolProxy.prototype, 'listTools').mockResolvedValue({
       servers: [
@@ -273,6 +308,38 @@ describe('McpCapabilitySyncService', () => {
         egressDenylist: [],
       }),
     ).rejects.toThrow('MCP source inventory for itops was truncated.');
+    expect(repositories.tools.saveTool).not.toHaveBeenCalled();
+    expect(repositories.mcpServers.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it('marks dry-run previews when MCP inventory is truncated', async () => {
+    vi.spyOn(McpToolProxy.prototype, 'listTools').mockResolvedValue({
+      servers: [
+        {
+          name: 'itops',
+          tools: [{ name: 'itops_get_connector_health', description: '' }],
+        },
+      ],
+      limit: 50,
+      total: 51,
+      diagnostics: { remoteListTruncated: true },
+    } as never);
+    const { repositories, service } = serviceWithRepos();
+
+    const result = await service.sync({
+      appId,
+      agentId,
+      serverId: 'mcp:itops' as never,
+      capabilityId: 'itops.access.manage',
+      dryRun: true,
+      egressDenylist: [],
+    });
+
+    expect(result.inventoryTruncated).toBe(true);
+    expect(result.warning).toContain('may be incomplete');
+    expect(result.addedTools).toEqual([
+      'mcp__itops__itops_get_connector_health',
+    ]);
     expect(repositories.tools.saveTool).not.toHaveBeenCalled();
     expect(repositories.mcpServers.appendAuditEvent).not.toHaveBeenCalled();
   });

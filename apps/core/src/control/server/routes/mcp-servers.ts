@@ -249,7 +249,7 @@ export async function handleMcpServerRoutes(
         serverId: decodeURIComponent(syncCapabilityMatch[1]) as McpServerId,
         capabilityId: parsed.data.capabilityId,
         dryRun: parsed.data.dryRun ?? false,
-        syncedBy: parsed.data.syncedBy,
+        syncedBy: auth.kid,
         egressDenylist: ctx.getEgressSettings?.().denylist ?? [],
       });
       sendJson(res, 200, result);

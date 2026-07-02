@@ -32,7 +32,7 @@ function usage(): string {
     '  gantry mcp list [--status <active|disabled>]',
     '  gantry mcp show <serverId>',
     '  gantry mcp doctor <serverId> [--agent <agentId>] [--by <admin>]',
-    '  gantry mcp sync-capability <serverId> --agent <agentId> --capability <capabilityId> [--dry-run] [--by <admin>]',
+    '  gantry mcp sync-capability <serverId> --agent <agentId> --capability <capabilityId> [--dry-run]',
     '  gantry mcp remove <serverId> --agent <agentId>',
     '  gantry mcp disable <serverId> [--reason <text>] [--by <admin>]',
   ].join('\n');
@@ -302,7 +302,6 @@ async function syncCapability(
       agentId: normalizeAgentId(agentId),
       capabilityId,
       dryRun: args.includes('--dry-run'),
-      syncedBy: flagValue(args, '--by'),
     },
   });
   printRecord(response, 'MCP Capability Sync');
