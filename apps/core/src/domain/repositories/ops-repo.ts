@@ -148,6 +148,12 @@ export interface RuntimeMessageRepository {
     limit?: number,
     options?: { threadId?: string | null; providerAccountId?: string | null },
   ): Promise<NewMessage[]>;
+  getContextMessagesSince?(
+    conversationJid: string,
+    sinceCursor: string,
+    limit?: number,
+    options?: { threadId?: string | null; providerAccountId?: string | null },
+  ): Promise<NewMessage[]>;
   getRecentTopLevelMessagesBefore(
     conversationJid: string,
     before: Pick<NewMessage, 'timestamp' | 'id'>,
@@ -308,6 +314,7 @@ export interface RuntimeAgentSessionRepository {
     query?: string;
     hydrateMemory?: boolean;
     hydrationMode?: 'first_visible' | 'full';
+    promoteReadyProviderSession?: boolean;
   }): Promise<{
     appId: string;
     agentId: string;
@@ -315,9 +322,41 @@ export interface RuntimeAgentSessionRepository {
     agentSessionResetAt?: string | null;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestProviderSessionLocked?: boolean;
+    lockedProviderSessionId?: string;
+    latestProviderSessionReady?: boolean;
+    readyProviderSessionId?: string;
+    readyExternalSessionId?: string;
     providerSessionAccessFingerprint?: string;
+    compactionDeltaReplay?: {
+      status: 'pending' | 'applied' | 'degraded';
+      baseCursor?: string;
+      lockedAt?: string;
+    };
     memoryContextBlock?: string;
   }>;
+  markProviderSessionMaintenance?(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    compactionBaseCursor?: string | null;
+  }): Promise<boolean>;
+  markProviderSessionDeltaReplay?(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'applied' | 'degraded';
+    reason?: string;
+  }): Promise<void>;
+  finishProviderSessionMaintenance?(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'active' | 'expired' | 'ready';
+  }): Promise<void>;
   setSession(
     agentFolder: string,
     sessionId: string,

@@ -16,6 +16,10 @@ import { stopWorkerHeartbeat } from '@core/jobs/worker-identity.js';
 import { buildPendingMessagesContinuationIdempotencyKey } from '@core/runtime/pending-message-replay.js';
 import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
 import {
+  encodeGroupMessageCursor,
+  toGroupMessageCursor,
+} from '@core/shared/message-cursor.js';
+import {
   FakeCoordination,
   FakeLiveTurns,
 } from '../application/live-turn-lease-fakes.js';
@@ -1188,6 +1192,112 @@ describe('startRuntimeServices', () => {
           }),
         }),
       ]);
+    } finally {
+      stopLiveTurnRecoveryLoop();
+      await stopLiveAdmissionLoop(0);
+      await shutdownLiveTurnAuthority();
+    }
+  });
+
+  it('queues active /compact for later command processing without live continuation injection', async () => {
+    const app = makeApp();
+    const channelWiring = makeChannelWiring();
+    const liveTurns = new FakeLiveTurns();
+    const coordination = Object.assign(new FakeCoordination(), {
+      registerWorker: vi.fn(async () => {}),
+      heartbeatWorker: vi.fn(async () => true),
+    });
+    liveTurns.coordination = coordination;
+    await liveTurns.claimLiveTurn({
+      id: 'turn-existing',
+      scope: {
+        appId: 'default',
+        agentSessionId: 'session-main',
+        conversationId: 'tg:primary',
+        threadId: null,
+      },
+      workerInstanceId: 'worker-other',
+      runId: 'agent-run:other',
+    });
+    const compactMessage = {
+      id: 'msg-compact',
+      chat_jid: 'tg:primary',
+      sender: 'user-owner',
+      sender_name: 'Owner',
+      content: '/compact',
+      timestamp: 'cursor-after-compact',
+      is_from_me: true,
+    };
+    const compactCursor = encodeGroupMessageCursor(
+      toGroupMessageCursor(compactMessage),
+    );
+    let cursor = '';
+    app.getOrRecoverCursor = vi.fn(async () => cursor);
+    app.setAgentCursor = vi.fn((_queueJid: string, nextCursor: string) => {
+      cursor = nextCursor;
+    });
+    const getMessagesSince = vi.fn(async (_chatJid: string, since: string) =>
+      since === compactCursor ? [] : [compactMessage],
+    );
+
+    await startRuntimeServices(
+      {
+        app,
+        channelWiring,
+      },
+      {
+        startSchedulerLoop: vi.fn() as any,
+        startIpcWatcher: vi.fn() as any,
+        writeGroupsSnapshot: vi.fn() as any,
+        opsRepository: {
+          getAgentTurnContext: vi.fn(async () => ({
+            appId: 'default',
+            agentId: 'agent-main',
+            agentSessionId: 'session-main',
+          })),
+          createSessionAgentRun: vi.fn(async () => 'agent-run:live-1'),
+          getMessagesSince,
+        } as any,
+        getToolRepository: vi.fn(() => ({}) as any),
+        getWorkerCoordinationRepository: vi.fn(() => coordination as any),
+        getLiveTurnRepository: vi.fn(() => liveTurns as any),
+        recoverPendingMessages: vi.fn() as any,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          fatal: vi.fn(),
+        },
+        exit: vi.fn() as any,
+      },
+    );
+    try {
+      const processMessages = vi.mocked(app.queue.setProcessMessagesFn as any)
+        .mock.calls[0]?.[0] as (queueJid: string) => Promise<boolean>;
+
+      await expect(processMessages('tg:primary')).resolves.toBe(true);
+      await expect(processMessages('tg:primary')).resolves.toBe(false);
+      expect(liveTurns.commands).toHaveLength(0);
+      expect(app.queue.sendMessage).not.toHaveBeenCalled();
+      expect(app.queue.closeStdin).not.toHaveBeenCalled();
+      expect(app.setAgentCursor).toHaveBeenCalledWith(
+        'tg:primary',
+        compactCursor,
+      );
+      expect(app.saveState).toHaveBeenCalledOnce();
+      expect(getMessagesSince).toHaveBeenLastCalledWith(
+        'tg:primary',
+        compactCursor,
+        expect.any(Number),
+        { threadId: null, providerAccountId: undefined },
+      );
+      expect(app.queue.enqueueMessageCheck).toHaveBeenCalledTimes(1);
+      expect(app.queue.enqueueMessageCheck).toHaveBeenCalledWith('tg:primary');
+      expect(channelWiring.sendMessage).toHaveBeenCalledWith(
+        'tg:primary',
+        "Compaction queued. You can keep messaging me; I'll use the compacted context when it's ready.",
+        { durability: 'required' },
+      );
+      expect(channelWiring.sendMessage).toHaveBeenCalledTimes(1);
     } finally {
       stopLiveTurnRecoveryLoop();
       await stopLiveAdmissionLoop(0);

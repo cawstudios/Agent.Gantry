@@ -18,6 +18,8 @@ import type {
   AsyncTaskReceipt,
   AsyncTaskRecord,
   AsyncTaskRepository,
+  AsyncTaskScopedAdmissionInput,
+  AsyncTaskScopedAdmissionResult,
   AsyncTaskStatus,
   AsyncTaskStatusCount,
   AsyncTaskTransitionInput,
@@ -72,6 +74,66 @@ export class PostgresAsyncTaskRepository implements AsyncTaskRepository {
         .values(taskInsertValues(task))
         .returning();
       return mapRow(row);
+    });
+  }
+
+  async createTaskWithScopedAdmission(
+    input: AsyncTaskScopedAdmissionInput,
+  ): Promise<AsyncTaskScopedAdmissionResult> {
+    return this.db.transaction(async (tx) => {
+      const task = input.task;
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${scopedAdmissionLockKey(task)}))`,
+      );
+      const scopeWhere = asyncTaskScopeWhere(task);
+      const staleTasks =
+        input.staleRunningBefore && input.staleRunningStatus
+          ? (
+              await tx
+                .update(pgSchema.agentAsyncTasksPostgres)
+                .set({
+                  status: input.staleRunningStatus,
+                  terminalAt: task.now,
+                  updatedAt: task.now,
+                  errorSummary: input.staleErrorSummary ?? null,
+                })
+                .where(
+                  and(
+                    scopeWhere,
+                    inArray(
+                      pgSchema.agentAsyncTasksPostgres.status,
+                      input.activeStatuses,
+                    ),
+                    sql`coalesce(${pgSchema.agentAsyncTasksPostgres.heartbeatAt}, ${pgSchema.agentAsyncTasksPostgres.updatedAt}) < ${input.staleRunningBefore}`,
+                  ),
+                )
+                .returning()
+            ).map(mapRow)
+          : [];
+      const [existing] = await tx
+        .select()
+        .from(pgSchema.agentAsyncTasksPostgres)
+        .where(
+          and(
+            scopeWhere,
+            input.activeStatuses.length
+              ? inArray(
+                  pgSchema.agentAsyncTasksPostgres.status,
+                  input.activeStatuses,
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(desc(pgSchema.agentAsyncTasksPostgres.updatedAt))
+        .limit(1);
+      if (existing) {
+        return { task: mapRow(existing), admitted: false, staleTasks };
+      }
+      const [row] = await tx
+        .insert(pgSchema.agentAsyncTasksPostgres)
+        .values(taskInsertValues(task))
+        .returning();
+      return { task: mapRow(row), admitted: true, staleTasks };
     });
   }
 
@@ -266,6 +328,33 @@ function taskInsertValues(input: AsyncTaskCreateInput) {
     updatedAt: input.now,
     summary: input.summary ?? null,
   };
+}
+
+function scopedAdmissionLockKey(input: AsyncTaskCreateInput): string {
+  return [
+    'agent_async_tasks_scope',
+    input.appId,
+    input.agentId,
+    input.kind,
+    input.conversationId ?? '',
+    input.threadId ?? '',
+  ].join(':');
+}
+
+function asyncTaskScopeWhere(input: AsyncTaskCreateInput) {
+  return and(
+    eq(pgSchema.agentAsyncTasksPostgres.appId, input.appId),
+    eq(pgSchema.agentAsyncTasksPostgres.agentId, input.agentId),
+    eq(pgSchema.agentAsyncTasksPostgres.kind, input.kind),
+    nullableEq(
+      pgSchema.agentAsyncTasksPostgres.conversationId,
+      input.conversationId ?? null,
+    ),
+    nullableEq(
+      pgSchema.agentAsyncTasksPostgres.threadId,
+      input.threadId ?? null,
+    ),
+  );
 }
 
 function asyncTaskFilterWhere(filter: Omit<AsyncTaskListFilter, 'limit'>) {

@@ -503,4 +503,81 @@ describe('live-turn host lease acquisition', () => {
       { threadId: null, providerAccountId: 'slack_beta' },
     );
   });
+
+  it('routes only earlier replay messages before an active /compact', async () => {
+    const routeMessage = vi.fn(async () => 'queued_to_owner' as const);
+    const isActiveControlMessage = vi.fn(
+      (message) => message.content === '/compact',
+    );
+    const handleActiveControlMessage = vi.fn(async () => false);
+    const setAgentCursor = vi.fn();
+    const saveState = vi.fn();
+    const enqueueMessageCheck = vi.fn();
+    const messages = [
+      {
+        id: 1,
+        chat_jid: 'chat-1',
+        sender: 'user-1',
+        content: 'normal first',
+        timestamp: '2024-01-01T00:00:01.000Z',
+        is_from_me: false,
+        message_id: 'msg-1',
+        reply_to_message_id: null,
+        reply_to_content: null,
+        sender_name: 'Ravi',
+      },
+      {
+        id: 2,
+        chat_jid: 'chat-1',
+        sender: 'user-1',
+        content: '/compact',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        is_from_me: true,
+        message_id: 'msg-2',
+        reply_to_message_id: null,
+        reply_to_content: null,
+        sender_name: 'Ravi',
+      },
+    ];
+
+    await expect(
+      routeScopeActiveLiveTurnAdmissionFromCursor({
+        scope: {
+          appId: 'app:test',
+          agentSessionId: 'session-1',
+          conversationId: 'chat-1',
+          threadId: null,
+        },
+        queueJid: 'chat-1',
+        liveRunId: 'run-active',
+        chatJid: 'chat-1',
+        threadId: null,
+        replayCursor: '2024-01-01T00:00:00.000Z::0',
+        messageFetchPageSize: 10,
+        timezone: 'UTC',
+        getMessagesSince: vi.fn(async () => messages),
+        setAgentCursor,
+        saveState,
+        enqueueMessageCheck,
+        isActiveControlMessage,
+        handleActiveControlMessage,
+        routeMessage,
+      }),
+    ).resolves.toBe(true);
+
+    expect(handleActiveControlMessage).toHaveBeenCalledOnce();
+    expect(handleActiveControlMessage).toHaveBeenCalledWith(messages[0]);
+    expect(isActiveControlMessage).toHaveBeenCalledWith(messages[1]);
+    expect(routeMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('normal first'),
+      }),
+    );
+    expect(routeMessage.mock.calls[0][0].text).not.toContain('/compact');
+    expect(setAgentCursor).toHaveBeenCalledWith(
+      'chat-1',
+      JSON.stringify({ timestamp: '2024-01-01T00:00:01.000Z', id: 1 }),
+    );
+    expect(enqueueMessageCheck).toHaveBeenCalledWith('chat-1');
+  });
 });

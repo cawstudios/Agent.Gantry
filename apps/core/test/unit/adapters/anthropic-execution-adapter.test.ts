@@ -112,7 +112,7 @@ describe('AnthropicClaudeAgentExecutionAdapter', () => {
     );
   });
 
-  it('uses disposable per-run Claude config projection', async () => {
+  it('delegates Claude config projection to the materializer', async () => {
     mockMaterializeClaudeRuntime.mockClear();
     const adapter = new AnthropicClaudeAgentExecutionAdapter();
 

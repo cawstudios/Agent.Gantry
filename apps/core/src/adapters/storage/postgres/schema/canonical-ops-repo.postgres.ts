@@ -185,6 +185,23 @@ export class PostgresRuntimeRepositoryBundle
     return this.messages.getMessagesSince(chatJid, sinceCursor, limit, options);
   }
 
+  async getContextMessagesSince(
+    chatJid: string,
+    sinceCursor: string,
+    limit: number = 200,
+    options: {
+      threadId?: string | null;
+      providerAccountId?: string | null;
+    } = {},
+  ): Promise<NewMessage[]> {
+    return this.messages.getContextMessagesSince(
+      chatJid,
+      sinceCursor,
+      limit,
+      options,
+    );
+  }
+
   async getRecentTopLevelMessagesBefore(
     chatJid: string,
     before: Pick<NewMessage, 'timestamp' | 'id'>,
@@ -450,6 +467,7 @@ export class PostgresRuntimeRepositoryBundle
     query?: string;
     hydrateMemory?: boolean;
     hydrationMode?: 'first_visible' | 'full';
+    promoteReadyProviderSession?: boolean;
   }): Promise<{
     appId: string;
     agentId: string;
@@ -457,7 +475,17 @@ export class PostgresRuntimeRepositoryBundle
     agentSessionResetAt?: string | null;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestProviderSessionLocked?: boolean;
+    lockedProviderSessionId?: string;
+    latestProviderSessionReady?: boolean;
+    readyProviderSessionId?: string;
+    readyExternalSessionId?: string;
     providerSessionAccessFingerprint?: string;
+    compactionDeltaReplay?: {
+      status: 'pending' | 'applied' | 'degraded';
+      baseCursor?: string;
+      lockedAt?: string;
+    };
     memoryContextBlock?: string;
   }> {
     return this.sessions.getAgentTurnContext({
@@ -473,6 +501,7 @@ export class PostgresRuntimeRepositoryBundle
       query: input.query,
       hydrateMemory: input.hydrateMemory,
       hydrationMode: input.hydrationMode,
+      promoteReadyProviderSession: input.promoteReadyProviderSession,
     });
   }
 
@@ -483,6 +512,37 @@ export class PostgresRuntimeRepositoryBundle
     externalSessionId: string;
   }): Promise<void> {
     await this.sessions.expireProviderSession(input);
+  }
+
+  async markProviderSessionMaintenance(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    compactionBaseCursor?: string | null;
+  }): Promise<boolean> {
+    return this.sessions.markProviderSessionMaintenance(input);
+  }
+
+  async markProviderSessionDeltaReplay(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'applied' | 'degraded';
+    reason?: string;
+  }): Promise<void> {
+    await this.sessions.markProviderSessionDeltaReplay(input);
+  }
+
+  async finishProviderSessionMaintenance(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'active' | 'expired' | 'ready';
+  }): Promise<void> {
+    await this.sessions.finishProviderSessionMaintenance(input);
   }
 
   async createSessionAgentRun(input: {

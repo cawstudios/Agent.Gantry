@@ -295,6 +295,14 @@ maybeDescribe('Postgres domain repositories', () => {
         terminalAt: now,
       }),
     ).resolves.toBeNull();
+    await repositories.asyncTasks.transitionTask({
+      taskId: 'task-admission-command-2',
+      leaseToken: 'lease-command-2-claim',
+      fencingVersion: 2,
+      status: 'completed',
+      now,
+      terminalAt: now,
+    });
   });
 
   it('atomically caps async task backlog admission', async () => {
@@ -331,6 +339,126 @@ maybeDescribe('Postgres domain repositories', () => {
         statuses: ['queued'],
       }),
     ).resolves.toEqual([{ status: 'queued', count: 32 }]);
+  });
+
+  it('deduplicates scoped session compaction admission and times out stale running tasks', async () => {
+    const first = await repositories.asyncTasks.createTaskWithScopedAdmission?.(
+      {
+        task: {
+          id: 'task-session-compact-1',
+          appId,
+          agentId,
+          conversationId,
+          threadId,
+          kind: 'session_compaction',
+          status: 'queued',
+          admissionClass: 'task',
+          authoritySnapshotJson: { internal: true },
+          privateCorrelationJson: {},
+          leaseToken: 'lease-session-compact-1',
+          fencingVersion: 1,
+          now,
+        },
+        activeStatuses: ['queued', 'running'],
+      },
+    );
+    expect(first).toMatchObject({
+      admitted: true,
+      task: { id: 'task-session-compact-1' },
+      staleTasks: [],
+    });
+
+    const duplicate =
+      await repositories.asyncTasks.createTaskWithScopedAdmission?.({
+        task: {
+          id: 'task-session-compact-2',
+          appId,
+          agentId,
+          conversationId,
+          threadId,
+          kind: 'session_compaction',
+          status: 'queued',
+          admissionClass: 'task',
+          authoritySnapshotJson: { internal: true },
+          privateCorrelationJson: {},
+          leaseToken: 'lease-session-compact-2',
+          fencingVersion: 1,
+          now,
+        },
+        activeStatuses: ['queued', 'running'],
+      });
+    expect(duplicate).toMatchObject({
+      admitted: false,
+      task: { id: 'task-session-compact-1' },
+      staleTasks: [],
+    });
+
+    const afterQueuedTimeout =
+      await repositories.asyncTasks.createTaskWithScopedAdmission?.({
+        task: {
+          id: 'task-session-compact-queued-timeout',
+          appId,
+          agentId,
+          conversationId,
+          threadId,
+          kind: 'session_compaction',
+          status: 'queued',
+          admissionClass: 'task',
+          authoritySnapshotJson: { internal: true },
+          privateCorrelationJson: {},
+          leaseToken: 'lease-session-compact-queued-timeout',
+          fencingVersion: 1,
+          now: '2026-04-27T00:12:00.000Z',
+        },
+        activeStatuses: ['queued', 'running'],
+        staleRunningBefore: '2026-04-27T00:11:00.000Z',
+        staleRunningStatus: 'timed_out',
+        staleErrorSummary: 'Session compaction exceeded the 10 minute timeout.',
+      });
+    expect(afterQueuedTimeout).toMatchObject({
+      admitted: true,
+      task: { id: 'task-session-compact-queued-timeout' },
+      staleTasks: [{ id: 'task-session-compact-1', status: 'timed_out' }],
+    });
+
+    await repositories.asyncTasks.transitionTask({
+      taskId: 'task-session-compact-queued-timeout',
+      leaseToken: 'lease-session-compact-queued-timeout',
+      fencingVersion: 1,
+      status: 'running',
+      now: '2026-04-27T00:01:00.000Z',
+      startedAt: '2026-04-27T00:01:00.000Z',
+      heartbeatAt: '2026-04-27T00:01:00.000Z',
+    });
+    const afterTimeout =
+      await repositories.asyncTasks.createTaskWithScopedAdmission?.({
+        task: {
+          id: 'task-session-compact-3',
+          appId,
+          agentId,
+          conversationId,
+          threadId,
+          kind: 'session_compaction',
+          status: 'queued',
+          admissionClass: 'task',
+          authoritySnapshotJson: { internal: true },
+          privateCorrelationJson: {},
+          leaseToken: 'lease-session-compact-3',
+          fencingVersion: 1,
+          now: '2026-04-27T00:12:00.000Z',
+        },
+        activeStatuses: ['queued', 'running'],
+        staleRunningBefore: '2026-04-27T00:11:00.000Z',
+        staleRunningStatus: 'timed_out',
+        staleErrorSummary: 'Session compaction exceeded the 10 minute timeout.',
+      });
+    expect(afterTimeout).toMatchObject({
+      admitted: true,
+      task: { id: 'task-session-compact-3' },
+      staleTasks: [
+        { id: 'task-session-compact-queued-timeout', status: 'timed_out' },
+      ],
+    });
   });
 
   it('rebinds desired-state conversation and binding upserts to the selected provider connection', async () => {

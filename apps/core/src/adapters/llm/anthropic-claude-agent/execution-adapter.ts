@@ -46,6 +46,10 @@ export class AnthropicClaudeAgentExecutionAdapter implements AgentExecutionAdapt
     return /\bNo conversation found with session ID\b/i.test(error ?? '');
   }
 
+  sessionCompactionPrompt(): string {
+    return '/compact';
+  }
+
   async prepare(
     input: AgentExecutionAdapterPrepareInput,
   ): Promise<PreparedAgentExecution> {

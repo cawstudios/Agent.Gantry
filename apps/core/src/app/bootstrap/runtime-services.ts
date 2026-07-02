@@ -78,8 +78,12 @@ import {
 import { splitLiveSendProfileText } from './runtime-services-live-send-segmentation.js';
 import { createDurableOutboundAttempt } from './runtime-services-durable-outbound-attempt.js';
 import { resolveConversationRoute } from './runtime-app-routes.js';
-// prettier-ignore
-import { controlAckMessageOptions, handleActiveNewSessionCommand } from './runtime-services-active-new.js';
+import { handleActiveNewSessionCommand } from './runtime-services-active-new.js';
+import {
+  queueActiveCompactionForRuntime,
+  sendActiveControlReceipt,
+  sendActiveCompactionQueuedReceipt,
+} from './runtime-services-active-compact.js';
 import { registerRuntimeLiveStopMessageAction } from './runtime-live-stop-message-action.js';
 import { nowIso, nowMs, toIso } from '../../shared/time/datetime.js';
 import { LiveTurnAuthority } from '../../runtime/live-turn-authority.js';
@@ -87,7 +91,7 @@ import type { LiveTurnRecoveryLoop } from '../../runtime/live-turn-recovery.js';
 import { configurePendingInteractionPermissionPersistence } from '../../application/interactions/pending-interaction-durability.js';
 import { liveTurnScopeForQueue } from './live-recovery-coordinator.js';
 // prettier-ignore
-import { buildLiveAdmissionProcessor, startLiveExecutionServices, type LiveExecutionServicesHandle, type RecoveryCoordinatorPort } from './live-execution.js';
+import { buildLiveAdmissionProcessor, startLiveExecutionServices, type ActiveControlCommandHandler, type LiveExecutionServicesHandle, type RecoveryCoordinatorPort } from './live-execution.js';
 import { buildLiveTurnBrowserFinalizer } from './live-turn-browser-finalizer.js';
 import { startWaitingStatusMonitor } from './live-execution-waiting-status.js';
 import type { ProcessRole } from './roles/process-role.js';
@@ -98,6 +102,13 @@ import {
 } from './runtime-services-async-task-recovery.js';
 export { stopAsyncTaskRecoveryLoop } from './runtime-services-async-task-recovery.js';
 type RuntimeBootstrapRepository = RuntimeAppRepository & RuntimeJobRepository;
+type LiveTurnCommandWakeupSourceFactory = () =>
+  | LiveTurnCommandWakeupSource
+  | undefined;
+type RuntimeDependencyRepositoryFactory = () =>
+  | RuntimeDependencyRepository
+  | undefined;
+type WaitingStatusMonitor = { oldestWaitingSeconds: () => number };
 interface Deps {
   startSchedulerLoop: typeof startSchedulerLoop;
   startIpcWatcher: typeof startIpcWatcher;
@@ -124,12 +135,8 @@ interface Deps {
     | undefined;
   getLiveTurnRepository?: () => LiveTurnCoordinationRepository | undefined;
   getLiveAdmissionWakeupSource?: () => LiveAdmissionWakeupSource | undefined;
-  getLiveTurnCommandWakeupSource?: () =>
-    | LiveTurnCommandWakeupSource
-    | undefined;
-  getRuntimeDependencyRepository?: () =>
-    | RuntimeDependencyRepository
-    | undefined;
+  getLiveTurnCommandWakeupSource?: LiveTurnCommandWakeupSourceFactory;
+  getRuntimeDependencyRepository?: RuntimeDependencyRepositoryFactory;
   getDeploymentMode: typeof getDeploymentMode;
   startOutboundDeliveryRecoveryLoop: typeof startOutboundDeliveryRecoveryLoop;
   callBrowserTool: IpcDeps['callBrowserTool'];
@@ -217,9 +224,7 @@ function createGroupSnapshotSync(app: RuntimeApp, deps: Deps): () => void {
 let activeLiveTurnRecoveryLoop: LiveTurnRecoveryLoop | undefined;
 let activeLiveTurnAuthority: LiveTurnAuthority | undefined;
 let activeLiveAdmissionLoop: LiveExecutionServicesHandle['admissionLoop'];
-let activeWaitingStatusMonitor:
-  | { oldestWaitingSeconds: () => number }
-  | undefined;
+let activeWaitingStatusMonitor: WaitingStatusMonitor | undefined;
 let activeLiveExecutionServices: LiveExecutionServicesHandle | undefined;
 export function getOldestWaitingLiveAdmissionSeconds(): number {
   return activeWaitingStatusMonitor?.oldestWaitingSeconds() ?? 0;
@@ -487,6 +492,7 @@ export async function startRuntimeServices(
           liveTurnAuthority.registerLocalRunner(queueJid, hooks, routing)
       : null,
   );
+  let handleActiveControlCommand: ActiveControlCommandHandler | undefined;
   app.queue.setProcessMessagesFn(
     buildLiveAdmissionProcessor({
       liveTurnAuthority,
@@ -499,6 +505,8 @@ export async function startRuntimeServices(
       warn: (context, message) => resolved.logger.warn(context, message),
       addReaction: (jid, messageRef, emoji, options) =>
         channelWiring.addReaction(jid, messageRef, emoji, options),
+      handleActiveControlCommand: (args) =>
+        handleActiveControlCommand?.(args) ?? Promise.resolve(false),
       finalizeAgentTodo: (jid, render, options) =>
         channelWiring.finalizeAgentTodo(jid, render, options),
       finalizeBrowserForLiveTurn: buildLiveTurnBrowserFinalizer({
@@ -583,7 +591,7 @@ export async function startRuntimeServices(
     },
   };
   registerRuntimeLiveStopMessageAction(channelWiring, app, liveMessageQueue);
-  const handleActiveControlCommand = async ({
+  handleActiveControlCommand = async ({
     chatJid,
     queueJid,
     group,
@@ -618,27 +626,25 @@ export async function startRuntimeServices(
       typeof message.thread_id === 'string' && message.thread_id.trim()
         ? message.thread_id.trim()
         : undefined;
-    const messageOptions = controlAckMessageOptions(
-      threadId,
-      group.providerAccountId,
-    );
     if (command.kind === 'compact') {
-      const sent = await liveMessageQueue.sendMessage(queueJid, '/compact', {
-        threadId,
-        senderUserIds: message.sender ? [message.sender] : [],
-        idempotencyKey: `compact:${message.id}`,
-      });
-      if (!sent) return false;
-      app.setAgentCursor(
+      return queueActiveCompactionForRuntime({
+        hasActiveTurn:
+          app.queue.isGroupActive(queueJid) ||
+          (liveTurnAuthority?.ownsQueue(queueJid) ?? false),
+        liveTurnAuthority,
+        app,
+        opsRepository: resolved.opsRepository,
+        executionAdapter: resolved.executionAdapter ?? app.executionAdapter,
         queueJid,
-        encodeGroupMessageCursor(toGroupMessageCursor(message)),
-      );
-      await app.saveState();
-      await channelWiring.sendMessage(chatJid, 'Compacting current session.', {
-        durability: 'required',
-        ...(messageOptions ? { messageOptions } : {}),
+        message,
+        sendQueuedReceipt: () =>
+          sendActiveCompactionQueuedReceipt({
+            sendMessage: (text, options) =>
+              channelWiring.sendMessage(chatJid, text, options),
+            threadId,
+            providerAccountId: group.providerAccountId,
+          }),
       });
-      return true;
     }
     if (command.kind === 'new') {
       return handleActiveNewSessionCommand({
@@ -664,16 +670,16 @@ export async function startRuntimeServices(
       encodeGroupMessageCursor(toGroupMessageCursor(message)),
     );
     await app.saveState();
-    await channelWiring.sendMessage(
-      chatJid,
-      command.kind === 'stop'
-        ? 'Stopping current run.'
-        : 'Started a fresh session.',
-      {
-        durability: 'required',
-        ...(messageOptions ? { messageOptions } : {}),
-      },
-    );
+    await sendActiveControlReceipt({
+      sendMessage: (text, options) =>
+        channelWiring.sendMessage(chatJid, text, options),
+      text:
+        command.kind === 'stop'
+          ? 'Stopping current run.'
+          : 'Started a fresh session.',
+      threadId,
+      providerAccountId: group.providerAccountId,
+    });
     return true;
   };
   const outboundDeliveryRepository = resolved.getOutboundDeliveryRepository?.();

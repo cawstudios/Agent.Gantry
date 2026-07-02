@@ -170,13 +170,24 @@ export class CanonicalSessionOpsService {
     query?: string;
     hydrateMemory?: boolean;
     hydrationMode?: HydrationMode;
+    promoteReadyProviderSession?: boolean;
   }): Promise<{
     appId: string;
     agentId: string;
     agentSessionId: string;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestProviderSessionLocked?: boolean;
+    lockedProviderSessionId?: string;
+    latestProviderSessionReady?: boolean;
+    readyProviderSessionId?: string;
+    readyExternalSessionId?: string;
     providerSessionAccessFingerprint?: string;
+    compactionDeltaReplay?: {
+      status: 'pending' | 'applied' | 'degraded';
+      baseCursor?: string;
+      lockedAt?: string;
+    };
     agentSessionResetAt?: string | null;
     memoryContextBlock?: string;
   }> {
@@ -197,6 +208,7 @@ export class CanonicalSessionOpsService {
       conversationKind: input.conversationKind,
       memoryUserId: input.memoryUserId,
       jobId: input.jobId,
+      promoteReadyProviderSession: input.promoteReadyProviderSession,
     });
     const hydrated =
       input.hydrateMemory === false
@@ -220,6 +232,37 @@ export class CanonicalSessionOpsService {
     externalSessionId: string;
   }): Promise<void> {
     await this.repository.expireProviderSession(input);
+  }
+
+  async markProviderSessionMaintenance(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    compactionBaseCursor?: string | null;
+  }): Promise<boolean> {
+    return this.repository.markProviderSessionMaintenance(input);
+  }
+
+  async markProviderSessionDeltaReplay(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'applied' | 'degraded';
+    reason?: string;
+  }): Promise<void> {
+    await this.repository.markProviderSessionDeltaReplay(input);
+  }
+
+  async finishProviderSessionMaintenance(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'active' | 'expired' | 'ready';
+  }): Promise<void> {
+    await this.repository.finishProviderSessionMaintenance(input);
   }
 
   async deleteSession(

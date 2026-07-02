@@ -41,6 +41,7 @@ import {
   createSaveProcedureHandler,
   createSenderCommandPolicy,
   createSessionArchiveHandlers,
+  createSessionCompactionHandlers,
 } from './group-session-command-state.js';
 import { groupTurnHasRequiredTrigger } from './group-trigger-policy.js';
 import {
@@ -53,6 +54,7 @@ import {
   createGroupAgentRunner,
   type GroupAgentRunResult,
 } from './group-agent-runner.js';
+import { createSessionCommandAgentRunners } from './group-session-command-runner.js';
 import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
 import {
   isModelAccessAuthFailure,
@@ -62,14 +64,10 @@ import { createGroupTurnOptionBuilders } from './group-turn-options.js';
 import { collectPendingMessagesSince } from './pending-message-replay.js';
 import { buildGroupProcessingConversationContext } from './group-processing-context.js';
 import { createGroupOutputBuffer } from './group-output-buffer.js';
+import { activeTurnUiCleanupByQueue } from './group-active-turn-cleanup.js';
 let streamingGenerationCounter = 0;
 const PERMISSION_BACKGROUND_DEMOTE_MS = 120_000;
 type ProgressHeartbeat = ReturnType<typeof startGroupProgressHeartbeats>;
-type ActiveTurnUiCleanup = {
-  token: symbol;
-  cancel: () => void | Promise<void>;
-};
-const activeTurnUiCleanupByQueue = new Map<string, ActiveTurnUiCleanup>();
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const collectSessionMemory = deps.collectSessionMemory;
   const ops = () => {
@@ -175,6 +173,18 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       group,
       triggerPattern: config.getTriggerPattern(group.trigger),
     });
+    const sessionCommandStateInput = {
+      ops,
+      appId: turnAppId,
+      group,
+      chatJid,
+      threadId: activeThreadId ?? null,
+      defaultScope: defaultMemoryScope,
+      memoryUserId,
+      collectMemory: collectSessionMemory,
+      executionAdapter: deps.executionAdapter,
+      getAsyncTaskRepository: deps.getAsyncTaskRepository,
+    };
     const cmdResult = await handleSessionCommand({
       missedMessages,
       groupName: group.name,
@@ -184,23 +194,23 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         sendMessage: (text, options) =>
           sendMessageToChannel(text, buildMessageOptions(options?.threadId)),
         setTyping: setTurnTyping,
-        runAgent: (prompt, onOutput, commandOptions) =>
-          runAgent(group, prompt, chatJid, queueJid, onOutput, {
-            ...commandOptions,
-            memoryContext: {
-              source: 'command',
-              userId: memoryUserId,
-              threadId: activeThreadId,
-            },
-            turnMessages: missedMessages,
-            existingRunId: options.existingRunId,
-            existingRunLeaseToken: options.existingRunLeaseToken,
-            existingRunLeaseWorkerInstanceId:
-              options.existingRunLeaseWorkerInstanceId,
-            existingRunLeaseFencingVersion:
-              options.existingRunLeaseFencingVersion,
-          }),
+        ...createSessionCommandAgentRunners({
+          runAgent,
+          group,
+          chatJid,
+          queueJid,
+          memoryUserId,
+          activeThreadId,
+          missedMessages,
+          existingRunId: options.existingRunId,
+          existingRunLeaseToken: options.existingRunLeaseToken,
+          existingRunLeaseWorkerInstanceId:
+            options.existingRunLeaseWorkerInstanceId,
+          existingRunLeaseFencingVersion:
+            options.existingRunLeaseFencingVersion,
+        }),
         closeStdin: () => deps.queue.closeStdin(queueJid),
+        compactionScopeKey: queueJid,
         advanceCursor: createAdvanceCursorHandler({
           queueJid,
           setCursor: deps.setCursor,
@@ -233,17 +243,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         getGroupThinkingOverride: () => group.agentConfig?.thinking,
         setGroupThinkingOverride: async (value) =>
           deps.setGroupThinkingOverride(commandOverrideRouteKey, value),
-        ...createSessionArchiveHandlers({
-          ops,
-          appId: turnAppId,
-          group,
-          chatJid,
-          threadId: activeThreadId ?? null,
-          defaultScope: defaultMemoryScope,
-          memoryUserId,
-          collectMemory: collectSessionMemory,
-          executionAdapter: deps.executionAdapter,
-        }),
+        ...createSessionArchiveHandlers(sessionCommandStateInput),
+        ...createSessionCompactionHandlers(sessionCommandStateInput),
         clearCurrentSession: () =>
           deps.clearSession(group.folder, activeThreadId, {
             appId: turnAppId,
@@ -676,6 +677,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           })
         ) {
           await sendTrackedDoneProgress(markerProgressState);
+        }
+        if (typingActive) {
+          await setTypingState(false);
         }
         startNextStreamingMessage();
         resetIdleTimer();

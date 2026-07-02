@@ -13,7 +13,7 @@ import type { GroupMessageRunContext } from '../../runtime/group-queue-types.js'
 import type { RunLease } from '../../domain/ports/worker-coordination.js';
 import type { RuntimeLease } from '../../domain/ports/runtime-lease.js';
 import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
-import type { NewMessage } from '../../domain/types.js';
+import type { ConversationRoute, NewMessage } from '../../domain/types.js';
 import type { ProcessRole } from './roles/process-role.js';
 import {
   findConversationRouteForQueue,
@@ -41,9 +41,24 @@ import { markPendingContinuationCommandsApplied } from './live-turn-continuation
 import { routeScopeActiveLiveTurnAdmissionFromCursor } from './live-recovery-coordinator.js';
 import { type LiveTurnBrowserFinalizer } from './live-turn-browser-finalizer.js';
 import { computeHostCapacityPlan } from '../../shared/host-capacity.js';
+import { type SessionCommand } from '../../session/session-commands.js';
+import { createActiveCompactRouteHandlers } from './runtime-services-active-compact.js';
 
 type WarnLog = (context: Record<string, unknown>, message: string) => void;
 type InfoLog = (obj: string | Record<string, unknown>, msg?: string) => void;
+export type ActiveControlRoute = {
+  folder: string;
+  trigger?: string;
+  conversationKind?: 'dm' | 'channel';
+  providerAccountId?: string;
+};
+export type ActiveControlCommandHandler = (args: {
+  chatJid: string;
+  queueJid: string;
+  group: ActiveControlRoute;
+  message: NewMessage;
+  command: SessionCommand;
+}) => Promise<boolean> | boolean;
 
 interface AdmissionOpsRepository {
   getAgentTurnContext?: (input: {
@@ -83,10 +98,7 @@ interface AdmissionOpsRepository {
 }
 
 interface AdmissionApp {
-  getConversationRoutes(): Record<
-    string,
-    { folder: string; conversationKind?: 'channel' | 'dm' }
-  >;
+  getConversationRoutes(): Record<string, ConversationRoute>;
   processGroupMessages: (
     queueJid: string,
     options: {
@@ -109,22 +121,6 @@ interface AdmissionApp {
   saveState: () => Promise<void> | void;
 }
 
-/**
- * Build the GroupQueue message processor. With WP2 horizontal execution EVERY
- * live worker runs this — there is no live-host lease gate on admission. The
- * durable one-active-turn-per-scope claim (`uq_live_turns_active_scope`) is the
- * serialization point: when two pollers race the same scope, the loser sees
- * `scope_active` and routes its message to the durable owner inbox instead of
- * starting a second run.
- *
- * Orphan-run avoidance (WP2): N pollers racing the same scope must not each mint
- * a `running` agent_run row that loses the claim. We do a cheap
- * `getActiveLiveTurn(scope)` pre-check BEFORE creating the run; if a turn is
- * already active, the continuation routes WITHOUT creating a run row. The
- * residual race (claimed between pre-check and claim) is cleaned up by
- * terminal-marking the just-created run on a non-`claimed` admission outcome, so
- * no non-terminal orphan run rows survive a lost race.
- */
 export function buildLiveAdmissionProcessor(input: {
   liveTurnAuthority: LiveTurnAuthority | undefined;
   app: AdmissionApp;
@@ -150,6 +146,7 @@ export function buildLiveAdmissionProcessor(input: {
     options?: { providerAccountId?: string },
   ) => Promise<boolean>;
   finalizeBrowserForLiveTurn?: LiveTurnBrowserFinalizer;
+  handleActiveControlCommand?: ActiveControlCommandHandler;
 }): (queueJid: string, context?: GroupMessageRunContext) => Promise<boolean> {
   const {
     liveTurnAuthority,
@@ -170,6 +167,7 @@ export function buildLiveAdmissionProcessor(input: {
     chatJid: string,
     threadId: string | null,
     replayCursor: string,
+    route: ActiveControlRoute,
   ): Promise<boolean> =>
     routeScopeActiveLiveTurnAdmissionFromCursor({
       scope,
@@ -184,6 +182,12 @@ export function buildLiveAdmissionProcessor(input: {
       setAgentCursor: app.setAgentCursor,
       saveState: app.saveState,
       enqueueMessageCheck: input.enqueueMessageCheck,
+      ...createActiveCompactRouteHandlers({
+        route,
+        chatJid,
+        queueJid,
+        handleActiveControlCommand: input.handleActiveControlCommand,
+      }),
       routeMessage: liveTurnAuthority!.routeMessage.bind(liveTurnAuthority),
       completeSessionAgentRun:
         opsRepository.completeSessionAgentRun?.bind(opsRepository),
@@ -253,6 +257,7 @@ export function buildLiveAdmissionProcessor(input: {
           chatJid,
           threadId ?? null,
           replayCursor,
+          route,
         );
       }
       liveRunId = await opsRepository.createSessionAgentRun?.({
@@ -285,6 +290,7 @@ export function buildLiveAdmissionProcessor(input: {
             chatJid,
             threadId ?? null,
             replayCursor,
+            route,
           );
         }
         // no_capacity / lease_unavailable: terminal-mark the orphan run. The
@@ -413,12 +419,6 @@ export interface LiveExecutionServicesHandle {
   recoveryLoop: LiveTurnRecoveryLoop | undefined;
 }
 
-/**
- * Hooks for the waiting-status monitor (a sibling of the recovery coordinator).
- * Started/stopped in lockstep with the coordinator so detection + sends happen
- * on exactly one worker. Absent ⇒ the monitor is not started (tests / processes
- * with no waiting-status delivery wired).
- */
 export interface WaitingStatusCoordination {
   /** Start the monitor; returns a handle with stop + oldest-age accessor. */
   start: () => { stop: () => void; oldestWaitingSeconds: () => number };

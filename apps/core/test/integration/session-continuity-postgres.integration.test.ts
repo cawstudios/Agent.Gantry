@@ -115,6 +115,271 @@ maybeDescribe('Postgres memory continuity', () => {
     });
   });
 
+  it('reports maintenance-locked provider sessions without replacing the head', async () => {
+    const workspaceFolder = 'group-session-locked';
+    const chatJid = 'tg:group-session-locked';
+    const sessionId = 'provider-session:test:locked';
+
+    await runtime.sessionOps.setSession(workspaceFolder, sessionId, null, {
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+    });
+    const active = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    await runtime.repositories.providerSessions.markProviderSessionStatus(
+      sessionId as ProviderSessionId,
+      'maintenance_compact',
+      new Date().toISOString(),
+    );
+
+    const locked = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    expect(locked.agentSessionId).toBe(active.agentSessionId);
+    expect(locked).toMatchObject({
+      latestProviderSessionLocked: true,
+      lockedProviderSessionId: sessionId,
+    });
+    expect(locked).not.toHaveProperty('providerSessionId');
+    expect(locked).not.toHaveProperty('externalSessionId');
+
+    await expect(
+      runtime.sessionOps.setSession(
+        workspaceFolder,
+        'provider-session:test:ephemeral',
+        null,
+        {
+          executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+          chatJid,
+          expectedAgentSessionId: active.agentSessionId,
+        },
+      ),
+    ).resolves.toBe(false);
+
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({ id: sessionId, status: 'maintenance_compact' });
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        'provider-session:test:ephemeral' as ProviderSessionId,
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('marks completed compaction ready, then promotes on the next turn boundary', async () => {
+    const workspaceFolder = 'group-session-ready-promotion';
+    const chatJid = 'tg:group-session-ready-promotion';
+    const sessionId = 'provider-session:test:ready-promotion';
+
+    await runtime.sessionOps.setSession(workspaceFolder, sessionId, null, {
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+    });
+    const active = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    await expect(
+      runtime.sessionOps.markProviderSessionMaintenance({
+        providerSessionId: sessionId,
+        agentSessionId: active.agentSessionId,
+        provider: TEST_EXECUTION_PROVIDER_ID,
+        externalSessionId: sessionId,
+        compactionBaseCursor: JSON.stringify({
+          timestamp: '2026-04-28T00:00:01.000Z',
+          id: 'compact-command',
+        }),
+      }),
+    ).resolves.toBe(true);
+    await runtime.sessionOps.finishProviderSessionMaintenance({
+      providerSessionId: sessionId,
+      agentSessionId: active.agentSessionId,
+      provider: TEST_EXECUTION_PROVIDER_ID,
+      externalSessionId: sessionId,
+      status: 'ready',
+    });
+
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      id: sessionId,
+      status: 'ready',
+      metadata: expect.objectContaining({
+        compactionPromotion: 'pending_next_turn',
+        deltaReplay: expect.objectContaining({
+          status: 'pending',
+          baseCursor: JSON.stringify({
+            timestamp: '2026-04-28T00:00:01.000Z',
+            id: 'compact-command',
+          }),
+        }),
+      }),
+    });
+
+    const statusRead = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    expect(statusRead).toMatchObject({
+      latestProviderSessionReady: true,
+      readyProviderSessionId: sessionId,
+    });
+    expect(statusRead).not.toHaveProperty('providerSessionId');
+    expect(statusRead).not.toHaveProperty('externalSessionId');
+
+    const promoted = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+      promoteReadyProviderSession: true,
+    });
+    expect(promoted).toMatchObject({
+      providerSessionId: sessionId,
+      externalSessionId: sessionId,
+    });
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({
+      id: sessionId,
+      status: 'active',
+      metadata: expect.objectContaining({
+        compactionPromotion: 'promoted_next_turn',
+        deltaReplay: expect.objectContaining({
+          status: 'pending',
+          baseCursor: JSON.stringify({
+            timestamp: '2026-04-28T00:00:01.000Z',
+            id: 'compact-command',
+          }),
+        }),
+      }),
+    });
+  });
+
+  it('releases stale maintenance compact locks before turn context and head writes', async () => {
+    const workspaceFolder = 'group-session-stale-lock';
+    const chatJid = 'tg:group-session-stale-lock';
+    const sessionId = 'provider-session:test:stale-lock';
+
+    await runtime.sessionOps.setSession(workspaceFolder, sessionId, null, {
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+    });
+    const activeContext = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    await runtime.repositories.providerSessions.markProviderSessionStatus(
+      sessionId as ProviderSessionId,
+      'maintenance_compact',
+      '2000-01-01T00:00:00.000Z',
+    );
+    const freshHeartbeatAt = new Date().toISOString();
+    await runtime.repositories.asyncTasks.createTask({
+      id: 'task-session-continuity-fresh-compact',
+      appId: activeContext.appId,
+      agentId: activeContext.agentId,
+      conversationId: chatJid,
+      threadId: null,
+      kind: 'session_compaction',
+      status: 'queued',
+      admissionClass: 'task',
+      authoritySnapshotJson: { internal: true },
+      privateCorrelationJson: {
+        providerSessionId: sessionId,
+        agentSessionId: activeContext.agentSessionId,
+        provider: TEST_EXECUTION_PROVIDER_ID,
+        externalSessionId: sessionId,
+      },
+      leaseToken: 'lease-session-continuity-fresh-compact',
+      fencingVersion: 1,
+      now: freshHeartbeatAt,
+    });
+    await runtime.repositories.asyncTasks.transitionTask({
+      taskId: 'task-session-continuity-fresh-compact',
+      leaseToken: 'lease-session-continuity-fresh-compact',
+      fencingVersion: 1,
+      status: 'running',
+      now: freshHeartbeatAt,
+      startedAt: freshHeartbeatAt,
+      heartbeatAt: freshHeartbeatAt,
+    });
+
+    const freshTaskContext = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    expect(freshTaskContext).toMatchObject({
+      latestProviderSessionLocked: true,
+      lockedProviderSessionId: sessionId,
+    });
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({ id: sessionId, status: 'maintenance_compact' });
+
+    await runtime.repositories.asyncTasks.transitionTask({
+      taskId: 'task-session-continuity-fresh-compact',
+      leaseToken: 'lease-session-continuity-fresh-compact',
+      fencingVersion: 1,
+      status: 'timed_out',
+      now,
+      terminalAt: now,
+    });
+
+    const context = await runtime.sessionOps.getAgentTurnContext({
+      workspaceFolder,
+      executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+      chatJid,
+      threadId: null,
+    });
+    expect(context).toMatchObject({
+      providerSessionId: sessionId,
+      externalSessionId: sessionId,
+    });
+    expect(context).not.toHaveProperty('latestProviderSessionLocked');
+    await expect(
+      runtime.repositories.providerSessions.getProviderSession(
+        sessionId as ProviderSessionId,
+      ),
+    ).resolves.toMatchObject({ id: sessionId, status: 'active' });
+
+    await expect(
+      runtime.sessionOps.setSession(
+        workspaceFolder,
+        'provider-session:test:stale-replacement',
+        null,
+        {
+          executionProviderId: TEST_EXECUTION_PROVIDER_ID,
+          chatJid,
+          expectedAgentSessionId: context.agentSessionId,
+        },
+      ),
+    ).resolves.toBe(true);
+  });
+
   it('uses active conversation install agent identity for turn context', async () => {
     const chatJid = 'tg:bound-skill-agent';
 
