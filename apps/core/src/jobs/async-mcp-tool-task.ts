@@ -19,7 +19,10 @@ import {
 } from './async-command-task-helpers.js';
 import { cancelledReceipt } from './async-command-task-receipts.js';
 import { hasAsyncTaskRunningCapacity } from './async-task-running-capacity.js';
-import { asyncMcpPrivateCorrelation } from './async-task-execution-payload.js';
+import {
+  asyncMcpPrivateCorrelation,
+  readEncryptedAsyncTaskPayload,
+} from './async-task-execution-payload.js';
 
 const RUNNING_ASYNC_MCP_STATUSES = ['running'] as const;
 const MAX_ACTIVE_ASYNC_MCP_PER_APP = 4;
@@ -49,6 +52,12 @@ const pendingAsyncMcpExecutions = new Map<
     arguments: Record<string, unknown>;
   }
 >();
+
+type DurableAsyncMcpPayload = {
+  serverName: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+};
 
 export async function createAsyncMcpTask(input: {
   repository: AsyncTaskRepository;
@@ -150,6 +159,44 @@ export async function enqueueAsyncMcpTask(input: {
 }): Promise<void> {
   pendingAsyncMcpExecutions.set(input.task.id, input);
   await drainAsyncMcpTasks(input.repository);
+}
+
+export async function recoverQueuedAsyncMcpTasks(input: {
+  repository: AsyncTaskRepository;
+  appId: string;
+  agentId?: string;
+  createProxy: (
+    task: AsyncTaskRecord,
+    payload: DurableAsyncMcpPayload,
+  ) => Promise<McpToolProxy> | McpToolProxy;
+  limit?: number;
+}): Promise<number> {
+  const tasks = await input.repository.listTasks({
+    appId: input.appId,
+    agentId: input.agentId,
+    kind: 'mcp_tool_call',
+    statuses: ['queued'],
+    limit: input.limit ?? 100,
+  });
+  let recovered = 0;
+  for (const task of tasks) {
+    if (pendingAsyncMcpExecutions.has(task.id)) continue;
+    const payload = readEncryptedAsyncTaskPayload<DurableAsyncMcpPayload>(task);
+    if (!isDurableAsyncMcpPayload(payload)) continue;
+    pendingAsyncMcpExecutions.set(task.id, {
+      repository: input.repository,
+      task,
+      proxy: await input.createProxy(task, payload),
+      appId: task.appId,
+      agentId: task.agentId,
+      serverName: payload.serverName,
+      toolName: payload.toolName,
+      arguments: payload.arguments,
+    });
+    recovered += 1;
+  }
+  if (recovered > 0) await drainAsyncMcpTasks(input.repository);
+  return recovered;
 }
 
 export async function executeAsyncMcpTask(input: {
@@ -459,5 +506,16 @@ function isMcpToolErrorResult(result: unknown): boolean {
     typeof result === 'object' &&
     !Array.isArray(result) &&
     (result as { isError?: unknown }).isError === true
+  );
+}
+
+function isDurableAsyncMcpPayload(
+  value: DurableAsyncMcpPayload | null,
+): value is DurableAsyncMcpPayload {
+  return Boolean(
+    value &&
+    typeof value.serverName === 'string' &&
+    typeof value.toolName === 'string' &&
+    isRecord(value.arguments),
   );
 }

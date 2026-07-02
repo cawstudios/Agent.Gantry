@@ -4,9 +4,12 @@ import {
   AsyncCommandTaskService,
   type AsyncCommandRunner,
 } from '@core/jobs/async-command-task-service.js';
-import { failUnrecoverableQueuedAsyncTasks } from '@core/jobs/async-command-queue-recovery.js';
 import { persistInspectionSnapshot } from '@core/jobs/async-command-task-helpers.js';
 import { readEncryptedAsyncTaskPayload } from '@core/jobs/async-task-execution-payload.js';
+import {
+  createAsyncMcpTask,
+  recoverQueuedAsyncMcpTasks,
+} from '@core/jobs/async-mcp-tool-task.js';
 import type {
   AsyncTaskCreateInput,
   AsyncTaskListFilter,
@@ -418,59 +421,120 @@ describe('AsyncCommandTaskService', () => {
     );
   });
 
-  it('fails queued MCP and delegated tasks that cannot be reconstructed after restart', async () => {
+  it('recovers queued MCP tasks from encrypted payloads after restart', async () => {
     const repository = new MemoryAsyncTaskRepository();
-    const now = new Date().toISOString();
-    await repository.createTask({
-      id: 'task-mcp',
+    const created = await createAsyncMcpTask({
+      repository,
       appId: 'app-1',
       agentId: 'agent-1',
       conversationId: 'conversation-1',
-      kind: 'mcp_tool_call',
-      status: 'queued',
-      admissionClass: 'task',
-      authoritySnapshotJson: { mcpToolRule: 'mcp__crm__create_deal' },
-      privateCorrelationJson: {},
-      leaseToken: 'lease-mcp',
-      fencingVersion: 1,
-      now,
+      serverName: 'crm',
+      toolName: 'create_deal',
+      arguments: { name: 'Acme' },
     });
-    await repository.createTask({
-      id: 'task-delegated',
-      appId: 'app-1',
-      agentId: 'agent-1',
-      conversationId: 'conversation-1',
-      kind: 'delegated_agent',
-      status: 'queued',
-      admissionClass: 'task',
-      authoritySnapshotJson: { toolName: 'delegate_task' },
-      privateCorrelationJson: {},
-      leaseToken: 'lease-delegated',
-      fencingVersion: 1,
-      now,
-    });
+    const callTool = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'created Acme' }],
+    }));
 
     await expect(
-      failUnrecoverableQueuedAsyncTasks({ repository, appId: 'app-1' }),
-    ).resolves.toBe(2);
+      recoverQueuedAsyncMcpTasks({
+        repository,
+        appId: 'app-1',
+        createProxy: () => ({ callTool }) as never,
+      }),
+    ).resolves.toBe(1);
 
-    expect(repository.tasks.get('task-mcp')).toMatchObject({
-      status: 'failed',
-      errorSummary:
-        'Task worker restarted before this queued task could be claimed.',
+    await waitForStatus(repository, created.task.id, 'completed');
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverName: 'crm',
+        toolName: 'create_deal',
+        arguments: { name: 'Acme' },
+      }),
+    );
+    expect(repository.tasks.get(created.task.id)).toMatchObject({
       receiptJson: {
-        completed: 'failed before queued task claim after worker restart',
+        completed: expect.stringContaining('created Acme'),
         used: 'mcp__crm__create_deal',
         delegated: 'no',
       },
     });
-    expect(repository.tasks.get('task-delegated')).toMatchObject({
-      status: 'failed',
-      receiptJson: {
-        completed: 'failed before queued task claim after worker restart',
-        used: 'Gantry agent run',
-        delegated: 'yes',
+  });
+
+  it('recovers queued delegated agents from encrypted payloads after restart', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const blocked = new AsyncCommandTaskService(repository, {
+      run: async () => ({}),
+    });
+    const releases: Array<() => void> = [];
+    const activeRun = vi.fn(
+      async () =>
+        new Promise((resolve) => {
+          releases.push(() => resolve({ outputSummary: 'done' }));
+        }),
+    );
+    for (const objective of ['one', 'two']) {
+      await blocked.startDelegatedAgent({
+        appId: 'app-1',
+        agentId: 'agent-1',
+        conversationId: 'conversation-1',
+        objective,
+        workspaceFolder: 'main_agent',
+        run: activeRun,
+      });
+    }
+    const activeTasks = [...repository.tasks.values()];
+    await waitForStatus(repository, activeTasks[0]!.id, 'running');
+    await waitForStatus(repository, activeTasks[1]!.id, 'running');
+    const queued = await blocked.startDelegatedAgent({
+      appId: 'app-1',
+      agentId: 'agent-1',
+      conversationId: 'conversation-1',
+      objective: 'three',
+      context: 'use current repo',
+      expectedOutput: 'short report',
+      workspaceFolder: 'main_agent',
+      run: async () => ({ outputSummary: 'should not run in old service' }),
+    });
+    expect(queued.ok).toBe(true);
+    if (!queued.ok) return;
+    expect(repository.tasks.get(queued.task.id)?.status).toBe('queued');
+    for (const task of [...repository.tasks.values()].filter(
+      (task) => task.status === 'running',
+    )) {
+      await repository.transitionTask({
+        taskId: task.id,
+        leaseToken: task.leaseToken,
+        fencingVersion: task.fencingVersion,
+        status: 'completed',
+        now: new Date().toISOString(),
+        terminalAt: new Date().toISOString(),
+      });
+    }
+    const recoveredRun = vi.fn(async ({ prompt }) => {
+      expect(prompt).toContain('Objective: three');
+      expect(prompt).toContain('Context: use current repo');
+      expect(prompt).toContain('Expected output: short report');
+      return { outputSummary: 'recovered delegation done' };
+    });
+    const recovered = new AsyncCommandTaskService(
+      repository,
+      { run: async () => ({}) },
+      {
+        createRecoveredDelegatedAgentRun: () => recoveredRun,
       },
+    );
+
+    await expect(
+      recovered.recoverQueuedTasks({ appId: 'app-1' }),
+    ).resolves.toBe(1);
+
+    await waitForStatus(repository, queued.task.id, 'completed');
+    expect(recoveredRun).toHaveBeenCalledTimes(1);
+    expect(repository.tasks.get(queued.task.id)?.receiptJson).toMatchObject({
+      completed: 'recovered delegation done',
+      used: 'Gantry agent run',
+      delegated: 'yes',
     });
   });
 

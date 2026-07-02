@@ -4,7 +4,10 @@ import type {
   AsyncCommandProcessHandle,
   StartAsyncCommandTaskInput,
 } from './async-command-task-service.js';
-import type { PendingDelegatedAgentExecution } from './async-delegated-agent-task.js';
+import type {
+  PendingDelegatedAgentExecution,
+  StartDelegatedAgentTaskInput,
+} from './async-delegated-agent-task.js';
 
 export type PendingAsyncCommandExecution = {
   task: AsyncTaskRecord;
@@ -29,6 +32,10 @@ export type PendingAsyncTaskExecution =
 
 export interface AsyncCommandTaskServiceOptions {
   terminateProcess?: (handle: AsyncCommandProcessHandle) => boolean;
+  createRecoveredDelegatedAgentRun?: (
+    task: AsyncTaskRecord,
+    input: Omit<StartDelegatedAgentTaskInput, 'run'>,
+  ) => StartDelegatedAgentTaskInput['run'];
   prepareRun?: (input: {
     task: AsyncTaskRecord;
     allowedNetworkHosts?: readonly string[];

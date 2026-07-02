@@ -20,6 +20,7 @@ import {
   ToolExecutionPolicyService,
 } from '../shared/tool-execution-policy-service.js';
 import { denyMemoryBoundaryToolUse } from '../shared/memory-boundary.js';
+import type { RunnerSandboxResourceLimits } from '../shared/runner-sandbox-provider.js';
 import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
 import { nowIso } from '../shared/time/datetime.js';
 import {
@@ -53,7 +54,7 @@ import type {
 } from './async-command-task-queue-types.js';
 import { drainQueuedAsyncTasks } from './async-command-task-drainer.js';
 import { asyncCommandPrivateCorrelation } from './async-task-execution-payload.js';
-import { recoverQueuedAsyncCommandTasks } from './async-command-queue-recovery.js';
+import { recoverQueuedAsyncTasks } from './async-command-queue-recovery.js';
 
 const SHELL_POLICY_TOOL_NAME = 'Bash';
 const MAX_ACTIVE_ASYNC_COMMANDS_PER_APP = 4;
@@ -99,11 +100,7 @@ export interface AsyncCommandRunner {
     protectedWritePaths?: readonly string[];
     allowedNetworkHosts?: readonly string[];
     egressProxyUrl?: string;
-    resourceLimits?: {
-      cpuSeconds: number;
-      memoryMb: number;
-      maxProcesses: number;
-    };
+    resourceLimits?: RunnerSandboxResourceLimits;
     onProcessStarted?: (
       handle: AsyncCommandProcessHandle,
     ) => Promise<void> | void;
@@ -127,11 +124,7 @@ export interface StartAsyncCommandTaskInput {
   protectedWritePaths?: readonly string[];
   allowedNetworkHosts?: readonly string[];
   egressProxyUrl?: string;
-  resourceLimits?: {
-    cpuSeconds: number;
-    memoryMb: number;
-    maxProcesses: number;
-  };
+  resourceLimits?: RunnerSandboxResourceLimits;
   allowedToolRules: readonly string[];
   memoryBlock?: string;
   isScheduledJob?: boolean;
@@ -153,6 +146,9 @@ export class AsyncCommandTaskService {
   private readonly prepareRun: NonNullable<
     AsyncCommandTaskServiceOptions['prepareRun']
   >;
+  private readonly createRecoveredDelegatedAgentRun:
+    | AsyncCommandTaskServiceOptions['createRecoveredDelegatedAgentRun']
+    | undefined;
 
   constructor(
     private readonly repository: AsyncTaskRepository,
@@ -161,6 +157,8 @@ export class AsyncCommandTaskService {
   ) {
     this.terminateProcess = options.terminateProcess ?? terminateProcessHandle;
     this.prepareRun = options.prepareRun ?? (async () => undefined);
+    this.createRecoveredDelegatedAgentRun =
+      options.createRecoveredDelegatedAgentRun;
   }
 
   async start(
@@ -397,9 +395,15 @@ export class AsyncCommandTaskService {
     agentId?: string;
     limit?: number;
   }): Promise<number> {
-    const recovered = await recoverQueuedAsyncCommandTasks({
+    const recovered = await recoverQueuedAsyncTasks({
       repository: this.repository,
       pending: this.pending,
+      createDelegatedRun: this.createRecoveredDelegatedAgentRun,
+      cancelLinkedChildTasks: async (parent) => {
+        const result = await this.cancelChildTasks(parent);
+        return result.ok ? result.cancelled : 0;
+      },
+      waitForTaskChange: (_parent, options) => this.taskChanges.wait(options),
       ...input,
     });
     if (recovered > 0) await this.drainQueuedTasks();

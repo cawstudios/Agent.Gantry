@@ -321,12 +321,18 @@ export async function startRuntimeServices(
       warn: (context, message) => resolved.logger.warn(context, message),
     });
   const syncGroupSnapshots = createGroupSnapshotSync(app, resolved);
+  const asyncTaskRecoveryDeps = {
+    ...resolved,
+    conversationRoutes: () => app.getConversationRoutes(),
+  };
   await recoverStaleAsyncCommandTasks(
     String(channelWiring.getRuntimeAppId()),
-    resolved,
-    { failUnrecoverableQueued: true },
+    asyncTaskRecoveryDeps,
   );
-  startAsyncTaskRecoveryLoop(String(channelWiring.getRuntimeAppId()), resolved);
+  startAsyncTaskRecoveryLoop(
+    String(channelWiring.getRuntimeAppId()),
+    asyncTaskRecoveryDeps,
+  );
   const onSchedulerChanged = (jobId?: string) => requestSchedulerSync(jobId);
   const schedulerMessageOptions = (
     jid: string,

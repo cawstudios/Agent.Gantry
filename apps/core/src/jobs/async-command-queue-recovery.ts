@@ -1,12 +1,11 @@
 import type {
-  AsyncTaskKind,
+  AsyncTaskRecord,
   AsyncTaskRepository,
 } from '../domain/ports/async-tasks.js';
-import { nowIso } from '../shared/time/datetime.js';
-import { failedReceipt } from './async-command-task-receipts.js';
 import type { AsyncCommandLaunchControl } from './async-command-task-service.js';
 import type { PendingAsyncTaskExecution } from './async-command-task-queue-types.js';
 import { readEncryptedAsyncTaskPayload } from './async-task-execution-payload.js';
+import type { StartDelegatedAgentTaskInput } from './async-delegated-agent-task.js';
 
 type DurableAsyncCommandPayload = {
   command: string;
@@ -14,7 +13,38 @@ type DurableAsyncCommandPayload = {
   launchControl: AsyncCommandLaunchControl;
 };
 
-export async function recoverQueuedAsyncCommandTasks(input: {
+type DurableDelegatedAgentPayload = Pick<
+  StartDelegatedAgentTaskInput,
+  'context' | 'expectedOutput' | 'objective' | 'workspaceFolder'
+>;
+
+export async function recoverQueuedAsyncTasks(input: {
+  repository: AsyncTaskRepository;
+  pending: Map<string, PendingAsyncTaskExecution>;
+  appId: string;
+  agentId?: string;
+  createDelegatedRun?: (
+    task: AsyncTaskRecord,
+    taskInput: Omit<StartDelegatedAgentTaskInput, 'run'>,
+  ) => StartDelegatedAgentTaskInput['run'];
+  cancelLinkedChildTasks: (parent: AsyncTaskRecord) => Promise<number>;
+  waitForTaskChange?: (
+    parent: AsyncTaskRecord,
+    options: { signal: AbortSignal; timeoutMs: number },
+  ) => Promise<void>;
+  limit?: number;
+}): Promise<number> {
+  let recovered = await recoverQueuedAsyncCommandTasks(input);
+  if (input.createDelegatedRun) {
+    recovered += await recoverQueuedDelegatedAgentTasks({
+      ...input,
+      createRun: input.createDelegatedRun,
+    });
+  }
+  return recovered;
+}
+
+async function recoverQueuedAsyncCommandTasks(input: {
   repository: AsyncTaskRepository;
   pending: Map<string, PendingAsyncTaskExecution>;
   appId: string;
@@ -46,41 +76,64 @@ export async function recoverQueuedAsyncCommandTasks(input: {
   return recovered;
 }
 
-export async function failUnrecoverableQueuedAsyncTasks(input: {
+async function recoverQueuedDelegatedAgentTasks(input: {
   repository: AsyncTaskRepository;
+  pending: Map<string, PendingAsyncTaskExecution>;
   appId: string;
   agentId?: string;
+  createRun: (
+    task: AsyncTaskRecord,
+    taskInput: Omit<StartDelegatedAgentTaskInput, 'run'>,
+  ) => StartDelegatedAgentTaskInput['run'];
+  cancelLinkedChildTasks: (parent: AsyncTaskRecord) => Promise<number>;
+  waitForTaskChange?: (
+    parent: AsyncTaskRecord,
+    options: { signal: AbortSignal; timeoutMs: number },
+  ) => Promise<void>;
   limit?: number;
 }): Promise<number> {
-  let failed = 0;
-  for (const kind of ['mcp_tool_call', 'delegated_agent'] as AsyncTaskKind[]) {
-    const tasks = await input.repository.listTasks({
-      appId: input.appId,
-      agentId: input.agentId,
-      kind,
-      statuses: ['queued'],
-      limit: input.limit ?? 100,
+  const tasks = await input.repository.listTasks({
+    appId: input.appId,
+    agentId: input.agentId,
+    kind: 'delegated_agent',
+    statuses: ['queued'],
+    limit: input.limit ?? 100,
+  });
+  let recovered = 0;
+  for (const task of tasks) {
+    if (input.pending.has(task.id)) continue;
+    const payload =
+      readEncryptedAsyncTaskPayload<DurableDelegatedAgentPayload>(task);
+    if (!isDurableDelegatedAgentPayload(payload)) continue;
+    const taskInput = {
+      appId: task.appId,
+      agentId: task.agentId,
+      conversationId: task.conversationId ?? '',
+      threadId: task.threadId,
+      parentRunId: task.parentRunId,
+      objective: payload.objective,
+      context: payload.context,
+      expectedOutput: payload.expectedOutput,
+      workspaceFolder: payload.workspaceFolder,
+    };
+    input.pending.set(task.id, {
+      task,
+      command: '',
+      input: undefined as never,
+      controller: new AbortController(),
+      launchControl: undefined as never,
+      delegated: {
+        taskInput: {
+          ...taskInput,
+          run: input.createRun(task, taskInput),
+        },
+        cancelLinkedChildTasks: input.cancelLinkedChildTasks,
+        waitForTaskChange: input.waitForTaskChange,
+      },
     });
-    for (const task of tasks) {
-      const now = nowIso();
-      const updated = await input.repository.transitionTask({
-        taskId: task.id,
-        leaseToken: task.leaseToken,
-        fencingVersion: task.fencingVersion,
-        status: 'failed',
-        now,
-        terminalAt: now,
-        errorSummary:
-          'Task worker restarted before this queued task could be claimed.',
-        receiptJson: failedReceipt(
-          task,
-          'failed before queued task claim after worker restart',
-        ),
-      });
-      if (updated) failed += 1;
-    }
+    recovered += 1;
   }
-  return failed;
+  return recovered;
 }
 
 function isDurableAsyncCommandPayload(
@@ -91,5 +144,15 @@ function isDurableAsyncCommandPayload(
     typeof value.command === 'string' &&
     value.launchControl &&
     typeof value.launchControl === 'object',
+  );
+}
+
+function isDurableDelegatedAgentPayload(
+  value: DurableDelegatedAgentPayload | null,
+): value is DurableDelegatedAgentPayload {
+  return Boolean(
+    value &&
+    typeof value.objective === 'string' &&
+    typeof value.workspaceFolder === 'string',
   );
 }
