@@ -1,7 +1,8 @@
 export type AsyncTaskKind =
   | 'async_command'
   | 'delegated_agent'
-  | 'mcp_tool_call';
+  | 'mcp_tool_call'
+  | 'session_compaction';
 
 export type AsyncTaskStatus =
   | 'queued'
@@ -99,6 +100,20 @@ export interface AsyncTaskBacklogAdmissionInput {
   statuses: AsyncTaskStatus[];
 }
 
+export interface AsyncTaskScopedAdmissionInput {
+  task: AsyncTaskCreateInput;
+  activeStatuses: AsyncTaskStatus[];
+  staleRunningBefore?: string;
+  staleRunningStatus?: Extract<AsyncTaskStatus, 'failed' | 'timed_out'>;
+  staleErrorSummary?: string;
+}
+
+export interface AsyncTaskScopedAdmissionResult {
+  task: AsyncTaskRecord;
+  admitted: boolean;
+  staleTasks: AsyncTaskRecord[];
+}
+
 export interface AsyncTaskListFilter {
   appId: string;
   agentId?: string;
@@ -147,6 +162,9 @@ export interface AsyncTaskRepository {
   createTaskWithBacklogAdmission?(
     input: AsyncTaskBacklogAdmissionInput,
   ): Promise<AsyncTaskRecord | null>;
+  createTaskWithScopedAdmission?(
+    input: AsyncTaskScopedAdmissionInput,
+  ): Promise<AsyncTaskScopedAdmissionResult>;
   claimQueuedTask?(input: AsyncTaskClaimInput): Promise<AsyncTaskRecord | null>;
   getTask(taskId: string): Promise<AsyncTaskRecord | null>;
   listTasks(filter: AsyncTaskListFilter): Promise<AsyncTaskRecord[]>;

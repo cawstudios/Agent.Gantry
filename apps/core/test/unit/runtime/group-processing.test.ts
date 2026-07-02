@@ -995,15 +995,12 @@ describe('createGroupProcessor', () => {
 
       expect(deps.queue.notifyIdle).not.toHaveBeenCalled();
       expect(deps.queue.closeStdin).not.toHaveBeenCalled();
-      expect(channel.setTyping).not.toHaveBeenLastCalledWith(
-        'group1@g.us',
-        false,
-      );
       expect(channel.sendProgressUpdate).toHaveBeenCalledWith(
         'group1@g.us',
         'Done.',
         expect.objectContaining({ done: true }),
       );
+      expect(channel.setTyping).toHaveBeenLastCalledWith('group1@g.us', false);
       const doneCallsAtMarker = (
         channel.sendProgressUpdate as ReturnType<typeof vi.fn>
       ).mock.calls.filter((call) => call[1] === 'Done.');
@@ -4604,10 +4601,12 @@ describe('createGroupProcessor', () => {
         agentFolder: 'my-group',
         executionProviderId: 'anthropic:claude-agent-sdk',
         conversationJid: 'group1@g.us',
+        providerAccountId: undefined,
         threadId: null,
         conversationKind: 'channel',
         memoryUserId: 'user1@s.whatsapp.net',
         hydrationMode: 'first_visible',
+        promoteReadyProviderSession: true,
         query: 'hello',
       });
     });
@@ -5468,6 +5467,7 @@ describe('createGroupProcessor', () => {
         messages?: NewMessage[];
         queueJid?: string;
         registeredJids?: string[];
+        depsOverrides?: Partial<GroupProcessingDeps>;
       } = {},
     ) {
       const group = opts.group ?? makeGroup({ folder: 'grp-folder' });
@@ -5480,6 +5480,7 @@ describe('createGroupProcessor', () => {
         getRegisteredJids: vi
           .fn()
           .mockReturnValue(new Set(opts.registeredJids ?? [])),
+        ...opts.depsOverrides,
       });
       (deps.opsRepository as any).getAgentTurnContext = vi
         .fn()
@@ -5517,6 +5518,54 @@ describe('createGroupProcessor', () => {
       expect(channel.sendMessage).toHaveBeenCalledWith(
         'group1@g.us',
         'hello from session cmd',
+      );
+    });
+
+    it('wires durable session compaction admission into session command deps', async () => {
+      const task = {
+        id: 'task-session-compact',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        kind: 'session_compaction',
+        status: 'queued',
+        admissionClass: 'task',
+        authoritySnapshotJson: {},
+        privateCorrelationJson: {},
+        leaseToken: 'lease-session-compact',
+        fencingVersion: 1,
+        createdAt: '2026-04-27T00:00:00.000Z',
+        updatedAt: '2026-04-27T00:00:00.000Z',
+      };
+      const repository = {
+        createTaskWithScopedAdmission: vi.fn().mockResolvedValue({
+          task,
+          admitted: true,
+          staleTasks: [],
+        }),
+      };
+      const { capturedDeps } = await captureSessionDeps({
+        depsOverrides: {
+          getAsyncTaskRepository: vi.fn().mockReturnValue(repository),
+        },
+      });
+
+      const result = await (
+        capturedDeps.admitSessionCompactionTask as () => Promise<unknown>
+      )();
+
+      expect(result).toMatchObject({ admitted: true, task });
+      expect(repository.createTaskWithScopedAdmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: expect.objectContaining({
+            appId: 'default',
+            agentId: 'agent:test',
+            conversationId: 'group1@g.us',
+            kind: 'session_compaction',
+            status: 'queued',
+          }),
+          activeStatuses: ['queued', 'running'],
+          staleRunningStatus: 'timed_out',
+        }),
       );
     });
 

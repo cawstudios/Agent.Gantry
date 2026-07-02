@@ -151,6 +151,33 @@ export class CanonicalMessageOpsService {
     return rows.map((row) => this.mapMessage(row)).slice(0, limit);
   }
 
+  async getContextMessagesSince(
+    chatJid: string,
+    sinceCursor: string,
+    limit: number = 200,
+    options: {
+      threadId?: string | null;
+      providerAccountId?: string | null;
+    } = {},
+  ): Promise<NewMessage[]> {
+    const cursor = decodeGroupMessageCursor(sinceCursor);
+    const hasThreadFilter = Object.prototype.hasOwnProperty.call(
+      options,
+      'threadId',
+    );
+    const rows = await this.repository.listContextMessages({
+      jids: [chatJid],
+      after: hasCursorBoundary(cursor)
+        ? { timestamp: cursor.timestamp, chatJid, id: cursor.id }
+        : undefined,
+      threadId: options.threadId ?? null,
+      providerAccountId: options.providerAccountId,
+      hasThreadFilter,
+      limit,
+    });
+    return rows.map((row) => this.mapMessage(row)).slice(0, limit);
+  }
+
   async getRecentTopLevelMessagesBefore(
     chatJid: string,
     before: Pick<NewMessage, 'timestamp' | 'id'>,

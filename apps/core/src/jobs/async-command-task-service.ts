@@ -14,12 +14,9 @@ import {
   type StartDelegatedAgentTaskInput,
 } from './async-delegated-agent-task.js';
 import {
-  buildAgentToolExecutionRequest,
-  evaluateProtectedCapabilityToolUse,
   ToolExecutionClassifier,
   ToolExecutionPolicyService,
 } from '../shared/tool-execution-policy-service.js';
-import { denyMemoryBoundaryToolUse } from '../shared/memory-boundary.js';
 import type { RunnerSandboxResourceLimits } from '../shared/runner-sandbox-provider.js';
 import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
 import { nowIso } from '../shared/time/datetime.js';
@@ -56,8 +53,8 @@ import { drainQueuedAsyncTasks } from './async-command-task-drainer.js';
 import { asyncCommandPrivateCorrelation } from './async-task-execution-payload.js';
 import { recoverQueuedAsyncTasks } from './async-command-queue-recovery.js';
 import { createAdmittedAsyncTask } from './async-task-admission.js';
+import { evaluateAsyncCommandStartPolicy } from './async-command-start-policy.js';
 
-const SHELL_POLICY_TOOL_NAME = 'Bash';
 const MAX_ACTIVE_ASYNC_COMMANDS_PER_APP = 4;
 const MAX_ACTIVE_ASYNC_COMMANDS_PER_AGENT = 2;
 const ASYNC_TASK_HEARTBEAT_MS = 15_000;
@@ -170,49 +167,18 @@ export class AsyncCommandTaskService {
     if (!command) {
       return { ok: false, message: 'RunCommand requires a non-empty command.' };
     }
-    const policyInput = { command };
-    const protectedDenial = evaluateProtectedCapabilityToolUse(
-      SHELL_POLICY_TOOL_NAME,
-      policyInput,
-    );
-    if (protectedDenial) {
-      return {
-        ok: false,
-        message: `Denied by Gantry tool execution policy: ${protectedDenial.reason} ${protectedDenial.recoveryAction}`,
-      };
-    }
-    const memoryDenial = denyMemoryBoundaryToolUse(
-      SHELL_POLICY_TOOL_NAME,
-      policyInput,
-      {},
-      input.memoryBlock ?? '',
-    );
-    if (memoryDenial) return { ok: false, message: memoryDenial };
-
-    const request = buildAgentToolExecutionRequest(
-      this.classifier,
-      SHELL_POLICY_TOOL_NAME,
-      policyInput,
-      {
-        conversationId: input.conversationId,
-        threadId: input.threadId ?? undefined,
-        jobId: input.parentJobId ?? undefined,
-        isScheduledJob: input.isScheduledJob,
-      },
-    );
-    const decision = this.policy.evaluate({
-      request,
-      ...(input.isScheduledJob
-        ? { autonomousAllowedToolRules: input.allowedToolRules }
-        : { allowedToolRules: input.allowedToolRules }),
+    const decision = evaluateAsyncCommandStartPolicy({
+      command,
+      conversationId: input.conversationId,
+      threadId: input.threadId,
+      parentJobId: input.parentJobId,
+      allowedToolRules: input.allowedToolRules,
+      memoryBlock: input.memoryBlock,
+      isScheduledJob: input.isScheduledJob,
+      classifier: this.classifier,
+      policy: this.policy,
     });
-    if (decision.status !== 'allow') {
-      return {
-        ok: false,
-        message:
-          'This command is not approved for this agent. Request access or choose an approved capability.',
-      };
-    }
+    if (!decision.ok) return decision;
     await this.recoverStaleTasks({ appId: input.appId });
     const taskId = `task_${randomUUID()}`;
     const launchControl = buildLaunchControl(taskId);
@@ -292,7 +258,7 @@ export class AsyncCommandTaskService {
 
   async get(taskId: string): Promise<PublicAsyncTaskDto | null> {
     const task = await this.repository.getTask(taskId);
-    return task ? toPublicAsyncTaskDto(task) : null;
+    return task && isAgentFacingTask(task) ? toPublicAsyncTaskDto(task) : null;
   }
 
   async getScoped(input: {
@@ -304,7 +270,9 @@ export class AsyncCommandTaskService {
     parentTaskId?: string | null;
   }): Promise<PublicAsyncTaskDto | null> {
     const task = await this.repository.getTask(input.taskId);
-    return task && taskInScope(task, input) ? toPublicAsyncTaskDto(task) : null;
+    return task && isAgentFacingTask(task) && taskInScope(task, input)
+      ? toPublicAsyncTaskDto(task)
+      : null;
   }
   async list(input: {
     appId: string;
@@ -316,7 +284,7 @@ export class AsyncCommandTaskService {
     limit?: number;
   }): Promise<PublicAsyncTaskDto[]> {
     const tasks = await this.repository.listTasks(input);
-    return tasks.map(toPublicAsyncTaskDto);
+    return tasks.filter(isAgentFacingTask).map(toPublicAsyncTaskDto);
   }
 
   async message(input: {
@@ -429,7 +397,9 @@ export class AsyncCommandTaskService {
   ): Promise<{ ok: boolean; message: string }> {
     const taskId = typeof input === 'string' ? input : input.taskId;
     const task = await this.repository.getTask(taskId);
-    if (!task) return { ok: false, message: 'Task not found.' };
+    if (!task || !isAgentFacingTask(task)) {
+      return { ok: false, message: 'Task not found.' };
+    }
     if (
       typeof input !== 'string' &&
       !taskInScope(task, {
@@ -697,4 +667,8 @@ export class AsyncCommandTaskService {
         this.execute(task, command, input, controller, launchControl),
     });
   }
+}
+
+function isAgentFacingTask(task: AsyncTaskRecord): boolean {
+  return task.kind !== 'session_compaction';
 }
