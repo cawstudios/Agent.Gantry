@@ -38,27 +38,12 @@ export function registerSlackMessageActionHandler(
           kind?: unknown;
           jobId?: unknown;
           runId?: unknown;
-          actionToken?: unknown;
           providerAccountId?: unknown;
         }
       | undefined;
     try {
       payload = action.value ? JSON.parse(action.value) : undefined;
     } catch {
-      return;
-    }
-    if (payload?.kind === 'live_turn_stop' && body.channel?.id) {
-      await opts?.onMessageAction?.({
-        kind: 'live_turn_stop',
-        conversationJid: `sl:${body.channel.id}`,
-        ...providerAccountFromPayload(payload, opts?.providerAccountId),
-        threadId: body.message?.thread_ts,
-        userId: body.user?.id,
-        actionToken:
-          typeof payload.actionToken === 'string'
-            ? payload.actionToken
-            : undefined,
-      });
       return;
     }
     if (

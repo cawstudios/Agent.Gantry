@@ -184,13 +184,7 @@ export function bindingRowToGroup(
   const bindingIdRouteKey = row.id.slice(
     CONVERSATION_ROUTE_BINDING_ID_PREFIX.length,
   );
-  const bindingQueueInfo = parseAgentThreadQueueKey(bindingIdRouteKey);
-  const jid =
-    (bindingQueueInfo.agentId && bindingIdRouteKey) ||
-    externalRef.jid ||
-    (row.conversationId.startsWith('conversation:')
-      ? row.conversationId.slice('conversation:'.length)
-      : externalRef.value);
+  const jid = bindingIdRouteKey || externalRef.jid || externalRef.value;
   if (!jid) return undefined;
   const folder = row.agentId.startsWith('agent:')
     ? row.agentId.slice('agent:'.length)

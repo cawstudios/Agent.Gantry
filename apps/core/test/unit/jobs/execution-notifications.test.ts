@@ -50,6 +50,18 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   } as Job;
 }
 
+function makeMemoryDreamingJob(overrides: Partial<Job> = {}): Job {
+  return makeJob({
+    id: 'system:dreaming:main_agent:test',
+    name: 'Memory Dreaming (main_agent tg:5759865942)',
+    prompt: '__system:memory_dream',
+    schedule_type: 'cron',
+    schedule_value: '15 3 * * *',
+    created_by: 'agent',
+    ...overrides,
+  });
+}
+
 describe('jobs/execution-notifications', () => {
   it('sends start lifecycle notification for non-silent jobs', async () => {
     const sendMessage = vi.fn(async () => undefined);
@@ -71,6 +83,18 @@ describe('jobs/execution-notifications', () => {
     const sendMessage = vi.fn(async () => undefined);
     const delivered = await notifySchedulerRunStart({
       job: makeJob({ silent: true }),
+      runId: 'run-1',
+      sendMessage,
+    });
+
+    expect(delivered).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('skips start notifications for memory dreaming jobs', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const delivered = await notifySchedulerRunStart({
+      job: makeMemoryDreamingJob(),
       runId: 'run-1',
       sendMessage,
     });
@@ -172,11 +196,11 @@ describe('jobs/execution-notifications', () => {
     });
   });
 
-  it('turns queue bookkeeping JSON into a human memory maintenance outcome', async () => {
+  it('sends compact memory dreaming completion notifications', async () => {
     const sendMessage = vi.fn(async () => undefined);
 
     await notifySchedulerTerminalRunState({
-      job: makeJob({ name: 'Memory Dreaming (main_agent tg:5759865942)' }),
+      job: makeMemoryDreamingJob(),
       runId: 'run-1',
       runShortId: 6,
       runStatus: 'completed',
@@ -189,20 +213,37 @@ describe('jobs/execution-notifications', () => {
     });
 
     const message = String(sendMessage.mock.calls[0]?.[1]);
-    expect(message).toContain('**✅ Completed**');
-    expect(message).toContain(
-      '· Memory Dreaming (main_agent tg:5759865942) · 13s',
-    );
-    expect(message).toContain('Memory maintenance completed.');
+    expect(message).toBe('Memory job done.');
     expect(message).not.toContain('"queued"');
     expect(message).not.toContain('deduped');
+    expect(message).not.toContain('Used:');
+    expect(message).not.toContain('Next:');
+  });
+
+  it('sends compact memory dreaming dedupe notifications', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+
+    await notifySchedulerTerminalRunState({
+      job: makeMemoryDreamingJob(),
+      runId: 'run-1',
+      runShortId: 6,
+      runStatus: 'completed',
+      summary: '{"queued":false,"pending":1,"deduped":true}',
+      nextRun: '2026-05-15T21:45:00.000Z',
+      retryCount: 0,
+      pauseReason: null,
+      sendMessage,
+      durationMs: 13_000,
+    });
+
+    expect(sendMessage.mock.calls[0]?.[1]).toBe('Memory job already running.');
   });
 
   it('sends pending memory review guidance through scheduler notification routes', async () => {
     const sendMessage = vi.fn(async () => undefined);
 
     await notifySchedulerTerminalRunState({
-      job: makeJob({ name: 'Memory Dreaming (main_agent tg:5759865942)' }),
+      job: makeMemoryDreamingJob(),
       runId: 'run-1',
       runShortId: 7,
       runStatus: 'completed',
@@ -240,7 +281,7 @@ describe('jobs/execution-notifications', () => {
     const updateLifecycleNotification = vi.fn(async () => 'updated' as const);
 
     const notified = await notifySchedulerTerminalRunState({
-      job: makeJob({ name: 'Memory Dreaming (main_agent tg:5759865942)' }),
+      job: makeMemoryDreamingJob(),
       runId: 'run-1',
       runShortId: 8,
       runStatus: 'completed',

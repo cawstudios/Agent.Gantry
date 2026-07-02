@@ -143,6 +143,69 @@ describe('system memory dreaming jobs', () => {
     expect(deleteJob).not.toHaveBeenCalled();
   });
 
+  it('deletes obsolete dreaming jobs when conversations are removed', async () => {
+    const { registerSystemJobs } = await loadSystemJobs();
+    const upsertJob = vi.fn().mockResolvedValue({ created: true });
+    const getJobById = vi.fn().mockResolvedValue(undefined);
+    const getAllJobs = vi.fn(async () => [
+      makeJob({
+        id: 'system:dreaming:agent:stale',
+        name: 'Memory Dreaming (agent sl:COLD)',
+      }),
+      makeJob({
+        id: 'manual:job',
+        name: 'Manual job',
+      }),
+    ]);
+    const deleteJob = vi.fn(async () => undefined);
+
+    await registerSystemJobs({
+      conversationRoutes: () => ({
+        'sl:C123': makeRoute({ folder: 'agent', conversationKind: 'channel' }),
+      }),
+      opsRepository: {
+        getJobById,
+        getAllJobs,
+        deleteJob,
+        upsertJob,
+      },
+    } as never);
+
+    expect(deleteJob).toHaveBeenCalledWith('system:dreaming:agent:stale');
+    expect(deleteJob).not.toHaveBeenCalledWith('manual:job');
+    expect(upsertJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps obsolete dreaming jobs while a run lease is unsettled', async () => {
+    const { registerSystemJobs } = await loadSystemJobs();
+    const upsertJob = vi.fn().mockResolvedValue({ created: true });
+    const getJobById = vi.fn().mockResolvedValue(undefined);
+    const getAllJobs = vi.fn(async () => [
+      makeJob({
+        id: 'system:dreaming:agent:leased',
+        name: 'Memory Dreaming (agent sl:COLD)',
+        lease_run_id: 'run-active',
+        lease_expires_at: '2026-05-08T00:05:00.000Z',
+      }),
+    ]);
+    const deleteJob = vi.fn(async () => undefined);
+
+    await registerSystemJobs({
+      conversationRoutes: () => ({
+        'sl:C123': makeRoute({ folder: 'agent', conversationKind: 'channel' }),
+      }),
+      opsRepository: {
+        getJobById,
+        getAllJobs,
+        deleteJob,
+        upsertJob,
+      },
+    } as never);
+
+    expect(deleteJob).not.toHaveBeenCalled();
+    expect(upsertJob).toHaveBeenCalledTimes(1);
+  });
+
   it('runs scheduled channel dreaming against whole channel subject without thread memory scope', async () => {
     const triggerDreaming = vi.fn().mockResolvedValue({ runId: 'dream-1' });
     const { _setMemoryMaintenanceQueueForTests, handleSystemJob } =

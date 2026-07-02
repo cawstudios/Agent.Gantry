@@ -7,7 +7,10 @@ import type {
 import type { SchedulerSendMessage } from './delivery.js';
 import { sendJobNotification } from './delivery.js';
 import { formatRunStatusMessage } from './status-formatting.js';
-import { MEMORY_DREAM_SYSTEM_PROMPT } from './system-jobs.js';
+import {
+  isMemoryDreamingSystemJob,
+  MEMORY_DREAM_SYSTEM_PROMPT,
+} from '../shared/system-job-identity.js';
 import { SETUP_REQUIRED_PAUSE_REASON } from '../application/jobs/job-readiness-service.js';
 import { parseAutonomousToolDenial } from '../shared/autonomous-tool-denial.js';
 import {
@@ -90,6 +93,7 @@ export async function notifySchedulerRunStart(input: {
   sendMessage: SchedulerSendMessage;
 }): Promise<boolean> {
   if (input.job.silent) return false;
+  if (isMemoryDreamingSystemJob(input.job)) return false;
   return Promise.race([
     sendJobNotification({
       job: input.job,
@@ -175,17 +179,19 @@ export async function notifySchedulerTerminalRunState(input: {
   ) {
     return false;
   }
-  const summaryMessage = formatRunStatusMessage({
-    job: input.job,
-    runId: input.runId,
-    runShortId: input.runShortId,
-    runStatus: input.runStatus,
-    summary: input.summary,
-    nextRun: input.nextRun,
-    retryCount: input.retryCount,
-    pauseReason: input.pauseReason,
-    durationMs: input.durationMs,
-  });
+  const summaryMessage =
+    compactMemoryDreamingTerminalMessage(input) ??
+    formatRunStatusMessage({
+      job: input.job,
+      runId: input.runId,
+      runShortId: input.runShortId,
+      runStatus: input.runStatus,
+      summary: input.summary,
+      nextRun: input.nextRun,
+      retryCount: input.retryCount,
+      pauseReason: input.pauseReason,
+      durationMs: input.durationMs,
+    });
   const updateResult =
     input.updateLifecycleNotification === undefined
       ? 'unsupported'
@@ -208,4 +214,38 @@ export async function notifySchedulerTerminalRunState(input: {
     actionAffordances,
     sendMessage: input.sendMessage,
   });
+}
+
+function compactMemoryDreamingTerminalMessage(input: {
+  job: Job;
+  runStatus: TerminalRunStatus;
+  summary: string;
+}): string | null {
+  if (!isMemoryDreamingSystemJob(input.job)) return null;
+  if (input.runStatus !== 'completed') return null;
+  if (memoryDreamingSummaryNeedsAttention(input.summary)) return null;
+  return memoryDreamingSummaryAlreadyRunning(input.summary)
+    ? 'Memory job already running.'
+    : 'Memory job done.';
+}
+
+function memoryDreamingSummaryNeedsAttention(summary: string): boolean {
+  return /\b(needs attention|failed|blocked|sent to review|pending memory reviews?|needs review|deadline exceeded|timed out)\b/i.test(
+    summary,
+  );
+}
+
+function memoryDreamingSummaryAlreadyRunning(summary: string): boolean {
+  if (/\balready running\b/i.test(summary)) return true;
+  try {
+    const parsed = JSON.parse(summary) as unknown;
+    return (
+      !!parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      (parsed as { deduped?: unknown }).deduped === true
+    );
+  } catch {
+    return false;
+  }
 }

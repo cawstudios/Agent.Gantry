@@ -83,6 +83,35 @@ describe('canonical binding repository route projection', () => {
     expect(JSON.parse(row.memorySubjectJson)).not.toHaveProperty('jid');
   });
 
+  it('uses the persisted route key instead of a provider-account conversation id', () => {
+    const row = {
+      id: 'conversation-route:sl:C123',
+      agentId: 'agent:main_agent',
+      providerAccountId: 'slack_default',
+      conversationId: 'conversation:slack_default:sl:C123',
+      threadId: null,
+      status: 'active',
+      conversationExternalRefJson: JSON.stringify({
+        kind: 'conversation',
+        value: 'C123',
+      }),
+      conversationKind: 'group',
+      memorySubjectJson: JSON.stringify({
+        kind: 'conversation',
+        appId: 'default',
+        conversationId: 'conversation:slack_default:sl:C123',
+        route: {
+          trigger: '@Gantry',
+          requiresTrigger: true,
+        },
+      }),
+      displayName: 'Slack General',
+      createdAt: '2026-05-06T00:00:00.000Z',
+    };
+
+    expect(bindingRowToGroup(row)).toMatchObject({ jid: 'sl:C123' });
+  });
+
   it('ignores non-route, disabled, and thread-scoped binding rows', () => {
     const baseRow = {
       id: 'conversation-route:tg:100',

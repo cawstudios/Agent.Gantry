@@ -2478,7 +2478,7 @@ describe('Slack channel', () => {
     expect(JSON.stringify(postMessage.mock.calls[0]?.[0])).toContain(
       '⏳ Searching the web · 2m 14s',
     );
-    expect(JSON.stringify(postMessage.mock.calls[0]?.[0])).toContain(
+    expect(JSON.stringify(postMessage.mock.calls[0]?.[0])).not.toContain(
       'stop-token-1',
     );
     expect(postMessage.mock.calls[1]?.[0]).toEqual(
@@ -2572,7 +2572,7 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.postEphemeral).not.toHaveBeenCalled();
   });
 
-  it('routes Slack live stop action buttons through the message action callback', async () => {
+  it('does not render Slack live stop action buttons', async () => {
     const opts = {
       ...createOptsWithApproverHook(['U_APPROVER']),
       providerAccountId: 'slack_alpha',
@@ -2588,18 +2588,24 @@ describe('Slack channel', () => {
       ],
     });
     const payload = appRef.current.client.chat.postMessage.mock.calls[0]?.[0];
-    expect(payload.blocks[1].elements[0]).toEqual(
-      expect.objectContaining({
-        action_id: 'gantry_message_action',
-        style: 'danger',
-        value:
-          '{"kind":"live_turn_stop","actionToken":"token-1","providerAccountId":"slack_beta"}',
-      }),
-    );
+    expect(payload.blocks).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain('live_turn_stop');
+    expect(JSON.stringify(payload)).not.toContain('Stop');
+  });
+
+  it('ignores stale Slack live stop action callbacks', async () => {
+    const opts = {
+      ...createOptsWithApproverHook(['U_APPROVER']),
+      providerAccountId: 'slack_alpha',
+      onMessageAction: vi.fn(),
+    };
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
+    await channel.connect();
 
     const actionHandler = appRef.current.actionHandlers.get(
       'gantry_message_action',
     );
+    expect(actionHandler).toBeDefined();
     const ack = vi.fn();
     await actionHandler({
       ack,
@@ -2615,14 +2621,8 @@ describe('Slack channel', () => {
     });
 
     expect(ack).toHaveBeenCalled();
-    expect(opts.onMessageAction).toHaveBeenCalledWith({
-      kind: 'live_turn_stop',
-      conversationJid: 'sl:C1234567890',
-      providerAccountId: 'slack_beta',
-      threadId: '1710000000.000111',
-      userId: 'U_APPROVER',
-      actionToken: 'token-1',
-    });
+    expect(opts.onMessageAction).not.toHaveBeenCalled();
+    expect(appRef.current.client.chat.postEphemeral).not.toHaveBeenCalled();
   });
 
   it('chunks outbound Slack messages to 4000-char parts and returns delivery metadata', async () => {

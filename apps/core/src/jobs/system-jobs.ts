@@ -144,6 +144,17 @@ export async function registerSystemJobs(
     jid,
     group,
   }));
+  const desiredDreamingJobIds = new Set(
+    RUNTIME_MEMORY_DREAMING_ENABLED
+      ? registrations.map(({ jid, group }) =>
+          systemDreamingJobId({ folder: group.folder, jid }),
+        )
+      : [],
+  );
+  await deleteObsoleteSystemDreamingJobs(
+    deps.opsRepository,
+    desiredDreamingJobIds,
+  );
 
   const registrationSignature = JSON.stringify({
     dreamingEnabled: RUNTIME_MEMORY_DREAMING_ENABLED,
@@ -264,6 +275,26 @@ export async function registerSystemJobs(
     }
   }
   setSystemJobRegistrationSignature(deps.opsRepository, registrationSignature);
+}
+
+async function deleteObsoleteSystemDreamingJobs(
+  opsRepository: SchedulerDependencies['opsRepository'],
+  desiredJobIds: ReadonlySet<string>,
+): Promise<void> {
+  const jobs = await opsRepository.getAllJobs();
+  for (const job of jobs) {
+    if (
+      job.id.startsWith(MEMORY_DREAMING_JOB_ID_PREFIX) &&
+      !desiredJobIds.has(job.id) &&
+      !hasUnsettledJobLease(job)
+    ) {
+      await opsRepository.deleteJob(job.id);
+    }
+  }
+}
+
+function hasUnsettledJobLease(job: Job): boolean {
+  return Boolean(job.lease_run_id || job.lease_expires_at);
 }
 
 export async function handleSystemJob(

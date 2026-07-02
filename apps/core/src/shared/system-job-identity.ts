@@ -29,3 +29,13 @@ export function isTrustedSystemJob(job: {
     job.prompt === MEMORY_DREAM_SYSTEM_PROMPT
   );
 }
+
+export function isMemoryDreamingSystemJob(job: {
+  id: string;
+  prompt: string;
+}): boolean {
+  return (
+    job.id.startsWith(MEMORY_DREAMING_JOB_ID_PREFIX) &&
+    job.prompt === MEMORY_DREAM_SYSTEM_PROMPT
+  );
+}

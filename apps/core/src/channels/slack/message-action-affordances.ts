@@ -17,21 +17,15 @@ function slackActionValue(
   action: MessageActionAffordance,
   providerAccountId?: string,
 ): string | undefined {
-  const value =
-    action.kind === 'live_turn_stop'
-      ? JSON.stringify({
-          kind: action.kind,
-          actionToken: action.actionToken,
-          ...(providerAccountId ? { providerAccountId } : {}),
-        })
-      : SCHEDULER_ACTION_KINDS.has(action.kind)
-        ? JSON.stringify({
-            kind: action.kind,
-            jobId: action.jobId,
-            runId: action.runId ?? null,
-            ...(providerAccountId ? { providerAccountId } : {}),
-          })
-        : undefined;
+  if (action.kind === 'live_turn_stop') return undefined;
+  const value = SCHEDULER_ACTION_KINDS.has(action.kind)
+    ? JSON.stringify({
+        kind: action.kind,
+        jobId: action.jobId,
+        runId: action.runId ?? null,
+        ...(providerAccountId ? { providerAccountId } : {}),
+      })
+    : undefined;
   if (!value) return undefined;
   return Buffer.byteLength(value, 'utf8') <= SLACK_ACTION_VALUE_MAX_BYTES
     ? value
@@ -54,8 +48,7 @@ export function slackMessageActionBlocks(
           type: 'plain_text',
           text: truncateSlackButtonLabel(action.label),
         },
-        ...(action.kind === 'scheduler_pause_job' ||
-        action.kind === 'live_turn_stop'
+        ...(action.kind === 'scheduler_pause_job'
           ? { style: 'danger' as const }
           : {}),
         value,
