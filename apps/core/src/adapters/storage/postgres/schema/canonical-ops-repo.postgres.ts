@@ -135,12 +135,14 @@ export class PostgresRuntimeRepositoryBundle
     name?: string,
     channel?: string,
     isGroup?: boolean,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<void> {
     await this.graph.ensureConversation(chatJid, {
       name,
       channel,
       isGroup,
       timestamp,
+      providerAccountId: options.providerAccountId,
     });
   }
 
@@ -175,7 +177,10 @@ export class PostgresRuntimeRepositoryBundle
     chatJid: string,
     sinceCursor: string,
     limit: number = 200,
-    options: { threadId?: string | null } = {},
+    options: {
+      threadId?: string | null;
+      providerAccountId?: string | null;
+    } = {},
   ): Promise<NewMessage[]> {
     return this.messages.getMessagesSince(chatJid, sinceCursor, limit, options);
   }
@@ -184,11 +189,13 @@ export class PostgresRuntimeRepositoryBundle
     chatJid: string,
     before: Pick<NewMessage, 'timestamp' | 'id'>,
     limit: number = 30,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<NewMessage[]> {
     return this.messages.getRecentTopLevelMessagesBefore(
       chatJid,
       before,
       limit,
+      options,
     );
   }
 
@@ -196,8 +203,14 @@ export class PostgresRuntimeRepositoryBundle
     chatJid: string,
     threadId: string,
     limit: number = 50,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<NewMessage[]> {
-    return this.messages.getFirstThreadMessages(chatJid, threadId, limit);
+    return this.messages.getFirstThreadMessages(
+      chatJid,
+      threadId,
+      limit,
+      options,
+    );
   }
 
   async getLatestThreadMessages(
@@ -205,29 +218,36 @@ export class PostgresRuntimeRepositoryBundle
     threadId: string,
     beforeOrAt: Pick<NewMessage, 'timestamp' | 'id'>,
     limit: number = 50,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<NewMessage[]> {
     return this.messages.getLatestThreadMessages(
       chatJid,
       threadId,
       beforeOrAt,
       limit,
+      options,
     );
   }
 
-  async getMessageThreadIds(chatJid: string): Promise<Array<string | null>> {
-    return this.messages.getMessageThreadIds(chatJid);
+  async getMessageThreadIds(
+    chatJid: string,
+    options: { providerAccountId?: string | null } = {},
+  ): Promise<Array<string | null>> {
+    return this.messages.getMessageThreadIds(chatJid, options);
   }
 
   async getLastBotMessageCursor(
     chatJid: string,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<{ timestamp: string; id: string } | undefined> {
-    return this.messages.getLastBotMessageCursor(chatJid);
+    return this.messages.getLastBotMessageCursor(chatJid, options);
   }
 
   async getLastBotMessageTimestamp(
     chatJid: string,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<string | undefined> {
-    return this.messages.getLastBotMessageTimestamp(chatJid);
+    return this.messages.getLastBotMessageTimestamp(chatJid, options);
   }
 
   async upsertJob(job: JobUpsertInput): Promise<{ created: boolean }> {
@@ -396,6 +416,7 @@ export class PostgresRuntimeRepositoryBundle
       appId?: string;
       executionProviderId: ExecutionProviderId;
       conversationJid?: string;
+      providerAccountId?: string | null;
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       expectedAgentSessionId?: string;
@@ -407,6 +428,7 @@ export class PostgresRuntimeRepositoryBundle
       appId: metadata.appId,
       executionProviderId: metadata.executionProviderId,
       chatJid: metadata.conversationJid,
+      providerAccountId: metadata.providerAccountId,
       conversationKind: metadata.conversationKind,
       memoryUserId: metadata.memoryUserId,
       expectedAgentSessionId: metadata.expectedAgentSessionId,
@@ -420,6 +442,7 @@ export class PostgresRuntimeRepositoryBundle
     agentFolder: string;
     executionProviderId: ExecutionProviderId;
     conversationJid: string;
+    providerAccountId?: string | null;
     threadId?: string | null;
     conversationKind?: 'dm' | 'channel';
     memoryUserId?: string;
@@ -442,6 +465,7 @@ export class PostgresRuntimeRepositoryBundle
       workspaceFolder: input.agentFolder,
       executionProviderId: input.executionProviderId,
       chatJid: input.conversationJid,
+      providerAccountId: input.providerAccountId,
       threadId: input.threadId,
       conversationKind: input.conversationKind,
       memoryUserId: input.memoryUserId,
@@ -578,6 +602,7 @@ export class PostgresRuntimeRepositoryBundle
     metadata: {
       appId?: string;
       conversationJid?: string;
+      providerAccountId?: string | null;
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       agentId?: string;
@@ -586,6 +611,7 @@ export class PostgresRuntimeRepositoryBundle
     await this.sessions.deleteSession(agentFolder, threadId, {
       appId: metadata.appId,
       chatJid: metadata.conversationJid,
+      providerAccountId: metadata.providerAccountId,
       conversationKind: metadata.conversationKind,
       memoryUserId: metadata.memoryUserId,
       agentId: metadata.agentId,

@@ -223,6 +223,7 @@ export interface LiveTurnScopeRepository {
     executionProviderId: ExecutionProviderId;
     conversationJid: string;
     threadId: string | null;
+    providerAccountId?: string | null;
     conversationKind?: 'channel' | 'dm';
     hydrateMemory: boolean;
   }) => Promise<
@@ -248,7 +249,8 @@ export async function liveTurnScopeForQueue(input: {
   queueJid: string;
 }): Promise<LiveTurnScope | null> {
   const { app, opsRepository, executionAdapter, queueJid } = input;
-  const { chatJid, threadId } = parseAgentThreadQueueKey(queueJid);
+  const { chatJid, threadId, providerAccountId } =
+    parseAgentThreadQueueKey(queueJid);
   const route = findConversationRouteForQueue(
     app.getConversationRoutes(),
     queueJid,
@@ -262,6 +264,7 @@ export async function liveTurnScopeForQueue(input: {
     executionProviderId,
     conversationJid: chatJid,
     threadId: threadId ?? null,
+    providerAccountId: providerAccountId ?? null,
     conversationKind: route.conversationKind,
     hydrateMemory: false,
   });
@@ -342,7 +345,7 @@ export async function routeScopeActiveLiveTurnAdmissionFromCursor(input: {
     conversationJid: string,
     sinceCursor: string,
     limit?: number,
-    options?: { threadId?: string | null },
+    options?: { threadId?: string | null; providerAccountId?: string | null },
   ) => Promise<NewMessage[]>;
   setAgentCursor: (queueJid: string, cursor: string) => void;
   saveState: () => Promise<void> | void;
@@ -360,7 +363,11 @@ export async function routeScopeActiveLiveTurnAdmissionFromCursor(input: {
         chatJid: input.chatJid,
         sinceCursor: input.replayCursor,
         pageSize: input.messageFetchPageSize,
-        options: { threadId: input.threadId },
+        options: {
+          threadId: input.threadId,
+          providerAccountId: parseAgentThreadQueueKey(input.queueJid)
+            .providerAccountId,
+        },
       })
     : undefined;
   const messages = replay?.messages;

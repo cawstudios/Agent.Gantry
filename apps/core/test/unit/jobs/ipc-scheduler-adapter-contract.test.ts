@@ -83,7 +83,7 @@ function makeContext(data: TaskIpcData): TaskContext {
     },
     sourceAgentFolder: 'team',
     conversationBindings: {
-      'tg:team': { folder: 'team' },
+      'tg:team': { folder: 'team', providerAccountId: 'telegram-main' },
       'tg:team-a': { folder: 'team' },
       'tg:team-b': { folder: 'team' },
     },
@@ -180,6 +180,33 @@ describe('scheduler IPC adapter contracts', () => {
 
     expect(() => schedulerAccessFromContext(context)).toThrow(
       'Scheduler IPC context missing conversation bindings.',
+    );
+  });
+
+  it('carries authenticated provider account into scheduler job access', () => {
+    expect(
+      schedulerAccessFromContext(
+        makeContext({
+          type: 'scheduler_list_jobs',
+          providerAccountId: 'telegram-main',
+        }),
+      ),
+    ).toMatchObject({
+      originConversationJid: 'tg:team',
+      originProviderAccountId: 'telegram-main',
+    });
+  });
+
+  it('rejects scheduler access from an unbound provider account', () => {
+    expect(() =>
+      schedulerAccessFromContext(
+        makeContext({
+          type: 'scheduler_list_jobs',
+          providerAccountId: 'telegram-other',
+        }),
+      ),
+    ).toThrow(
+      'Scheduler job operations must originate from the authenticated provider account.',
     );
   });
 

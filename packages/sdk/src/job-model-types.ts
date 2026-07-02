@@ -81,6 +81,7 @@ export interface JobRequestExecutionContext {
 export interface JobNotificationRoute {
   conversationJid: string;
   threadId: string | null;
+  providerAccountId?: string | null;
   label: string;
 }
 

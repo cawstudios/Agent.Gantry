@@ -32,6 +32,7 @@ import {
 } from './ipc-request-wakeup-registry.js';
 import { IpcWakeupScopeTracker } from './ipc-wakeup-scope.js';
 import { processRichInteractionRequestDirectory } from './ipc-rich-interaction-directory.js';
+import { resolveRunnerIpcRoute } from './ipc-route-authorization.js';
 export type { IpcDeps } from './ipc-domain-types.js';
 export { processTaskIpc } from '../jobs/ipc-handler.js';
 export { validateIpcAuthRequest } from './ipc-auth-validation.js';
@@ -306,35 +307,31 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 claimedPath = claimed.claimedPath;
                 const rawData = claimed.raw;
                 const data = parseIpcMessage(rawData, sourceAgentFolder);
-                const targetGroup = groupRegistry[data.chatJid];
-                if (targetGroup && targetGroup.folder === sourceAgentFolder) {
-                  const message = await resolveOwnedFileArtifactMessage({
-                    deps,
-                    appId: data.appId,
-                    sourceAgentFolder,
-                    text: data.text,
-                    files: data.files,
-                  });
-                  if (data.threadId) {
-                    await deps.sendMessage(data.chatJid, message.text, {
-                      threadId: data.threadId,
-                      files: message.files,
-                    });
-                  } else {
-                    await deps.sendMessage(data.chatJid, message.text, {
-                      files: message.files,
-                    });
-                  }
-                  logger.info(
-                    { chatJid: data.chatJid, sourceAgentFolder },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceAgentFolder },
-                    'Unauthorized IPC message attempt blocked',
-                  );
-                }
+                const route = resolveRunnerIpcRoute({
+                  routes: groupRegistry,
+                  sourceAgentFolder,
+                  targetJid: data.chatJid,
+                  threadId: data.threadId,
+                  providerAccountId: data.providerAccountId,
+                });
+                const message = await resolveOwnedFileArtifactMessage({
+                  deps,
+                  appId: data.appId,
+                  sourceAgentFolder,
+                  text: data.text,
+                  files: data.files,
+                });
+                await deps.sendMessage(route.targetJid, message.text, {
+                  ...(data.threadId ? { threadId: data.threadId } : {}),
+                  ...(route.providerAccountId
+                    ? { providerAccountId: route.providerAccountId }
+                    : {}),
+                  files: message.files,
+                });
+                logger.info(
+                  { chatJid: route.targetJid, sourceAgentFolder },
+                  'IPC message sent',
+                );
                 runnerControlPort.removeClaimedRequest(claimedPath);
               } catch (err) {
                 logger.error(
@@ -561,23 +558,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   rawRequest,
                   sourceAgentFolder,
                 );
-                if (
-                  request.targetJid &&
-                  !folderTargetJids
-                    .get(sourceAgentFolder)
-                    ?.has(request.targetJid)
-                ) {
-                  throw new Error(
-                    'Permission IPC target does not belong to the requesting agent folder',
-                  );
-                }
+                const route = resolveRunnerIpcRoute({
+                  routes: groupRegistry,
+                  sourceAgentFolder,
+                  targetJid: request.targetJid,
+                  threadId: request.threadId,
+                  providerAccountId: request.providerAccountId,
+                });
                 await validatePermissionIpcJobExecutionTarget({
                   request,
                   sourceAgentFolder,
                   deps,
                 });
-                request.targetJid =
-                  request.targetJid || folderTargetJid.get(sourceAgentFolder);
+                request.targetJid = route.targetJid;
+                request.providerAccountId = route.providerAccountId;
                 requestId = request.requestId;
                 requestThreadId = request.threadId;
                 responseKeyId = request.responseKeyId;
@@ -664,6 +658,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           shouldProcessRequestLane,
           folderTargetJid,
           folderTargetJids,
+          groupRegistry,
           inFlightInteractionIpc,
           maxInFlightInteractionIpc: MAX_IN_FLIGHT_INTERACTION_IPC,
           runnerControlPort,
@@ -705,23 +700,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   rawRequest,
                   sourceAgentFolder,
                 );
-                if (
-                  request.targetJid &&
-                  !folderTargetJids
-                    .get(sourceAgentFolder)
-                    ?.has(request.targetJid)
-                ) {
-                  throw new Error(
-                    'User question IPC target does not belong to the requesting agent folder',
-                  );
-                }
+                const route = resolveRunnerIpcRoute({
+                  routes: groupRegistry,
+                  sourceAgentFolder,
+                  targetJid: request.targetJid,
+                  threadId: request.threadId,
+                  providerAccountId: request.providerAccountId,
+                });
                 await validateUserQuestionIpcJobExecutionTarget({
                   request,
                   sourceAgentFolder,
                   deps,
                 });
-                request.targetJid =
-                  request.targetJid || folderTargetJid.get(sourceAgentFolder);
+                request.targetJid = route.targetJid;
+                request.providerAccountId = route.providerAccountId;
                 requestId = request.requestId;
                 requestThreadId = request.threadId;
                 responseKeyId = request.responseKeyId;

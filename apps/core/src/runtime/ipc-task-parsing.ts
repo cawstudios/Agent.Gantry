@@ -233,6 +233,7 @@ function toOptionalNotificationRoutes(value: unknown):
   | Array<{
       conversationJid: string;
       threadId: string | null;
+      providerAccountId?: string | null;
       label: string;
     }>
   | undefined {
@@ -243,6 +244,7 @@ function toOptionalNotificationRoutes(value: unknown):
   const routes: Array<{
     conversationJid: string;
     threadId: string | null;
+    providerAccountId?: string | null;
     label: string;
   }> = [];
   for (const entry of value) {
@@ -257,6 +259,14 @@ function toOptionalNotificationRoutes(value: unknown):
       entry.threadId === null
         ? null
         : toTrimmedString(entry.threadId, { maxLen: 255 });
+    const hasProviderAccountId = Object.prototype.hasOwnProperty.call(
+      entry,
+      'providerAccountId',
+    );
+    const providerAccountId =
+      entry.providerAccountId === null
+        ? null
+        : toTrimmedString(entry.providerAccountId, { maxLen: 255 });
     const label = toTrimmedString(entry.label, { maxLen: 80 });
     if (!conversationJid || !label || !hasThreadId) {
       throw new Error(
@@ -268,9 +278,27 @@ function toOptionalNotificationRoutes(value: unknown):
         'notificationRoutes entries threadId must be a string or null.',
       );
     }
+    if (
+      hasProviderAccountId &&
+      entry.providerAccountId !== null &&
+      !providerAccountId
+    ) {
+      throw new Error(
+        'notificationRoutes entries providerAccountId must be a string or null.',
+      );
+    }
     const normalizedThreadId: string | null =
       entry.threadId === null ? null : (threadId as string);
-    routes.push({ conversationJid, threadId: normalizedThreadId, label });
+    const normalizedProviderAccountId: string | null =
+      entry.providerAccountId === null ? null : (providerAccountId as string);
+    routes.push({
+      conversationJid,
+      threadId: normalizedThreadId,
+      ...(hasProviderAccountId
+        ? { providerAccountId: normalizedProviderAccountId }
+        : {}),
+      label,
+    });
   }
   return routes;
 }

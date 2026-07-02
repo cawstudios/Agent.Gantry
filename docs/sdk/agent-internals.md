@@ -101,20 +101,20 @@ sequenceDiagram
   participant Store as Postgres
   participant Provider as Provider Adapter
 
-  App->>SDK: providerConnections.create()
-  SDK->>Control: POST /v1/provider-connections
+  App->>SDK: providerAccounts.create()
+  SDK->>Control: POST /v1/provider-accounts
   Control->>Store: persist non-secret config + runtimeSecretRefs
-  App->>SDK: providerConnections.discoverConversations()
-  SDK->>Control: POST /v1/provider-connections/:id/discover-conversations
+  App->>SDK: providerAccounts.discoverConversations()
+  SDK->>Control: POST /v1/provider-accounts/:id/discover-conversations
   Control->>Provider: discover conversations with runtime-owned secret
   Control->>Store: upsert normalized conversations
-  App->>SDK: agents.conversationBindings.enable()
-  SDK->>Control: PUT /v1/agents/:agentId/conversation-bindings/:conversationId
-  Control->>Store: upsert active AgentConversationBinding
+  App->>SDK: conversationInstalls.create()
+  SDK->>Control: POST /v1/conversation-installs
+  Control->>Store: upsert active ConversationInstall
 ```
 
 The control API never accepts raw Slack, Telegram, Teams, or WhatsApp tokens in
-providerConnection payloads. Backend apps pass runtime secret references, and the host
+Provider Account payloads. Backend apps pass runtime secret references, and the host
 runtime resolves those references through `RuntimeSecretProvider`. Teams and
 WhatsApp are catalog placeholders until provider adapters exist.
 

@@ -509,6 +509,7 @@ export async function spawnAgent(
       ipcInputDir,
       ipcAuthToken: ipcAuth.authToken,
       chatJid: input.chatJid,
+      providerAccountId: group.providerAccountId,
       jobId: input.jobId,
       jobName: input.jobName,
       runId: input.runId,
@@ -774,9 +775,7 @@ export async function spawnAgent(
     }
     cleanupRunnerMcpConfigFile(mcpConfigPath, logger.warn.bind(logger));
     cleanupRunnerMcpConfigFile(sandboxConfigPath, logger.warn.bind(logger));
-    if (egressGateway) {
-      await closeEgressGateway(egressGateway);
-    }
+    if (egressGateway) await closeEgressGateway(egressGateway);
     await hostCredentials.revoke?.();
     try {
       preparedExecution.cleanup();

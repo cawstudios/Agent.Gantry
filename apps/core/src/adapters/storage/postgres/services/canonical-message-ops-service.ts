@@ -128,7 +128,10 @@ export class CanonicalMessageOpsService {
     chatJid: string,
     sinceCursor: string,
     limit: number = 200,
-    options: { threadId?: string | null } = {},
+    options: {
+      threadId?: string | null;
+      providerAccountId?: string | null;
+    } = {},
   ): Promise<NewMessage[]> {
     const cursor = decodeGroupMessageCursor(sinceCursor);
     const hasThreadFilter = Object.prototype.hasOwnProperty.call(
@@ -141,6 +144,7 @@ export class CanonicalMessageOpsService {
         ? { timestamp: cursor.timestamp, chatJid, id: cursor.id }
         : undefined,
       threadId: options.threadId ?? null,
+      providerAccountId: options.providerAccountId,
       hasThreadFilter,
       limit,
     });
@@ -151,10 +155,12 @@ export class CanonicalMessageOpsService {
     chatJid: string,
     before: Pick<NewMessage, 'timestamp' | 'id'>,
     limit: number = 30,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<NewMessage[]> {
     const rows = await this.repository.listContextMessages({
       jids: [chatJid],
       before: { timestamp: before.timestamp, chatJid, id: before.id },
+      providerAccountId: options.providerAccountId,
       threadId: null,
       hasThreadFilter: true,
       includeSelfThreadRoots: true,
@@ -171,9 +177,11 @@ export class CanonicalMessageOpsService {
     chatJid: string,
     threadId: string,
     limit: number = 50,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<NewMessage[]> {
     const rows = await this.repository.listContextMessages({
       jids: [chatJid],
+      providerAccountId: options.providerAccountId,
       threadId,
       hasThreadFilter: true,
       limit,
@@ -186,9 +194,11 @@ export class CanonicalMessageOpsService {
     threadId: string,
     beforeOrAt: Pick<NewMessage, 'timestamp' | 'id'>,
     limit: number = 50,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<NewMessage[]> {
     const rows = await this.repository.listContextMessages({
       jids: [chatJid],
+      providerAccountId: options.providerAccountId,
       beforeOrAt: {
         timestamp: beforeOrAt.timestamp,
         chatJid,
@@ -205,22 +215,27 @@ export class CanonicalMessageOpsService {
       .slice(0, limit);
   }
 
-  async getMessageThreadIds(chatJid: string): Promise<Array<string | null>> {
-    return this.repository.listThreadIds(chatJid);
+  async getMessageThreadIds(
+    chatJid: string,
+    options: { providerAccountId?: string | null } = {},
+  ): Promise<Array<string | null>> {
+    return this.repository.listThreadIds(chatJid, options);
   }
 
   async getLastBotMessageCursor(
     chatJid: string,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<{ timestamp: string; id: string } | undefined> {
-    const row = await this.repository.getLastBotMessageRow(chatJid);
+    const row = await this.repository.getLastBotMessageRow(chatJid, options);
     const msg = row ? this.mapMessage(row) : undefined;
     return msg ? { timestamp: msg.timestamp, id: msg.id } : undefined;
   }
 
   async getLastBotMessageTimestamp(
     chatJid: string,
+    options: { providerAccountId?: string | null } = {},
   ): Promise<string | undefined> {
-    return (await this.getLastBotMessageCursor(chatJid))?.timestamp;
+    return (await this.getLastBotMessageCursor(chatJid, options))?.timestamp;
   }
 
   private mapMessage(row: CanonicalOpsMessageRow): NewMessage {
@@ -228,6 +243,10 @@ export class CanonicalMessageOpsService {
     const payload = parseJson<{ text?: string }>(row.payload_json, {});
     const attachments = mapAttachments(row.attachments_json);
     const chatJid = publicConversationJid(row, ref);
+    const providerAccountId =
+      ref.providerAccountId ??
+      (parseJson<Record<string, unknown>>(row.external_ref_json, {})
+        .provider_account_id as string | undefined);
     return {
       id: ref.id || row.id,
       chat_jid: chatJid,
@@ -242,6 +261,7 @@ export class CanonicalMessageOpsService {
       reply_to_message_content: ref.reply_to_message_content,
       reply_to_sender_name: ref.reply_to_sender_name,
       external_message_id: ref.external_message_id,
+      providerAccountId,
       ...(attachments.length > 0 ? { attachments } : {}),
       delivery_status:
         ref.delivery_status ??

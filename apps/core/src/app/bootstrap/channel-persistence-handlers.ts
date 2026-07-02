@@ -5,7 +5,7 @@ import type {
   RuntimeMessageRepository,
 } from '../../domain/repositories/ops-repo.js';
 import {
-  findConversationRoutesForChat,
+  normalizeThreadQueueId,
   parseAgentThreadQueueKey,
 } from '../../shared/thread-queue-key.js';
 import type { RuntimeApp } from './runtime-app.js';
@@ -57,25 +57,71 @@ export function createChannelPersistenceHandlers({
 }: ChannelPersistenceHandlerDeps) {
   const chatIsGroup = new Map<string, boolean>();
 
-  const routesForChat = (chatJid: string, threadId?: string | null) => {
-    const byAgent = new Map<string, ConversationRoute>();
-    for (const [key, route] of findConversationRoutesForChat(
-      app.getConversationRoutes(),
-      chatJid,
-      threadId,
-    )) {
+  const routesForChat = (
+    chatJid: string,
+    threadId?: string | null,
+    providerAccountId?: string,
+  ) => {
+    const requestedProviderAccountId = providerAccountId?.trim();
+    const normalizedThreadId = normalizeThreadQueueId(threadId);
+    const wholeConversationRoutes: Array<[string, ConversationRoute]> = [];
+    const threadRoutes: Array<[string, ConversationRoute]> = [];
+    for (const entry of Object.entries(app.getConversationRoutes())) {
+      const [key, route] = entry;
       const parsed = parseAgentThreadQueueKey(key);
-      const agentId = agentIdForFolder(route.folder);
-      if (!byAgent.has(agentId) || parsed.agentId) byAgent.set(agentId, route);
+      if (parsed.chatJid !== chatJid) continue;
+      const routeProviderAccountId =
+        parsed.providerAccountId ??
+        (typeof route.providerAccountId === 'string'
+          ? route.providerAccountId.trim() || undefined
+          : undefined);
+      if (
+        requestedProviderAccountId &&
+        routeProviderAccountId !== requestedProviderAccountId
+      ) {
+        continue;
+      }
+      if (parsed.threadId) {
+        if (normalizedThreadId && parsed.threadId === normalizedThreadId) {
+          threadRoutes.push(entry);
+        }
+        continue;
+      }
+      wholeConversationRoutes.push(entry);
     }
-    return [...byAgent.values()];
+    const byAgent = new Map<string, [string, ConversationRoute]>();
+    const candidateRoutes =
+      threadRoutes.length > 0 ? threadRoutes : wholeConversationRoutes;
+    for (const [key, route] of candidateRoutes) {
+      const parsed = parseAgentThreadQueueKey(key);
+      const agentId = route.agentId ?? agentIdForFolder(route.folder);
+      if (!byAgent.has(agentId) || parsed.agentId)
+        byAgent.set(agentId, [key, route]);
+    }
+    const routeEntries = [...byAgent.values()];
+    if (!requestedProviderAccountId) {
+      const accountIds = new Set(
+        routeEntries
+          .map(([key, route]) => {
+            const parsed = parseAgentThreadQueueKey(key);
+            return parsed.providerAccountId ?? route.providerAccountId;
+          })
+          .filter(Boolean),
+      );
+      if (accountIds.size > 1) return [];
+    }
+    return routeEntries.map(([, route]) => route);
   };
 
   const ensureConfiguredConversationRoute = async (
     chatJid: string,
     msg: NewMessage,
   ): Promise<boolean> => {
-    const existingGroup = routesForChat(chatJid, msg.thread_id)[0];
+    const existingGroup = routesForChat(
+      chatJid,
+      msg.thread_id,
+      msg.providerAccountId,
+    )[0];
     const isKnownDirect =
       chatIsGroup.get(chatJid) === false ||
       existingGroup?.conversationKind === 'dm';
@@ -94,7 +140,7 @@ export function createChannelPersistenceHandlers({
     onMessage: async (chatJid: string, msg: NewMessage) => {
       const canRoute = await ensureConfiguredConversationRoute(chatJid, msg);
       if (!canRoute) return;
-      let routes = routesForChat(chatJid, msg.thread_id);
+      let routes = routesForChat(chatJid, msg.thread_id, msg.providerAccountId);
       if (!msg.is_from_me && !msg.is_bot_message && routes.length > 0) {
         const cfg = resolved.loadSenderAllowlist();
         routes = routes.filter((route) => {
@@ -129,7 +175,8 @@ export function createChannelPersistenceHandlers({
             for (const route of routes) {
               await repository.storeMessageWithLiveAdmission(msg, {
                 appId: resolved.appId,
-                agentId: agentIdForFolder(route.folder),
+                agentId: route.agentId ?? agentIdForFolder(route.folder),
+                providerAccountId: route.providerAccountId,
                 triggerDecision: {
                   source: 'channel_persistence',
                   requiresTrigger: route.requiresTrigger !== false,
@@ -158,6 +205,7 @@ export function createChannelPersistenceHandlers({
       name?: string,
       channel?: string,
       isGroup?: boolean,
+      options?: { providerAccountId?: string },
     ) => {
       if (isGroup !== undefined) chatIsGroup.set(chatJid, Boolean(isGroup));
       const persistMetadata = async () => {
@@ -168,6 +216,7 @@ export function createChannelPersistenceHandlers({
             name,
             channel,
             isGroup,
+            options,
           );
         } catch (err) {
           resolved.logger.error(

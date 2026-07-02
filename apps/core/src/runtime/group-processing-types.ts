@@ -37,6 +37,7 @@ import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
 import type { PatternCandidateRepository } from '../domain/ports/pattern-candidates.js';
 import type { AgentTodoRender } from '../domain/ports/task-lifecycle.js';
 import type { AgentLockStatus } from './proactive-surfacing-gate.js';
+import type { GroupAgentRunResult } from './group-agent-runner.js';
 
 export type {
   ConversationContextHydrationRequest,
@@ -46,23 +47,31 @@ export type {
 export type GroupProcessingRepository = RuntimeAgentSessionRepository &
   RuntimeMessageRepository;
 
+export type GroupProcessOptions = {
+  queued?: boolean;
+  memoryContext?: {
+    userId?: string;
+    source?: 'message' | 'command';
+    threadId?: string | null;
+    recallQuery?: string;
+  };
+  existingRunId?: string;
+  existingRunLeaseToken?: string;
+  existingRunLeaseWorkerInstanceId?: string;
+  existingRunLeaseFencingVersion?: number;
+  finalRetry?: boolean;
+  onRunResult?: (result: GroupAgentRunResult) => void;
+  onFirstProgress?: (input: {
+    jid: string;
+    messageRef: string;
+  }) => Promise<void> | void;
+  onLiveStopActionToken?: (token: string) => Promise<void> | void;
+};
+
 export interface GroupProcessor {
   processGroupMessages: (
     chatJid: string,
-    options?: {
-      queued?: boolean;
-      existingRunId?: string;
-      existingRunLeaseToken?: string;
-      existingRunLeaseWorkerInstanceId?: string;
-      existingRunLeaseFencingVersion?: number;
-      finalRetry?: boolean;
-      onRunResult?: (result: 'success' | 'error' | 'stopped') => void;
-      onFirstProgress?: (input: {
-        jid: string;
-        messageRef: string;
-      }) => Promise<void> | void;
-      onLiveStopActionToken?: (token: string) => Promise<void> | void;
-    },
+    options?: GroupProcessOptions,
   ) => Promise<boolean>;
 }
 
@@ -77,9 +86,18 @@ export interface ProactiveSurfacingConsentReader {
 
 export interface GroupProcessingDeps {
   channelRuntime: {
-    hasChannel: (chatJid: string) => boolean;
-    supportsStreaming: (chatJid: string) => boolean;
-    supportsProgress: (chatJid: string) => boolean;
+    hasChannel: (
+      chatJid: string,
+      options?: { providerAccountId?: string },
+    ) => boolean;
+    supportsStreaming: (
+      chatJid: string,
+      options?: { providerAccountId?: string },
+    ) => boolean;
+    supportsProgress: (
+      chatJid: string,
+      options?: { providerAccountId?: string },
+    ) => boolean;
     sendMessage: (
       chatJid: string,
       rawText: string,
@@ -90,8 +108,15 @@ export interface GroupProcessingDeps {
       rawText: string,
       options?: StreamingChunkOptions,
     ) => Promise<boolean>;
-    resetStreaming: (chatJid: string) => void;
-    setTyping: (chatJid: string, isTyping: boolean) => Promise<void>;
+    resetStreaming: (
+      chatJid: string,
+      options?: { providerAccountId?: string },
+    ) => void;
+    setTyping: (
+      chatJid: string,
+      isTyping: boolean,
+      options?: { providerAccountId?: string },
+    ) => Promise<void>;
     sendProgressUpdate: (
       chatJid: string,
       text: string,
@@ -100,6 +125,7 @@ export interface GroupProcessingDeps {
     renderAgentTodo?: (
       chatJid: string,
       render: AgentTodoRender,
+      options?: { providerAccountId?: string },
     ) => Promise<boolean>;
     hydrateConversationContext?: (
       request: ConversationContextHydrationRequest,
@@ -115,6 +141,7 @@ export interface GroupProcessingDeps {
     chatJid: string,
     threadId?: string | null,
     agentId?: string | null,
+    providerAccountId?: string | null,
   ) => ConversationRoute | undefined;
   clearSession: (
     workspaceFolder: string,
@@ -122,6 +149,7 @@ export interface GroupProcessingDeps {
     metadata?: {
       appId?: string;
       conversationJid?: string;
+      providerAccountId?: string | null;
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
     },

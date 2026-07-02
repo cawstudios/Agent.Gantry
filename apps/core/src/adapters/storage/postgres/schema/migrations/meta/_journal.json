@@ -610,6 +610,27 @@
       "when": 1777306200000,
       "tag": "0089_proactive_surfacing_opt_ins",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1777309800000,
+      "tag": "0090_provider_accounts_conversation_installs",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1777313400000,
+      "tag": "0091_provider_accounts_post_cutover_repairs",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1777317000000,
+      "tag": "0092_provider_accounts_final_repairs",
+      "breakpoints": true
     }
   ]
 }

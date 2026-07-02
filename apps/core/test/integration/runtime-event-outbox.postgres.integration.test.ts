@@ -195,7 +195,7 @@ maybeDescribe('Postgres runtime event outbox', () => {
       [otherAppId, createdAt],
     );
     await runtime.service.pool.query(
-      `INSERT INTO conversations (id, app_id, provider_connection_id, external_ref_json, kind, title, status, created_at, updated_at)
+      `INSERT INTO conversations (id, app_id, provider_account_id, external_ref_json, kind, title, status, created_at, updated_at)
          VALUES ($1, $2, 'provider:test', '{}', 'group', 'Runtime Event Replay', 'active', $3, $3)
          ON CONFLICT (id) DO NOTHING`,
       [conversationId, appId, createdAt],

@@ -13,15 +13,23 @@ function truncateSlackButtonLabel(label: string): string {
   return `${trimmed.slice(0, 72)}...`;
 }
 
-function slackActionValue(action: MessageActionAffordance): string | undefined {
+function slackActionValue(
+  action: MessageActionAffordance,
+  providerAccountId?: string,
+): string | undefined {
   const value =
     action.kind === 'live_turn_stop'
-      ? JSON.stringify({ kind: action.kind, actionToken: action.actionToken })
+      ? JSON.stringify({
+          kind: action.kind,
+          actionToken: action.actionToken,
+          ...(providerAccountId ? { providerAccountId } : {}),
+        })
       : SCHEDULER_ACTION_KINDS.has(action.kind)
         ? JSON.stringify({
             kind: action.kind,
             jobId: action.jobId,
             runId: action.runId ?? null,
+            ...(providerAccountId ? { providerAccountId } : {}),
           })
         : undefined;
   if (!value) return undefined;
@@ -33,11 +41,11 @@ function slackActionValue(action: MessageActionAffordance): string | undefined {
 export function slackMessageActionBlocks(
   text: string,
   actions?: MessageActionAffordance[],
-  options: { actionOnly?: boolean } = {},
+  options: { actionOnly?: boolean; providerAccountId?: string } = {},
 ): Array<Record<string, unknown>> | undefined {
   const elements = (actions ?? [])
     .map((action) => {
-      const value = slackActionValue(action);
+      const value = slackActionValue(action, options.providerAccountId);
       if (!value) return null;
       return {
         type: 'button',

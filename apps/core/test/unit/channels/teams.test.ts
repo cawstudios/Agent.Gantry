@@ -43,6 +43,20 @@ function makeOpts(): ChannelOpts {
     onMessage: vi.fn(async () => {}),
     onChatMetadata: vi.fn(async () => {}),
     conversationRoutes: vi.fn(() => ({})),
+    providerAccountId: 'teams_default',
+    runtimeSettings: () =>
+      ({
+        providerAccounts: {
+          teams_default: {
+            provider: 'teams',
+            runtimeSecretRefs: {
+              client_id: 'env:TEAMS_CLIENT_ID',
+              client_secret: 'env:TEAMS_CLIENT_SECRET',
+              tenant_id: 'env:TEAMS_TENANT_ID',
+            },
+          },
+        },
+      }) as never,
     runtimeSecrets: {
       getSecret(ref) {
         const value = this.getOptionalSecret(ref);
@@ -333,6 +347,7 @@ describe('TeamsChannel adapter scaffold', () => {
       'Engineering',
       'teams',
       true,
+      { providerAccountId: 'teams_default' },
     );
     expect(opts.onMessage).toHaveBeenCalledWith(
       'teams:19:abc@thread.v2',
@@ -946,6 +961,7 @@ describe('TeamsChannel adapter scaffold', () => {
     expect(onMessageAction).toHaveBeenCalledWith({
       kind: 'live_turn_stop',
       conversationJid: 'teams:19:abc@thread.v2',
+      providerAccountId: 'teams_default',
       threadId: 'root-message',
       userId: 'teams-user-1',
       actionToken: 'token-1',
@@ -1033,6 +1049,7 @@ describe('TeamsChannel adapter scaffold', () => {
     expect(onMessageAction).toHaveBeenCalledWith({
       kind: 'scheduler_run_now',
       conversationJid: 'teams:19:abc@thread.v2',
+      providerAccountId: 'teams_default',
       threadId: 'root-message',
       userId: 'teams-user-1',
       jobId: 'job-1',
@@ -1934,9 +1951,9 @@ describe('TeamsChannel adapter scaffold', () => {
     const opts = makeOpts();
     opts.runtimeSettings = () =>
       ({
-        providers: { teams: { defaultConnection: 'teams_default' } },
-        providerConnections: {
+        providerAccounts: {
           teams_default: {
+            provider: 'teams',
             runtimeSecretRefs: {
               client_id: 'gantry-secret:TEAMS_CLIENT_ID',
               client_secret: 'gantry-secret:TEAMS_CLIENT_SECRET',

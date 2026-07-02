@@ -40,6 +40,9 @@ export const CHANNEL_STREAM_UPDATE_INTERVAL_MS = {
 } as const;
 
 export interface ChannelOpts {
+  providerAccountId?: string;
+  inboundProviderAccountIds?: string[];
+  agentId?: string;
   onMessage: OnInboundMessage;
   ensureMessageRoute?: (
     chatJid: string,
@@ -53,7 +56,10 @@ export interface ChannelOpts {
   runtimeSecrets?: RuntimeSecretProvider;
   isControlApproverAllowed?: (input: {
     providerId: string;
+    providerAccountId?: string;
+    agentId?: string;
     conversationJid: string;
+    threadId?: string;
     userId: string;
     sourceAgentFolder: string;
     decisionPolicy?: PermissionApprovalRequest['decisionPolicy'];

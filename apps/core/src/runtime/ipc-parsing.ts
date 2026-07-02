@@ -26,6 +26,7 @@ const IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 export interface ParsedIpcMessage {
   type: 'message';
   appId?: string;
+  providerAccountId?: string;
   chatJid: string;
   text: string;
   sender?: string;
@@ -64,7 +65,6 @@ export interface ParsedBrowserIpcRequest {
   timeoutMs?: number;
   deadlineAtMs?: number;
 }
-
 const TOOL_INPUT_MAX_DEPTH = 2;
 const TOOL_INPUT_MAX_KEYS = 40;
 const TOOL_INPUT_MAX_STRING_LENGTH = 500;
@@ -266,6 +266,10 @@ export function parseIpcMessage(
     sourceAgentFolder,
     'IPC message',
   );
+  const context = isPlainObject(raw.context) ? raw.context : undefined;
+  const providerAccountId =
+    toTrimmedString(raw.providerAccountId, { maxLen: 255 }) ??
+    toTrimmedString(context?.providerAccountId, { maxLen: 255 });
   const type = toTrimmedString(raw.type, { maxLen: 64 });
   if (type !== 'message') throw new Error('Invalid IPC message type');
   const chatJid = toTrimmedString(raw.chatJid, { maxLen: 255 });
@@ -276,6 +280,7 @@ export function parseIpcMessage(
   return {
     type: 'message',
     ...(appId ? { appId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     chatJid,
     text,
     ...(sender ? { sender } : {}),
@@ -379,6 +384,9 @@ export function parsePermissionIpcRequest(
   const agentID = toTrimmedString(raw.agentID, { maxLen: 200 });
   const agentId = binding.agentId;
   const context = isPlainObject(raw.context) ? raw.context : undefined;
+  const providerAccountId =
+    toTrimmedString(raw.providerAccountId, { maxLen: 255 }) ??
+    toTrimmedString(context?.providerAccountId, { maxLen: 255 });
   const payloadJobId = toTrimmedString(raw.jobId, { maxLen: 200 });
   const contextJobId = toTrimmedString(context?.jobId, { maxLen: 200 });
   if (payloadJobId && contextJobId && payloadJobId !== contextJobId) {
@@ -449,6 +457,7 @@ export function parsePermissionIpcRequest(
     requestId,
     appId,
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     ...(responseNonce ? { responseNonce } : {}),
     sourceAgentFolder,
     ...(jobId ? { jobId } : {}),
@@ -499,6 +508,9 @@ export function parseUserQuestionIpcRequest(
   const context = isPlainObject(raw.context) ? raw.context : undefined;
   const appId = binding.appId;
   const agentId = binding.agentId;
+  const providerAccountId =
+    toTrimmedString(raw.providerAccountId, { maxLen: 255 }) ??
+    toTrimmedString(context?.providerAccountId, { maxLen: 255 });
   const payloadJobId = toTrimmedString(raw.jobId, { maxLen: 200 });
   const contextJobId = toTrimmedString(context?.jobId, { maxLen: 200 });
   if (payloadJobId && contextJobId && payloadJobId !== contextJobId) {
@@ -619,6 +631,7 @@ export function parseUserQuestionIpcRequest(
     sourceAgentFolder,
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     ...(jobId ? { jobId } : {}),
     ...(runId ? { runId } : {}),
     ...(runLeaseToken ? { runLeaseToken } : {}),
@@ -647,6 +660,9 @@ export function parseRichInteractionIpcRequest(
     throw new Error('Invalid rich interaction IPC requestId');
   }
   const context = isPlainObject(raw.context) ? raw.context : undefined;
+  const providerAccountId =
+    toTrimmedString(raw.providerAccountId, { maxLen: 255 }) ??
+    toTrimmedString(context?.providerAccountId, { maxLen: 255 });
   const payloadTargetJid = toTrimmedString(raw.targetJid, { maxLen: 255 });
   const contextTargetJid = toTrimmedString(context?.chatJid, { maxLen: 255 });
   if (
@@ -669,6 +685,7 @@ export function parseRichInteractionIpcRequest(
     sourceAgentFolder,
     ...(binding.appId ? { appId: binding.appId } : {}),
     ...(binding.agentId ? { agentId: binding.agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     ...(jobId ? { jobId } : {}),
     ...(runId ? { runId } : {}),
     ...(payloadTargetJid || contextTargetJid

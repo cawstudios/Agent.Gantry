@@ -622,6 +622,7 @@ describe('pending interaction durability', () => {
     ).resolves.toEqual({
       sourceAgentFolder: 'agent-folder',
       targetJid: 'chat-1',
+      threadId: null,
       decisionPolicy: 'approval_required',
     });
   });

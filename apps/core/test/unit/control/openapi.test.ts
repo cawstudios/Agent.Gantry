@@ -34,10 +34,10 @@ const expectedControlRoutes = [
   'GET /v1/agents/{agentId}/access',
   'PUT /v1/agents/{agentId}/access',
   'GET /v1/agents/{agentId}/admin',
-  'GET /v1/agents/{agentId}/conversation-bindings',
-  'DELETE /v1/agents/{agentId}/conversation-bindings/{conversationId}',
-  'PATCH /v1/agents/{agentId}/conversation-bindings/{conversationId}',
-  'PUT /v1/agents/{agentId}/conversation-bindings/{conversationId}',
+  'GET /v1/agents/{agentId}/conversation-installs',
+  'DELETE /v1/agents/{agentId}/conversation-installs/{conversationId}',
+  'PATCH /v1/agents/{agentId}/conversation-installs/{conversationId}',
+  'PUT /v1/agents/{agentId}/conversation-installs/{conversationId}',
   'GET /v1/agents/{agentId}/profile-files',
   'GET /v1/agents/{agentId}/profile-files/{kind}',
   'PUT /v1/agents/{agentId}/profile-files/{kind}',
@@ -99,12 +99,12 @@ const expectedControlRoutes = [
   'GET /v1/models/defaults',
   'PATCH /v1/models/defaults',
   'POST /v1/models/preview',
-  'GET /v1/provider-connections',
-  'POST /v1/provider-connections',
-  'DELETE /v1/provider-connections/{providerConnectionId}',
-  'GET /v1/provider-connections/{providerConnectionId}',
-  'PATCH /v1/provider-connections/{providerConnectionId}',
-  'POST /v1/provider-connections/{providerConnectionId}/discover-conversations',
+  'GET /v1/provider-accounts',
+  'POST /v1/provider-accounts',
+  'DELETE /v1/provider-accounts/{providerAccountId}',
+  'GET /v1/provider-accounts/{providerAccountId}',
+  'PATCH /v1/provider-accounts/{providerAccountId}',
+  'POST /v1/provider-accounts/{providerAccountId}/discover-conversations',
   'GET /v1/providers',
   'GET /v1/runs',
   'GET /v1/runs/{runId}',
@@ -305,7 +305,8 @@ describe('control OpenAPI documentation', () => {
   it('serves the unified status read model from the system route', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.providers.telegram = { enabled: true };
-    settings.providerConnections.telegram_default = {
+    settings.providerAccounts.telegram_default = {
+      agentId: 'main_agent',
       provider: 'telegram',
       label: 'Telegram',
       runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
@@ -319,7 +320,7 @@ describe('control OpenAPI documentation', () => {
       capabilities: [{ id: 'browser.use', version: 'builtin' }],
     };
     settings.conversations.main_dm = {
-      providerConnection: 'telegram_default',
+      providerAccount: 'telegram_default',
       externalId: '123',
       kind: 'dm',
       displayName: 'Main DM',
@@ -373,13 +374,14 @@ describe('control OpenAPI documentation', () => {
   it('computes status model readiness from internal settings, not redacted settings', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.providers.telegram = { enabled: true };
-    settings.providerConnections.telegram_default = {
+    settings.providerAccounts.telegram_default = {
+      agentId: 'main_agent',
       provider: 'telegram',
       label: 'Telegram',
       runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
     };
     settings.conversations.main_dm = {
-      providerConnection: 'telegram_default',
+      providerAccount: 'telegram_default',
       externalId: '123',
       kind: 'dm',
       displayName: 'Main DM',
@@ -679,10 +681,36 @@ describe('control OpenAPI documentation', () => {
     expect(createAgentRequest.properties).not.toHaveProperty('agentEngine');
     expect(updateAgentRequest.properties).not.toHaveProperty('agentEngine');
     expect(
-      spec.paths['/v1/provider-connections']?.post.requestBody.content[
+      spec.paths['/v1/provider-accounts']?.post.requestBody.content[
         'application/json'
       ].schema,
-    ).toEqual({ $ref: '#/components/schemas/ProviderConnectionRequest' });
+    ).toEqual({ $ref: '#/components/schemas/ProviderAccountRequest' });
+    expect(
+      spec.paths['/v1/provider-accounts/{providerAccountId}']?.patch.requestBody
+        .content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/ProviderAccountUpdateRequest' });
+    expect(
+      spec.components.schemas.ProviderAccountUpdateRequest,
+    ).not.toHaveProperty('required');
+    expect(
+      Object.keys(
+        spec.components.schemas.ProviderAccountUpdateRequest.properties,
+      ).sort(),
+    ).toEqual([
+      'config',
+      'enabled',
+      'externalRef',
+      'label',
+      'metadata',
+      'runtimeSecretRefs',
+      'status',
+    ]);
+    expect(spec.components.schemas.ProviderAccount.required).not.toContain(
+      'enabled',
+    );
+    expect(
+      spec.components.schemas.ProviderAccount.properties,
+    ).not.toHaveProperty('enabled');
     expect(spec.paths['/v1/ingresses/{ingressId}/invoke']?.post.security).toBe(
       undefined,
     );
@@ -694,6 +722,9 @@ describe('control OpenAPI documentation', () => {
     expect(spec.components.schemas.GuidedActionType.enum).toContain(
       'resume_job',
     );
+    expect(spec.components.schemas.GuidedActionType.enum).toContain(
+      'add_conversation_install',
+    );
     expect(spec.components.schemas.GuidedActionType.enum).not.toContain(
       'fix_blocked_job',
     );
@@ -704,7 +735,7 @@ describe('control OpenAPI documentation', () => {
     const operationIds = Object.values(spec.paths).flatMap((pathItem) =>
       Object.values(pathItem).map((operation) => operation.operationId),
     );
-    expect(operationIds).toContain('listProviderConnections');
+    expect(operationIds).toContain('listProviderAccounts');
     expect(operationIds).toContain('connectMcpServer');
     expect(new Set(operationIds).size).toBe(operationIds.length);
   });

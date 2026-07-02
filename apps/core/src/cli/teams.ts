@@ -11,6 +11,7 @@ import {
 } from '../channels/teams-setup-discovery.js';
 import { ensureRuntimeLayout } from '../config/settings/runtime-home.js';
 import {
+  ensureConfiguredAgent,
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
@@ -18,6 +19,7 @@ import {
 import { openRuntimeGroupDb } from './runtime-group-db.js';
 import {
   allocateDefaultAgentFolder,
+  DEFAULT_AGENT_FOLDER,
   defaultTriggerForAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
@@ -28,6 +30,7 @@ import {
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
+import { providerAccountIdForAgent } from './provider-utils.js';
 
 type TeamsChannelChoice =
   | { type: 'selected'; channel: TeamsDiscoveredChannel }
@@ -359,24 +362,15 @@ export async function runTeamsConnectCommand(
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   settings.providers.teams.enabled = true;
-  const providerConnectionId =
-    settings.providers.teams.defaultConnection || 'teams_default';
-  settings.providers.teams.defaultConnection = providerConnectionId;
-  settings.providerConnections[providerConnectionId] = {
-    provider: 'teams',
-    label:
-      settings.providerConnections[providerConnectionId]?.label ||
-      'Teams Default',
-    runtimeSecretRefs: {
-      ...(settings.providerConnections[providerConnectionId]
-        ?.runtimeSecretRefs || {}),
-      client_id: clientIdSecret.ref,
-      client_secret: clientSecretRef.ref,
-      tenant_id: tenantIdSecret.ref,
-    },
-  };
+  let providerAccountId = 'teams_default';
+  const providerAgentId = registeredFolder || DEFAULT_AGENT_FOLDER;
+  ensureConfiguredAgent(settings, {
+    agentId: providerAgentId,
+    agentName: registeredChatTitle || settings.agent.name,
+    agentFolder: providerAgentId,
+  });
   if (registeredFolder) {
-    ensureConfiguredConversationBinding(settings, {
+    const binding = ensureConfiguredConversationBinding(settings, {
       agentId: registeredFolder,
       agentName: conversationRouteName || settings.agent.name,
       agentFolder: registeredFolder,
@@ -386,7 +380,27 @@ export async function runTeamsConnectCommand(
       requiresTrigger: false,
       approverIds,
     });
+    providerAccountId = binding.providerConnectionId;
+  } else {
+    providerAccountId = providerAccountIdForAgent(settings, {
+      providerId: 'teams',
+      agentId: providerAgentId,
+      defaultAccountId: providerAccountId,
+    });
   }
+  settings.providerAccounts[providerAccountId] = {
+    agentId: providerAgentId,
+    provider: 'teams',
+    label:
+      settings.providerAccounts[providerAccountId]?.label || 'Teams Default',
+    runtimeSecretRefs: {
+      ...(settings.providerAccounts[providerAccountId]?.runtimeSecretRefs ||
+        {}),
+      client_id: clientIdSecret.ref,
+      client_secret: clientSecretRef.ref,
+      tenant_id: tenantIdSecret.ref,
+    },
+  };
   await writeDesiredRuntimeSettings({
     runtimeHome,
     settings,

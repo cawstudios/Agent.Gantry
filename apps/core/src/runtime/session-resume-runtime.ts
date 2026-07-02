@@ -293,6 +293,7 @@ export async function archiveCurrentRuntimeSession(input: {
     executionProviderId:
       input.executionProviderId ?? resolveRuntimeExecutionProviderId(),
     conversationJid: input.chatJid,
+    providerAccountId: input.group.providerAccountId,
     threadId: input.threadId,
     conversationKind: input.group.conversationKind,
     memoryUserId: input.memoryUserId,

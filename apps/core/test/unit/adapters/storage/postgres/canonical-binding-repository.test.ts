@@ -5,6 +5,7 @@ import {
   PostgresCanonicalBindingRepository,
   bindingRowToGroup,
 } from '@core/adapters/storage/postgres/repositories/canonical-binding-repository.postgres.js';
+import * as pgSchema from '@core/adapters/storage/postgres/schema/schema.js';
 import type { ConversationRoute } from '@core/domain/types.js';
 
 describe('canonical binding repository route projection', () => {
@@ -13,6 +14,7 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: `conversation-route:${routeKey}`,
       agentId: 'agent:main_agent',
+      providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:100',
       threadId: null,
       status: 'active',
@@ -26,20 +28,23 @@ describe('canonical binding repository route projection', () => {
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:100',
+        route: {
+          trigger: '@main',
+          requiresTrigger: false,
+        },
       }),
       displayName: 'Main Telegram',
-      triggerPattern: '@main',
-      requiresTrigger: false,
       createdAt: '2026-05-06T00:00:00.000Z',
     };
 
     expect(bindingRowToGroup(row)).toMatchObject({ jid: routeKey });
   });
 
-  it('reconstructs registered groups from binding columns instead of memory-subject route blobs', () => {
+  it('reconstructs registered groups from conversation install route metadata', () => {
     const row = {
       id: 'conversation-route:tg:100',
       agentId: 'agent:main_agent',
+      providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:100',
       threadId: null,
       status: 'active',
@@ -53,10 +58,12 @@ describe('canonical binding repository route projection', () => {
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:100',
+        route: {
+          trigger: '@main',
+          requiresTrigger: false,
+        },
       }),
       displayName: 'Main Telegram',
-      triggerPattern: '@main',
-      requiresTrigger: false,
       createdAt: '2026-05-06T00:00:00.000Z',
     };
 
@@ -65,6 +72,7 @@ describe('canonical binding repository route projection', () => {
       group: {
         name: 'Main Telegram',
         folder: 'main_agent',
+        providerAccountId: 'provider-account:telegram',
         trigger: '@main',
         added_at: '2026-05-06T00:00:00.000Z',
         requiresTrigger: false,
@@ -79,6 +87,7 @@ describe('canonical binding repository route projection', () => {
     const baseRow = {
       id: 'conversation-route:tg:100',
       agentId: 'agent:main_agent',
+      providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:100',
       threadId: null,
       status: 'active',
@@ -88,10 +97,12 @@ describe('canonical binding repository route projection', () => {
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:100',
+        route: {
+          trigger: '@main',
+          requiresTrigger: false,
+        },
       }),
       displayName: 'Main Telegram',
-      triggerPattern: '@main',
-      requiresTrigger: false,
       createdAt: '2026-05-06T00:00:00.000Z',
     };
 
@@ -110,6 +121,7 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: 'conversation-route:app:one',
       agentId: 'agent:main_agent',
+      providerAccountId: 'provider-account:app',
       conversationId: 'conversation:app:one',
       threadId: null,
       status: 'active',
@@ -119,10 +131,11 @@ describe('canonical binding repository route projection', () => {
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:app:one',
+        route: {
+          requiresTrigger: false,
+        },
       }),
       displayName: 'App Conversation',
-      triggerPattern: null,
-      requiresTrigger: false,
       createdAt: '2026-05-06T00:00:00.000Z',
     };
 
@@ -137,6 +150,7 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: 'conversation-route:sl:C123',
       agentId: 'agent:main_agent',
+      providerAccountId: 'provider-account:slack',
       conversationId: 'conversation:sl:C123',
       threadId: null,
       status: 'active',
@@ -147,6 +161,8 @@ describe('canonical binding repository route projection', () => {
         appId: 'default',
         conversationId: 'conversation:sl:C123',
         route: {
+          trigger: '@ops',
+          requiresTrigger: true,
           agentConfig: {
             model: 'opus',
             thinking: { mode: 'enabled', effort: 'high' },
@@ -155,8 +171,6 @@ describe('canonical binding repository route projection', () => {
         },
       }),
       displayName: 'Ops',
-      triggerPattern: '@ops',
-      requiresTrigger: true,
       createdAt: '2026-05-06T00:00:00.000Z',
     };
 
@@ -171,6 +185,7 @@ describe('canonical binding repository route projection', () => {
     const directRow = {
       id: 'conversation-route:tg:5759865942',
       agentId: 'agent:main_agent',
+      providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:5759865942',
       threadId: null,
       status: 'active',
@@ -180,10 +195,12 @@ describe('canonical binding repository route projection', () => {
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:5759865942',
+        route: {
+          trigger: '@main',
+          requiresTrigger: false,
+        },
       }),
       displayName: 'Main Agent',
-      triggerPattern: '@main',
-      requiresTrigger: false,
       createdAt: '2026-05-06T00:00:00.000Z',
     };
     const channelRow = {
@@ -222,7 +239,7 @@ describe('canonical binding repository route projection', () => {
     );
     const ensureAgent = vi.fn(async () => 'agent:main_agent');
     const getConversationInstallationId = vi.fn(
-      async () => 'channel-providerConnection:default:tg',
+      async () => 'provider-account:default:tg',
     );
 
     const repo = new PostgresCanonicalBindingRepository(db);
@@ -239,12 +256,16 @@ describe('canonical binding repository route projection', () => {
       added_at: '2026-06-01T00:00:00.000Z',
       requiresTrigger: true,
       conversationKind: 'channel',
+      providerAccountId: 'provider-account:default:tg',
     } as ConversationRoute);
 
     expect(ensureConversation).toHaveBeenCalledOnce();
     expect(ensureConversation).toHaveBeenCalledWith(
       'tg:100',
-      expect.objectContaining({ isGroup: true }),
+      expect.objectContaining({
+        isGroup: true,
+        providerAccountId: 'provider-account:default:tg',
+      }),
       tx,
     );
     expect(ensureConversation).not.toHaveBeenCalledWith(
@@ -260,5 +281,26 @@ describe('canonical binding repository route projection', () => {
       id: `conversation-route:${routeKey}`,
       conversationId: 'conversation:tg:100',
     });
+  });
+
+  it('requires active provider accounts when loading active route rows', async () => {
+    let query: any;
+    query = {
+      from: vi.fn(() => query),
+      innerJoin: vi.fn(() => query),
+      where: vi.fn(() => query),
+      orderBy: vi.fn(async () => []),
+    };
+    const db = {
+      select: vi.fn(() => query),
+    } as any;
+
+    const repo = new PostgresCanonicalBindingRepository(db);
+    await repo.listConversationRoutes();
+
+    expect(query.innerJoin).toHaveBeenCalledWith(
+      pgSchema.providerAccountsPostgres,
+      expect.anything(),
+    );
   });
 });

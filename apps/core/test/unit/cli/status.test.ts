@@ -19,7 +19,7 @@ describe('status command formatting', () => {
   it('renders the unified operator status without storage internals', () => {
     const settings = createDefaultRuntimeSettings();
     settings.providers.telegram = { enabled: true };
-    settings.providerConnections.telegram_default = {
+    settings.providerAccounts.telegram_default = {
       provider: 'telegram',
       label: 'Telegram',
       runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
@@ -121,10 +121,10 @@ describe('status command formatting', () => {
     expect(output).not.toContain('IPC');
   });
 
-  it('reports missing conversation binding after provider setup is ready', () => {
+  it('reports missing conversation install after provider setup is ready', () => {
     const settings = createDefaultRuntimeSettings();
     settings.providers.telegram = { enabled: true };
-    settings.providerConnections.telegram_default = {
+    settings.providerAccounts.telegram_default = {
       provider: 'telegram',
       label: 'Telegram',
       runtimeSecretRefs: { bot_token: 'TELEGRAM_BOT_TOKEN' },
@@ -166,7 +166,7 @@ describe('status command formatting', () => {
 
     expect(output).toContain('Providers: 1/0/0');
     expect(output).toContain(
-      'Next action: Run `gantry agent add <chat-jid>` to bind an agent to a conversation.',
+      'Next action: Run `gantry conversation install --agent <agent-id> --conversation <conversation-id>` to install an agent in a conversation.',
     );
   });
 

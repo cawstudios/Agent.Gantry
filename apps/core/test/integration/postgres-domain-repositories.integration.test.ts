@@ -19,7 +19,7 @@ import {
 import type { AgentId } from '@core/domain/agent/agent.js';
 import type { AppId } from '@core/domain/app/app.js';
 import type {
-  ProviderConnectionId,
+  ProviderAccountId,
   ProviderId,
 } from '@core/domain/provider/provider.js';
 import type {
@@ -50,8 +50,8 @@ const TEST_CODEX_PROVIDER_ID = 'codex-sdk' as ExecutionProviderId;
 const appId = DEFAULT_APP_ID as AppId;
 const agentId = DEFAULT_AGENT_ID as AgentId;
 const providerId = 'slack' as ProviderId;
-const providerConnectionId =
-  'channel-providerConnection:test:slack' as ProviderConnectionId;
+const providerAccountId =
+  'channel-providerAccount:test:slack' as ProviderAccountId;
 const conversationId = 'conversation:test:slack:C123' as ConversationId;
 const threadId = 'thread:test:slack:C123:1700.1' as ConversationThreadId;
 const userId = 'user:test:U123' as UserId;
@@ -84,12 +84,13 @@ maybeDescribe('Postgres domain repositories', () => {
     await service.migrate();
     repositories = createPostgresDomainRepositories(service.db, service.pool);
 
-    await repositories.providerConnections.saveProviderConnection({
-      id: providerConnectionId,
+    await repositories.providerAccounts.saveProviderAccount({
+      id: providerAccountId,
       appId,
+      agentId,
       providerId,
-      externalInstallationRef: {
-        kind: 'provider_connection',
+      externalIdentityRef: {
+        kind: 'provider_account',
         value: 'T123',
       },
       label: 'Test Slack',
@@ -102,7 +103,7 @@ maybeDescribe('Postgres domain repositories', () => {
     await repositories.conversations.saveConversation({
       id: conversationId,
       appId,
-      providerConnectionId: providerConnectionId,
+      providerAccountId: providerAccountId,
       externalRef: { kind: 'conversation', value: 'C123' },
       kind: 'channel',
       title: 'engineering',
@@ -135,7 +136,7 @@ maybeDescribe('Postgres domain repositories', () => {
       repositories.conversations.getConversationByExternalRef({
         appId,
         providerId,
-        providerConnectionId: providerConnectionId,
+        providerAccountId: providerAccountId,
         externalConversationId: 'C123',
       }),
     ).resolves.toMatchObject({ id: conversationId });
@@ -302,16 +303,17 @@ maybeDescribe('Postgres domain repositories', () => {
 
   it('rebinds desired-state conversation and binding upserts to the selected provider connection', async () => {
     const selectedConnectionId =
-      'channel-providerConnection:test:slack-selected' as ProviderConnectionId;
+      'channel-providerAccount:test:slack-selected' as ProviderAccountId;
     const reboundConversationId =
       'conversation:test:slack:C999' as ConversationId;
     const bindingId = 'agent-channel-binding:test:rebound';
-    await repositories.providerConnections.saveProviderConnection({
+    await repositories.providerAccounts.saveProviderAccount({
       id: selectedConnectionId,
       appId,
+      agentId,
       providerId,
-      externalInstallationRef: {
-        kind: 'provider_connection',
+      externalIdentityRef: {
+        kind: 'provider_account',
         value: 'T999',
       },
       label: 'Selected Slack',
@@ -325,7 +327,7 @@ maybeDescribe('Postgres domain repositories', () => {
     await repositories.conversations.saveConversation({
       id: reboundConversationId,
       appId,
-      providerConnectionId,
+      providerAccountId,
       externalRef: { kind: 'conversation', value: 'C999' },
       kind: 'channel',
       title: 'stale',
@@ -333,16 +335,16 @@ maybeDescribe('Postgres domain repositories', () => {
       createdAt: now,
       updatedAt: now,
     });
-    await repositories.providerConnections.saveAgentConversationBinding({
+    await repositories.providerAccounts.saveConversationInstall({
       id: bindingId,
       appId,
       agentId,
-      providerConnectionId,
+      providerAccountId,
       conversationId: reboundConversationId,
       displayName: 'stale',
       status: 'active',
-      triggerMode: 'trigger',
-      requiresTrigger: true,
+      senderPolicy: 'provider_native',
+      controlPolicy: 'conversation_approvers',
       memoryScope: 'conversation',
       memorySubject: {
         kind: 'conversation',
@@ -357,7 +359,7 @@ maybeDescribe('Postgres domain repositories', () => {
     await repositories.conversations.saveConversation({
       id: reboundConversationId,
       appId,
-      providerConnectionId: selectedConnectionId,
+      providerAccountId: selectedConnectionId,
       externalRef: { kind: 'conversation', value: 'C999' },
       kind: 'channel',
       title: 'selected',
@@ -365,16 +367,16 @@ maybeDescribe('Postgres domain repositories', () => {
       createdAt: now,
       updatedAt: '2026-04-27T00:01:00.000Z',
     });
-    await repositories.providerConnections.saveAgentConversationBinding({
+    await repositories.providerAccounts.saveConversationInstall({
       id: bindingId,
       appId,
       agentId,
-      providerConnectionId: selectedConnectionId,
+      providerAccountId: selectedConnectionId,
       conversationId: reboundConversationId,
       displayName: 'selected',
       status: 'active',
-      triggerMode: 'trigger',
-      requiresTrigger: true,
+      senderPolicy: 'provider_native',
+      controlPolicy: 'conversation_approvers',
       memoryScope: 'conversation',
       memorySubject: {
         kind: 'conversation',
@@ -389,30 +391,31 @@ maybeDescribe('Postgres domain repositories', () => {
     await expect(
       repositories.conversations.getConversation(reboundConversationId),
     ).resolves.toMatchObject({
-      providerConnectionId: selectedConnectionId,
+      providerAccountId: selectedConnectionId,
       title: 'selected',
     });
     await expect(
-      repositories.providerConnections.getAgentConversationBinding({
+      repositories.providerAccounts.getConversationInstall({
         appId,
         agentId,
         conversationId: reboundConversationId,
       }),
     ).resolves.toMatchObject({
-      providerConnectionId: selectedConnectionId,
+      providerAccountId: selectedConnectionId,
       displayName: 'selected',
     });
   });
 
   it('partially updates provider connections without clobbering stored config', async () => {
     const partialInstallationId =
-      'channel-providerConnection:test:partial' as ProviderConnectionId;
-    await repositories.providerConnections.saveProviderConnection({
+      'channel-providerAccount:test:partial' as ProviderAccountId;
+    await repositories.providerAccounts.saveProviderAccount({
       id: partialInstallationId,
       appId,
+      agentId,
       providerId,
-      externalInstallationRef: {
-        kind: 'provider_connection',
+      externalIdentityRef: {
+        kind: 'provider_account',
         value: 'T-PARTIAL',
       },
       label: 'Partial Slack',
@@ -424,7 +427,7 @@ maybeDescribe('Postgres domain repositories', () => {
     });
 
     await expect(
-      repositories.providerConnections.updateProviderConnection({
+      repositories.providerAccounts.updateProviderAccount({
         appId,
         id: partialInstallationId,
         patch: { label: 'Renamed Slack' },
@@ -1382,16 +1385,16 @@ maybeDescribe('Postgres domain repositories', () => {
   });
 
   it('answers agent conversation binding enablement for conversations and threads', async () => {
-    await repositories.providerConnections.saveAgentConversationBinding({
+    await repositories.providerAccounts.saveConversationInstall({
       id: 'agent-channel-binding:test:conversation',
       appId,
       agentId,
-      providerConnectionId: providerConnectionId,
+      providerAccountId: providerAccountId,
       conversationId,
       displayName: 'Default Agent',
       status: 'active',
-      triggerMode: 'always',
-      requiresTrigger: false,
+      senderPolicy: 'provider_native',
+      controlPolicy: 'conversation_approvers',
       memoryScope: 'conversation',
       memorySubject: { kind: 'conversation', appId, conversationId },
       permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
@@ -1400,7 +1403,7 @@ maybeDescribe('Postgres domain repositories', () => {
     });
 
     await expect(
-      repositories.providerConnections.isAgentEnabledInConversation({
+      repositories.providerAccounts.isAgentEnabledInConversation({
         appId,
         agentId,
         conversationId,
@@ -1408,7 +1411,7 @@ maybeDescribe('Postgres domain repositories', () => {
       }),
     ).resolves.toBe(true);
 
-    await repositories.providerConnections.disableAgentConversationBinding({
+    await repositories.providerAccounts.disableConversationInstall({
       appId,
       agentId,
       conversationId,
@@ -1416,7 +1419,7 @@ maybeDescribe('Postgres domain repositories', () => {
     });
 
     await expect(
-      repositories.providerConnections.isAgentEnabledInConversation({
+      repositories.providerAccounts.isAgentEnabledInConversation({
         appId,
         agentId,
         conversationId,
@@ -1424,7 +1427,7 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toBe(false);
 
     await expect(
-      repositories.providerConnections.getAgentConversationBinding({
+      repositories.providerAccounts.getConversationInstall({
         appId,
         agentId,
         conversationId,
@@ -1432,10 +1435,109 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toMatchObject({
       displayName: 'Default Agent',
       status: 'disabled',
-      triggerMode: 'always',
+      senderPolicy: 'provider_native',
       memoryScope: 'conversation',
       permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
     });
+  });
+
+  it('keeps exact thread install lookup from matching whole-conversation installs', async () => {
+    const exactConversationId =
+      'conversation:test:slack:C-thread-exact' as ConversationId;
+    const exactThreadId =
+      'thread:test:slack:C-thread-exact:1700.1' as ConversationThreadId;
+
+    await repositories.conversations.saveConversation({
+      id: exactConversationId,
+      appId,
+      providerAccountId,
+      externalRef: { kind: 'conversation', value: 'C-thread-exact' },
+      kind: 'channel',
+      title: 'thread exact',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repositories.conversations.saveThread({
+      id: exactThreadId,
+      appId,
+      conversationId: exactConversationId,
+      externalRef: { kind: 'conversation_thread', value: '1700.1' },
+      title: 'thread exact',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repositories.providerAccounts.saveConversationInstall({
+      id: 'agent-channel-binding:test:thread-exact:conversation',
+      appId,
+      agentId,
+      providerAccountId,
+      conversationId: exactConversationId,
+      displayName: 'Whole conversation',
+      status: 'active',
+      senderPolicy: 'provider_native',
+      controlPolicy: 'conversation_approvers',
+      memoryScope: 'conversation',
+      memorySubject: {
+        kind: 'conversation',
+        appId,
+        conversationId: exactConversationId,
+      },
+      permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(
+      repositories.providerAccounts.getConversationInstall({
+        appId,
+        agentId,
+        conversationId: exactConversationId,
+        threadId: exactThreadId,
+        exactThreadId: true,
+      }),
+    ).resolves.toBeNull();
+
+    await repositories.providerAccounts.saveConversationInstall({
+      id: 'agent-channel-binding:test:thread-exact:thread',
+      appId,
+      agentId,
+      providerAccountId,
+      conversationId: exactConversationId,
+      threadId: exactThreadId,
+      displayName: 'Thread',
+      status: 'active',
+      senderPolicy: 'provider_native',
+      controlPolicy: 'conversation_approvers',
+      memoryScope: 'conversation',
+      memorySubject: {
+        kind: 'conversation',
+        appId,
+        conversationId: exactConversationId,
+      },
+      permissionPolicyIds: [DEFAULT_PERMISSION_POLICY_ID],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(
+      repositories.providerAccounts.listConversationInstallsByConversation({
+        appId,
+        conversationId: exactConversationId,
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'agent-channel-binding:test:thread-exact:conversation',
+          threadId: undefined,
+        }),
+        expect.objectContaining({
+          id: 'agent-channel-binding:test:thread-exact:thread',
+          threadId: exactThreadId,
+        }),
+      ]),
+    );
   });
 
   it('persists permission decisions with audit context', async () => {

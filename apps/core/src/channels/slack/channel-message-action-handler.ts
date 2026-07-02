@@ -20,7 +20,10 @@ type SlackAppLike = {
 
 export function registerSlackMessageActionHandler(
   app: SlackAppLike,
-  onMessageAction?: OnMessageAction,
+  opts?: {
+    onMessageAction?: OnMessageAction;
+    providerAccountId?: string;
+  },
 ): void {
   app.action('gantry_message_action', async (args: any) => {
     await args.ack();
@@ -36,6 +39,7 @@ export function registerSlackMessageActionHandler(
           jobId?: unknown;
           runId?: unknown;
           actionToken?: unknown;
+          providerAccountId?: unknown;
         }
       | undefined;
     try {
@@ -44,9 +48,10 @@ export function registerSlackMessageActionHandler(
       return;
     }
     if (payload?.kind === 'live_turn_stop' && body.channel?.id) {
-      await onMessageAction?.({
+      await opts?.onMessageAction?.({
         kind: 'live_turn_stop',
         conversationJid: `sl:${body.channel.id}`,
+        ...providerAccountFromPayload(payload, opts?.providerAccountId),
         threadId: body.message?.thread_ts,
         userId: body.user?.id,
         actionToken:
@@ -70,9 +75,10 @@ export function registerSlackMessageActionHandler(
       return;
     }
     if (payload.kind === 'scheduler_run_now') {
-      await onMessageAction?.({
+      await opts?.onMessageAction?.({
         kind: 'scheduler_run_now',
         conversationJid: `sl:${body.channel.id}`,
+        ...providerAccountFromPayload(payload, opts?.providerAccountId),
         threadId: body.message?.thread_ts,
         userId: body.user.id,
         jobId: payload.jobId,
@@ -90,4 +96,14 @@ export function registerSlackMessageActionHandler(
       // ignore callback feedback failures
     }
   });
+}
+
+function providerAccountFromPayload(
+  payload: { providerAccountId?: unknown } | undefined,
+  fallback?: string,
+): { providerAccountId?: string } {
+  if (typeof payload?.providerAccountId === 'string') {
+    return { providerAccountId: payload.providerAccountId };
+  }
+  return fallback ? { providerAccountId: fallback } : {};
 }

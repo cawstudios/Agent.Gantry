@@ -300,7 +300,9 @@ describe('agent task lifecycle IPC handlers', () => {
         ],
         stop: { label: 'Stop', actionToken: 'stop-token-1' },
         threadId: 'thread-1',
+        updatedAt: expect.any(String),
       }),
+      undefined,
     );
     expect(readResponse(runtimeHome, 'todo-ok')).toMatchObject({
       ok: true,

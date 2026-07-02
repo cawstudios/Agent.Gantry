@@ -8,13 +8,18 @@ import {
 import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
 import type { Job, ConversationRoute } from '@core/domain/types.js';
 
-function group(folder: string, name: string): ConversationRoute {
+function group(
+  folder: string,
+  name: string,
+  providerAccountId?: string,
+): ConversationRoute {
   return {
     folder,
     name,
     trigger: '',
     requiresTrigger: false,
     conversationKind: 'channel',
+    providerAccountId,
   } as ConversationRoute;
 }
 
@@ -184,6 +189,47 @@ describe('resolveExecutionContext', () => {
     expect(resolved?.group).toBe(
       groups[makeAgentThreadQueueKey('sl:C123', 'agent:alpha')],
     );
+  });
+
+  it('uses the notification route provider account to select execution route', () => {
+    const alphaKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      null,
+      'acct-a',
+    );
+    const betaKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      null,
+      'acct-b',
+    );
+    const groups = {
+      [alphaKey]: group('alpha', 'Alpha A', 'acct-a'),
+      [betaKey]: group('alpha', 'Alpha B', 'acct-b'),
+    };
+
+    const resolved = resolveExecutionContext(
+      job({
+        workspace_key: 'alpha',
+        execution_context: {
+          conversationJid: 'sl:C123',
+          threadId: null,
+          workspaceKey: 'alpha',
+        },
+        notification_routes: [
+          {
+            conversationJid: 'sl:C123',
+            threadId: null,
+            providerAccountId: 'acct-b',
+            label: 'primary',
+          },
+        ],
+      }),
+      groups,
+    );
+
+    expect(resolved?.group).toBe(groups[betaKey]);
   });
 
   it('returns null for ambiguous provider conversation routes without a job agent', () => {

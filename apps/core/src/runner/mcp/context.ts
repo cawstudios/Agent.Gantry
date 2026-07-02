@@ -57,6 +57,8 @@ if (process.env.GANTRY_GROUP_FOLDER !== undefined) {
 }
 
 export const chatJid = process.env.GANTRY_CHAT_JID!;
+export const providerAccountId =
+  process.env.GANTRY_PROVIDER_ACCOUNT_ID?.trim() || undefined;
 export const workspaceFolder = process.env.GANTRY_WORKSPACE_KEY!;
 export const appId = process.env.GANTRY_APP_ID?.trim() || undefined;
 export const agentId = process.env.GANTRY_AGENT_ID?.trim() || undefined;

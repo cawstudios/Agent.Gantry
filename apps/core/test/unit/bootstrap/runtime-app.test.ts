@@ -38,7 +38,7 @@ async function loadRuntimeApp() {
       throw new Error('ops repository should not be used by this test');
     }),
     getRuntimeSkillArtifactStore: vi.fn(),
-    getRuntimeStorage: vi.fn(),
+    getRuntimeStorage: vi.fn(() => ({})),
     getConfiguredModelProvidersForApp: vi.fn(async () => new Set<string>()),
   }));
   return import('@core/app/bootstrap/runtime-app.js');
@@ -72,7 +72,7 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
       throw new Error('ops repository should not be used by this test');
     }),
     getRuntimeSkillArtifactStore: vi.fn(),
-    getRuntimeStorage: vi.fn(),
+    getRuntimeStorage: vi.fn(() => ({})),
     getConfiguredModelProvidersForApp: vi.fn(async () => new Set<string>()),
   }));
   const runtimeApp = await import('@core/app/bootstrap/runtime-app.js');
@@ -245,6 +245,52 @@ describe('runtime app credential binding', () => {
     );
   });
 
+  it('threads provider account options through channel lookup', async () => {
+    const { createRuntimeApp, createGroupProcessor } =
+      await loadRuntimeAppWithGroupProcessorSpy();
+    const app = createRuntimeApp();
+    const capturedDeps = vi.mocked(createGroupProcessor).mock.calls[0]?.[0];
+    const hasChannel = vi.fn(() => true);
+    const supportsStreaming = vi.fn(() => true);
+    const supportsProgress = vi.fn(() => false);
+
+    app.setChannelRuntime({
+      hasChannel,
+      supportsStreaming,
+      supportsProgress,
+      sendMessage: vi.fn(async () => {}),
+      sendStreamingChunk: vi.fn(async () => true),
+      resetStreaming: vi.fn(),
+      setTyping: vi.fn(async () => {}),
+      sendProgressUpdate: vi.fn(async () => {}),
+    });
+
+    expect(
+      capturedDeps?.channelRuntime.hasChannel('sl:C123', {
+        providerAccountId: 'slack_beta',
+      }),
+    ).toBe(true);
+    expect(hasChannel).toHaveBeenCalledWith('sl:C123', {
+      providerAccountId: 'slack_beta',
+    });
+    expect(
+      capturedDeps?.channelRuntime.supportsStreaming('sl:C123', {
+        providerAccountId: 'slack_beta',
+      }),
+    ).toBe(true);
+    expect(
+      capturedDeps?.channelRuntime.supportsProgress('sl:C123', {
+        providerAccountId: 'slack_beta',
+      }),
+    ).toBe(false);
+    expect(supportsStreaming).toHaveBeenCalledWith('sl:C123', {
+      providerAccountId: 'slack_beta',
+    });
+    expect(supportsProgress).toHaveBeenCalledWith('sl:C123', {
+      providerAccountId: 'slack_beta',
+    });
+  });
+
   it('resolves agent-qualified routes without overwriting sibling agents', async () => {
     const { createRuntimeApp, createGroupProcessor } =
       await loadRuntimeAppWithGroupProcessorSpy();
@@ -295,6 +341,26 @@ describe('runtime app credential binding', () => {
     expect(deleteConversationRoute).toHaveBeenCalledWith('sl:C123');
     expect(deleteConversationRoute).toHaveBeenCalledWith(alphaKey);
     expect(deleteConversationRoute).toHaveBeenCalledWith(betaThreadKey);
+  });
+
+  it('projects conversation routes with provider account scoped keys', async () => {
+    const { createRuntimeApp } = await loadRuntimeApp();
+    const app = createRuntimeApp();
+    const route = makeGroup({
+      folder: 'alpha',
+      providerAccountId: 'slack-one',
+    });
+
+    await app.projectConversationRoute('sl:C123', route);
+
+    expect(app.getConversationRoutes()).toEqual({
+      [makeAgentThreadQueueKey(
+        'sl:C123',
+        'agent:alpha',
+        undefined,
+        'slack-one',
+      )]: route,
+    });
   });
 
   it('unregisters one agent-qualified route without deleting sibling routes', async () => {
@@ -405,6 +471,64 @@ describe('runtime app credential binding', () => {
     expect(setRouterState).not.toHaveBeenCalled();
   });
 
+  it('does not seed provider-qualified cursors from a bare chat cursor', async () => {
+    const { createRuntimeApp } = await loadRuntimeApp();
+    const setRouterState = vi.fn(async () => undefined);
+    const getLastBotMessageCursor = vi.fn(async () => undefined);
+    const app = createRuntimeApp({
+      opsRepository: {
+        setRouterState,
+        getLastBotMessageCursor,
+      } as any,
+    });
+    const queueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      undefined,
+      'slack-two',
+    );
+
+    app.setAgentCursor('sl:C123', 'wrong-account-cursor');
+
+    await expect(app.getOrRecoverCursor(queueJid)).resolves.toBe('');
+    expect(getLastBotMessageCursor).toHaveBeenCalledWith('sl:C123', {
+      providerAccountId: 'slack-two',
+    });
+    expect(setRouterState).not.toHaveBeenCalled();
+  });
+
+  it('seeds provider-qualified cursors from a provider-scoped chat cursor', async () => {
+    const { createRuntimeApp } = await loadRuntimeApp();
+    const setRouterState = vi.fn(async () => undefined);
+    const getLastBotMessageCursor = vi.fn();
+    const app = createRuntimeApp({
+      opsRepository: {
+        setRouterState,
+        getLastBotMessageCursor,
+      } as any,
+    });
+    const providerQueueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      undefined,
+      undefined,
+      'slack-two',
+    );
+    const agentQueueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      undefined,
+      'slack-two',
+    );
+
+    app.setAgentCursor(providerQueueJid, 'provider-cursor');
+
+    await expect(app.getOrRecoverCursor(agentQueueJid)).resolves.toBe(
+      'provider-cursor',
+    );
+    expect(getLastBotMessageCursor).not.toHaveBeenCalled();
+    expect(setRouterState).not.toHaveBeenCalled();
+  });
+
   it('seeds agent-qualified thread cursors from a legacy thread cursor', async () => {
     const { createRuntimeApp } = await loadRuntimeApp();
     const setRouterState = vi.fn(async () => undefined);
@@ -428,6 +552,35 @@ describe('runtime app credential binding', () => {
     await expect(app.getOrRecoverCursor(agentThreadQueueJid)).resolves.toBe(
       'thread-cursor',
     );
+    expect(getLastBotMessageCursor).not.toHaveBeenCalled();
+    expect(setRouterState).not.toHaveBeenCalled();
+  });
+
+  it('does not seed provider-qualified thread cursors from unscoped thread cursors', async () => {
+    const { createRuntimeApp } = await loadRuntimeApp();
+    const setRouterState = vi.fn(async () => undefined);
+    const getLastBotMessageCursor = vi.fn();
+    const app = createRuntimeApp({
+      opsRepository: {
+        setRouterState,
+        getLastBotMessageCursor,
+      } as any,
+    });
+    const unscopedThreadQueueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      undefined,
+      'thread:one',
+    );
+    const agentThreadQueueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      'thread:one',
+      'slack-two',
+    );
+
+    app.setAgentCursor(unscopedThreadQueueJid, 'wrong-thread-cursor');
+
+    await expect(app.getOrRecoverCursor(agentThreadQueueJid)).resolves.toBe('');
     expect(getLastBotMessageCursor).not.toHaveBeenCalled();
     expect(setRouterState).not.toHaveBeenCalled();
   });
@@ -477,11 +630,44 @@ describe('runtime app credential binding', () => {
     await expect(app.getOrRecoverCursor(queueJid)).resolves.toBe(
       recoveredCursor,
     );
-    expect(getLastBotMessageCursor).toHaveBeenCalledWith('sl:C999');
+    expect(getLastBotMessageCursor).toHaveBeenCalledWith('sl:C999', {
+      providerAccountId: undefined,
+    });
     const persistedState = JSON.parse(
       setRouterState.mock.calls[0]?.[1] as string,
     ) as Record<string, string>;
     expect(persistedState[queueJid]).toBe(recoveredCursor);
+  });
+
+  it('recovers provider-qualified cursors from provider-scoped bot cursor lookup', async () => {
+    const { createRuntimeApp } = await loadRuntimeApp();
+    const setRouterState = vi.fn(async () => undefined);
+    const getLastBotMessageCursor = vi.fn(async () => ({
+      timestamp: '2026-06-30T00:00:00.000Z',
+      id: 'bot-1',
+    }));
+    const app = createRuntimeApp({
+      opsRepository: {
+        setRouterState,
+        getLastBotMessageCursor,
+      } as any,
+    });
+    const queueJid = makeAgentThreadQueueKey(
+      'sl:C999',
+      'agent:alpha',
+      undefined,
+      'slack-two',
+    );
+
+    await expect(app.getOrRecoverCursor(queueJid)).resolves.toBe(
+      JSON.stringify({
+        timestamp: '2026-06-30T00:00:00.000Z',
+        id: 'bot-1',
+      }),
+    );
+    expect(getLastBotMessageCursor).toHaveBeenCalledWith('sl:C999', {
+      providerAccountId: 'slack-two',
+    });
   });
 
   it('seeds persisted route folders once and creates profile mirrors', async () => {

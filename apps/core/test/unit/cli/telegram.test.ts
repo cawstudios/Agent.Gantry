@@ -9,6 +9,7 @@ import {
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@core/config/settings/runtime-settings.js';
+import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
 import {
   normalizeTelegramChatJid,
   registerTelegramMainGroup,
@@ -855,6 +856,23 @@ describe('cli telegram helpers', () => {
   it('allows agent add to bind a second agent to the same provider conversation', async () => {
     const runtimeHome = makeRuntimeHome();
     fs.appendFileSync(path.join(runtimeHome, '.env'), 'TELEGRAM_BOT_TOKEN=x\n');
+    const seedSettings = createDefaultRuntimeSettings();
+    seedSettings.providers.telegram.enabled = true;
+    seedSettings.agents.first_agent = {
+      name: 'First',
+      folder: 'first_agent',
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    seedSettings.providerAccounts.telegram_default = {
+      agentId: 'first_agent',
+      provider: 'telegram',
+      label: 'Telegram Default',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    saveRuntimeSettings(runtimeHome, seedSettings);
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {

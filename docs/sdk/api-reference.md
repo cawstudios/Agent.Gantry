@@ -200,19 +200,19 @@ GET    /v1/agents/:agentId/access
 PUT    /v1/agents/:agentId/access
 
 GET    /v1/providers
-GET    /v1/provider-connections
-POST   /v1/provider-connections
-GET    /v1/provider-connections/:providerConnectionId
-PATCH  /v1/provider-connections/:providerConnectionId
-POST   /v1/provider-connections/:providerConnectionId/discover-conversations
+GET    /v1/provider-accounts
+POST   /v1/provider-accounts
+GET    /v1/provider-accounts/:providerAccountId
+PATCH  /v1/provider-accounts/:providerAccountId
+POST   /v1/provider-accounts/:providerAccountId/discover-conversations
 GET    /v1/conversations
 GET    /v1/conversations/:conversationId
 GET    /v1/conversations/:conversationId/approvers
 PUT    /v1/conversations/:conversationId/approvers
-GET    /v1/agents/:agentId/conversation-bindings
-PUT    /v1/agents/:agentId/conversation-bindings/:conversationId
-PATCH  /v1/agents/:agentId/conversation-bindings/:conversationId
-DELETE /v1/agents/:agentId/conversation-bindings/:conversationId
+GET    /v1/agents/:agentId/conversation-installs
+PUT    /v1/agents/:agentId/conversation-installs/:conversationId
+PATCH  /v1/agents/:agentId/conversation-installs/:conversationId
+DELETE /v1/agents/:agentId/conversation-installs/:conversationId
 ```
 
 Agents expose `sources` and `capabilities` as separate API surfaces.
@@ -809,9 +809,10 @@ and Teams threads plus Telegram forum topics inherit approvers from the parent c
 ```ts
 client.providers.list()
 
-client.providerConnections.create({
+client.providerAccounts.create({
   appId,
   providerId, // app | telegram | slack
+  agentId,
   label,
   config?,
   externalRef?,
@@ -819,9 +820,9 @@ client.providerConnections.create({
   enabled?,
 })
 
-client.providerConnections.list()
-client.providerConnections.get(providerConnectionId)
-client.providerConnections.update(providerConnectionId, {
+client.providerAccounts.list()
+client.providerAccounts.get(providerAccountId)
+client.providerAccounts.update(providerAccountId, {
   label?,
   status?,
   config?,
@@ -829,17 +830,25 @@ client.providerConnections.update(providerConnectionId, {
   runtimeSecretRefs?,
   enabled?,
 })
-client.providerConnections.delete(providerConnectionId)
-client.providerConnections.discoverConversations(providerConnectionId, {
+client.providerAccounts.delete(providerAccountId)
+client.providerAccounts.discoverConversations(providerAccountId, {
   query?,
   limit?,
   includeArchived?,
 })
 
-client.conversations.list({ providerConnectionId? })
+client.conversations.list({ providerAccountId? })
 client.conversations.get(conversationId)
 client.conversations.getApprovers(conversationId)
 client.conversations.setApprovers(conversationId, userIds)
+client.conversationInstalls.create({
+  agentId,
+  providerAccountId,
+  conversationId,
+  threadId?,
+})
+client.conversationInstalls.list({ agentId? })
+client.conversationInstalls.disable({ agentId, conversationId, threadId? })
 client.conversations.messages(conversationId, {
   threadId?,
   after?,
@@ -872,12 +881,12 @@ GET    /v1/agents/:id/access                       agents:admin
 PUT    /v1/agents/:id/access                       agents:admin
 
 GET    /v1/providers                               providers:read
-POST   /v1/provider-connections                    providers:admin
-GET    /v1/provider-connections                    providers:read
-GET    /v1/provider-connections/:id                providers:read
-PATCH  /v1/provider-connections/:id                providers:admin
-DELETE /v1/provider-connections/:id                providers:admin
-POST   /v1/provider-connections/:id/discover-conversations providers:admin
+POST   /v1/provider-accounts                       providers:admin
+GET    /v1/provider-accounts                       providers:read
+GET    /v1/provider-accounts/:id                   providers:read
+PATCH  /v1/provider-accounts/:id                   providers:admin
+DELETE /v1/provider-accounts/:id                   providers:admin
+POST   /v1/provider-accounts/:id/discover-conversations providers:admin
 
 GET    /v1/conversations                           conversations:read
 GET    /v1/conversations/:id                       conversations:read
@@ -886,10 +895,10 @@ PUT    /v1/conversations/:id/approvers             conversations:admin
 GET    /v1/conversations/:id/threads               conversations:read
 GET    /v1/conversations/:id/messages              messages:read
 
-GET    /v1/agents/:id/conversation-bindings        conversations:read
-PUT    /v1/agents/:id/conversation-bindings/:conversationId agents:admin
-PATCH  /v1/agents/:id/conversation-bindings/:conversationId agents:admin
-DELETE /v1/agents/:id/conversation-bindings/:conversationId agents:admin
+GET    /v1/agents/:agentId/conversation-installs                 conversations:read
+PUT    /v1/agents/:agentId/conversation-installs/:conversationId agents:admin
+PATCH  /v1/agents/:agentId/conversation-installs/:conversationId agents:admin
+DELETE /v1/agents/:agentId/conversation-installs/:conversationId agents:admin
 ```
 
 `GET /v1/agents/:id/admin` returns Agent admin state, including
@@ -924,27 +933,26 @@ includes tested normalization and Adaptive Card approval scaffolding. `whatsapp`
 is still returned as an unavailable placeholder until its adapter is
 implemented.
 
-## Agent Conversation Bindings
+## Conversation Installs
 
 ```ts
-client.agents.conversationBindings.list(agentId)
-client.agents.conversationBindings.enable(agentId, conversationId, {
-  providerConnectionId?,
+client.conversationInstalls.list({ agentId? })
+client.conversationInstalls.create({
+  agentId,
+  conversationId,
+  providerAccountId,
   threadId?,
   displayName?,
-  triggerMode?, // always | mention | keyword | manual | webhook
-  triggerPattern?,
-  requiresTrigger?,
   memoryScope?, // user | conversation | agent | app
   memorySubject?,
   workspaceSnapshotId?,
   permissionPolicyIds?,
 })
-client.agents.bindings.update(agentId, conversationId, patch)
-client.agents.bindings.disable(agentId, conversationId, { threadId? })
+client.conversationInstalls.update(installId, patch)
+client.conversationInstalls.disable(installId)
 ```
 
-Binding writes require `agents:admin`. `disable()` marks the binding disabled;
+Install writes require `agents:admin`. `disable()` marks the install disabled;
 it does not delete the row.
 
 ## Agent Skill Bindings

@@ -7,12 +7,16 @@ import {
 } from 'node:crypto';
 
 import { ConversationMessageIngressModule } from '../../application/external-ingress/conversation-message-ingress.js';
-import { providerIdForJid } from '../../channels/provider-registry.js';
+import {
+  providerIdForJid,
+  providerJidPrefix,
+} from '../../channels/provider-registry.js';
 import { ApplicationError } from '../../application/common/application-error.js';
 import { DEFAULT_JOB_RUNTIME_APP_ID } from '../../application/jobs/job-access.js';
 import { ExternalIngressModule } from '../../application/external-ingress/external-ingress-module.js';
 import { EXTERNAL_INGRESS_RUNTIME_DISPATCH } from '../../application/external-ingress/runtime-dispatch.js';
 import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
+import type { ProviderAccountId } from '../../domain/provider/provider.js';
 import {
   findConversationRoutesForChat,
   makeAgentThreadQueueKey,
@@ -35,19 +39,27 @@ import {
 import { adaptSessionControlPort } from './session-control-port.js';
 import { createJobManagementService } from './routes/jobs.js';
 
-function hasRouteForConversation(
+export function hasRouteForConversation(
   routes: Record<string, unknown>,
   conversationJid: string,
+  threadId?: string | null,
+  providerAccountId?: string | null,
 ): boolean {
-  return Object.keys(routes).some(
-    (key) => parseAgentThreadQueueKey(key).chatJid === conversationJid,
+  return (
+    findConversationRoutesForChat(
+      routes,
+      conversationJid,
+      threadId,
+      providerAccountId,
+    ).length > 0
   );
 }
 
-function resolveConversationMessageRoute(
+export function resolveConversationMessageRoute(
   routes: Record<string, unknown>,
   conversationJid: string,
   threadId: string | null,
+  providerAccountId?: string | null,
   agentId?: string | null,
 ): { agentId?: string | null; queueKey: string } | null {
   const normalizedAgentId = agentId?.trim() || null;
@@ -55,6 +67,7 @@ function resolveConversationMessageRoute(
     routes,
     conversationJid,
     threadId,
+    providerAccountId,
   ).map(([key, route]) => {
     const parsed = parseAgentThreadQueueKey(key);
     return {
@@ -76,6 +89,7 @@ function resolveConversationMessageRoute(
         conversationJid,
         normalizedAgentId,
         threadId,
+        providerAccountId,
       ),
     };
   }
@@ -99,6 +113,7 @@ function resolveConversationMessageRoute(
           conversationJid,
           resolvedAgentId,
           threadId,
+          providerAccountId,
         ),
       }
     : {
@@ -136,16 +151,29 @@ export function createExternalIngressModule(
     ops: getRuntimeRepositories(),
     runtimeEvents: getRuntimeEventExchange(),
     liveAdmissionAppId,
-    isConversationRoutable: (conversationJid) =>
-      hasRouteForConversation(ctx.app.getConversationRoutes(), conversationJid),
+    isConversationRoutable: (conversationJid, threadId, providerAccountId) =>
+      hasRouteForConversation(
+        ctx.app.getConversationRoutes(),
+        conversationJid,
+        threadId,
+        providerAccountId,
+      ),
+    resolveProviderJidPrefix: async (providerAccountId) => {
+      const account =
+        await getRuntimeStorage().repositories.providerAccounts.getProviderAccount(
+          providerAccountId as ProviderAccountId,
+        );
+      return account ? providerJidPrefix(account.providerId) || null : null;
+    },
     providerForConversationJid: (conversationJid) =>
       providerIdForJid(conversationJid, 'app'),
     makeQueueKey: makeThreadQueueKey,
-    resolveRoute: ({ conversationJid, threadId, agentId }) =>
+    resolveRoute: ({ conversationJid, threadId, agentId, providerAccountId }) =>
       resolveConversationMessageRoute(
         ctx.app.getConversationRoutes(),
         conversationJid,
         threadId,
+        providerAccountId,
         agentId,
       ),
     messageReactions: ctx.addMessageReaction

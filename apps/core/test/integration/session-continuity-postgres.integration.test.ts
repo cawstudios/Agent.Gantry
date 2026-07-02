@@ -115,7 +115,7 @@ maybeDescribe('Postgres memory continuity', () => {
     });
   });
 
-  it('uses active conversation binding agent identity for turn context', async () => {
+  it('uses active conversation install agent identity for turn context', async () => {
     const chatJid = 'tg:bound-skill-agent';
 
     await runtime.ops.setConversationRoute(chatJid, {
@@ -142,7 +142,7 @@ maybeDescribe('Postgres memory continuity', () => {
     });
   });
 
-  it('prefers the selected folder when multiple agents bind one conversation', async () => {
+  it('prefers the selected folder when multiple agents are installed in one conversation', async () => {
     const chatJid = 'tg:multi-agent-provider-onboarding';
     const selectedFolder = 'multi_agent_selected';
     const selectedAgentId = `agent:${selectedFolder}`;
@@ -163,29 +163,26 @@ maybeDescribe('Postgres memory continuity', () => {
       createdAt: now,
       updatedAt: now,
     });
-    await runtime.repositories.providerConnections.saveAgentConversationBinding(
-      {
-        id: 'agent-conversation-binding:test:multi-agent-selected' as never,
+    await runtime.repositories.providerAccounts.saveConversationInstall({
+      id: 'conversation-install:test:multi-agent-selected' as never,
+      appId: 'default' as never,
+      agentId: selectedAgentId as never,
+      providerAccountId: 'channel-providerAccount:default:telegram' as never,
+      conversationId: conversationId as never,
+      displayName: 'Selected Agent',
+      status: 'active',
+      senderPolicy: 'provider_native',
+      controlPolicy: 'conversation_approvers',
+      memoryScope: 'conversation',
+      memorySubject: {
+        kind: 'conversation',
         appId: 'default' as never,
-        agentId: selectedAgentId as never,
-        providerConnectionId:
-          'channel-providerConnection:default:telegram' as never,
         conversationId: conversationId as never,
-        displayName: 'Selected Agent',
-        status: 'active',
-        triggerMode: 'keyword',
-        requiresTrigger: true,
-        memoryScope: 'conversation',
-        memorySubject: {
-          kind: 'conversation',
-          appId: 'default' as never,
-          conversationId: conversationId as never,
-        },
-        permissionPolicyIds: [],
-        createdAt: now,
-        updatedAt: now,
       },
-    );
+      permissionPolicyIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
 
     const context = await runtime.sessionOps.getAgentTurnContext({
       workspaceFolder: selectedFolder,
@@ -197,7 +194,7 @@ maybeDescribe('Postgres memory continuity', () => {
     expect(context.agentId).toBe(selectedAgentId);
   });
 
-  it('does not reuse a sibling agent when the selected binding is missing', async () => {
+  it('does not reuse a sibling agent when the selected install is missing', async () => {
     const chatJid = 'tg:missing-selected-agent-binding';
     const selectedFolder = 'missing_selected_agent';
     const selectedAgentId = `agent:${selectedFolder}`;

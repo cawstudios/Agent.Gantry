@@ -65,8 +65,8 @@ vi.mock('@core/config/settings/runtime-settings.js', async (importOriginal) => {
           previousSchema: input.previousSettings?.storage.postgres.schema,
           telegramEnabled: Boolean(input.settings.providers.telegram.enabled),
           telegramBotRef:
-            input.settings.providerConnections.telegram_default
-              ?.runtimeSecretRefs.bot_token,
+            input.settings.providerAccounts.telegram_default?.runtimeSecretRefs
+              .bot_token,
           agentHarness: input.settings.agent.agentHarness,
         });
         return { reconciled: false };

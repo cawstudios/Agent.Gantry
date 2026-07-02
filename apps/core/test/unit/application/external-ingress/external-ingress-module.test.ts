@@ -178,6 +178,7 @@ function makeModule(overrides?: {
       enqueue: {
         conversationJid: 'tg:-100',
         threadId: '42',
+        providerAccountId: 'channel-providerAccount:app-one:telegram',
         queueKey: 'tg:-100::thread:42',
         durableAdmissionCreated: true,
       },
@@ -804,6 +805,7 @@ describe('ExternalIngressModule', () => {
     expect(conversationProviderMessages?.send).toHaveBeenCalledWith({
       conversationJid: 'tg:-100',
       threadId: '42',
+      providerAccountId: 'channel-providerAccount:app-one:telegram',
       text: 'QA Worker: trigger the job',
     });
     expect(

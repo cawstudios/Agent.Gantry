@@ -1135,6 +1135,7 @@ describe('agent-spawn timeout behavior', () => {
       string
     >;
     expect(env.GANTRY_CHAT_JID).toBe('tg:trusted-chat');
+    expect(env.GANTRY_PROVIDER_ACCOUNT_ID).toBeUndefined();
     const allowedActions = JSON.parse(
       env.GANTRY_MEMORY_IPC_ACTIONS_JSON,
     ) as string[];
@@ -1191,6 +1192,28 @@ describe('agent-spawn timeout behavior', () => {
         testGroup.folder,
       ),
     ).toThrow(/Invalid memory IPC signature/);
+  });
+
+  it('projects provider account scope into runner IPC context', async () => {
+    const resultPromise = spawnTestAgent(
+      { ...testGroup, providerAccountId: 'provider-account:slack:a' },
+      testInput,
+      () => {},
+    );
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'started',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.GANTRY_PROVIDER_ACCOUNT_ID).toBe('provider-account:slack:a');
   });
 
   it('includes reviewer memory actions in spawned IPC signatures for control approvers', async () => {

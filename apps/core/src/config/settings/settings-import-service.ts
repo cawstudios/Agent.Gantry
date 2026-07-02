@@ -21,9 +21,10 @@ import {
   type SettingsRevisionWakeup,
 } from './settings-revision-notify.js';
 import type {
-  ProviderConnectionId,
+  ProviderAccountId,
   ProviderId,
 } from '../../domain/provider/provider.js';
+import { migrateLegacyAgentBindings } from './settings-revision-legacy-bindings.js';
 
 /**
  * Reader version of the settings-revision contract this build understands. A
@@ -380,16 +381,43 @@ export function settingsToRevisionDocument(
   return stripUndefinedDeep({
     desired_state: snakeRecord(settings.desiredState),
     providers: mapRecord(settings.providers, snakeRecord),
-    provider_connections: mapRecord(settings.providerConnections, snakeRecord),
+    provider_accounts: mapRecord(settings.providerAccounts, (account) => ({
+      agent: account.agentId,
+      provider: account.provider,
+      label: account.label,
+      status: account.status === 'disabled' ? account.status : undefined,
+      runtime_secret_refs: account.runtimeSecretRefs,
+      external_identity_ref: account.externalIdentityRef,
+      config: account.config,
+    })),
     conversations: mapRecord(settings.conversations, (conversation) => ({
-      provider_connection: conversation.providerConnection,
+      provider_account:
+        conversation.providerAccount ?? conversation.providerConnection,
       external_id: conversation.externalId,
       kind: conversation.kind,
       display_name: conversation.displayName,
       sender_policy: conversation.senderPolicy,
       control_approvers: conversation.controlApprovers,
+      installed_agents: Object.fromEntries(
+        Object.entries(conversation.installedAgents).map(
+          ([installId, install]) => [
+            installId,
+            {
+              provider_account: install.providerAccountId,
+              agent:
+                installId === install.agentId ? undefined : install.agentId,
+              thread_id: install.threadId,
+              status: install.status,
+              added_at: install.addedAt,
+              memory_scope: install.memoryScope,
+              trigger: install.trigger,
+              requires_trigger: install.requiresTrigger,
+              model: install.model,
+            },
+          ],
+        ),
+      ),
     })),
-    bindings: mapRecord(settings.bindings, snakeRecord),
     agents: mapRecord(settings.agents, (agent) => ({
       name: agent.name,
       persona: agent.persona,
@@ -398,7 +426,6 @@ export function settingsToRevisionDocument(
       agent_harness: agent.agentHarness,
       one_time_job_default_model: agent.oneTimeJobDefaultModel,
       recurring_job_default_model: agent.recurringJobDefaultModel,
-      bindings: mapRecord(agent.bindings, snakeRecord),
       access: {
         preset: agent.accessPreset,
         sources: {
@@ -455,7 +482,7 @@ export function settingsToRevisionDocument(
 export function settingsFromRevisionDocument(
   document: Record<string, unknown>,
 ): RuntimeSettings {
-  return parseRuntimeSettingsObject(document);
+  return parseRuntimeSettingsObject(migrateLegacyAgentBindings(document));
 }
 
 export async function settingsMatchesLatestRevision(input: {
@@ -490,23 +517,23 @@ async function validateProjectionPreconditions(input: {
   repositories: SettingsDesiredStateRepositories;
   appId: AppId;
 }): Promise<void> {
-  const providerConnections = input.repositories.providerConnections;
-  if (!providerConnections) return;
-  for (const [connectionId, connection] of Object.entries(
-    input.settings.providerConnections,
+  const providerAccounts = input.repositories.providerAccounts;
+  if (!providerAccounts) return;
+  for (const [accountId, account] of Object.entries(
+    input.settings.providerAccounts,
   )) {
-    const existing = await providerConnections.getProviderConnection(
-      connectionId as ProviderConnectionId,
+    const existing = await providerAccounts.getProviderAccount(
+      accountId as ProviderAccountId,
     );
     if (!existing) continue;
     if (existing.appId !== input.appId) {
       throw new Error(
-        `provider_connections.${connectionId} already belongs to another app`,
+        `provider_accounts.${accountId} already belongs to another app`,
       );
     }
-    if (existing.providerId !== (connection.provider as ProviderId)) {
+    if (existing.providerId !== (account.provider as ProviderId)) {
       throw new Error(
-        `provider_connections.${connectionId}.provider cannot change from ${existing.providerId} to ${connection.provider}; use a new provider connection id.`,
+        `provider_accounts.${accountId}.provider cannot change from ${existing.providerId} to ${account.provider}; use a new provider account id.`,
       );
     }
   }

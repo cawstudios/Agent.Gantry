@@ -74,6 +74,27 @@ describe('CanonicalMessageOpsService', () => {
     });
   });
 
+  it('passes route provider account scope to replay reads', async () => {
+    const listInboundMessages = vi.fn().mockResolvedValue([]);
+    const service = new CanonicalMessageOpsService({
+      listInboundMessages,
+    } as unknown as PostgresCanonicalMessageRepository);
+
+    await service.getMessagesSince('sl:C123', '', 50, {
+      threadId: '1710000001.000100',
+      providerAccountId: 'slack_beta',
+    });
+
+    expect(listInboundMessages).toHaveBeenCalledWith({
+      jids: ['sl:C123'],
+      after: undefined,
+      threadId: '1710000001.000100',
+      providerAccountId: 'slack_beta',
+      hasThreadFilter: true,
+      limit: 50,
+    });
+  });
+
   it('keeps message content and attachments out of external refs while mapping stored attachments', async () => {
     const ref = externalRefForMessage({
       id: 'provider-message-1',
@@ -307,9 +328,157 @@ describe('CanonicalMessageOpsService', () => {
     expect(whereShape).toContain('outbound');
     expect(whereShape).toContain('delivery_status');
     expect(whereShape).toContain('sent');
+    expect(whereShape).toContain('external_ref_json');
+    expect(whereShape).toContain('::jsonb');
+    expect(whereShape).toContain('chat_jid');
     expect(whereShape).not.toContain('pending');
     expect(whereShape).not.toContain('failed');
     expect(whereShape).not.toContain('partially_sent');
+  });
+
+  it('scopes repository reads to account conversations when provider account is known', async () => {
+    let capturedWhere: unknown;
+    const lateralLimit = vi.fn(() => ({
+      as: vi.fn(() => ({ payloadJson: sql`first_part.payload_json` })),
+    }));
+    const db = {
+      select: vi
+        .fn()
+        .mockReturnValueOnce({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              orderBy: vi.fn(() => ({ limit: lateralLimit })),
+            })),
+          })),
+        })
+        .mockReturnValueOnce({
+          from: vi.fn(() => ({
+            leftJoinLateral: vi.fn(() => ({
+              where: vi.fn((condition: unknown) => {
+                capturedWhere = condition;
+                return {
+                  orderBy: vi.fn(() => ({
+                    limit: vi.fn(async () => []),
+                  })),
+                };
+              }),
+            })),
+          })),
+        }),
+    };
+    const repository = new PostgresCanonicalMessageRepository(db as never);
+
+    await repository.listContextMessages({
+      jids: ['sl:C123'],
+      providerAccountId: 'slack_beta',
+      threadId: '1710000001.000100',
+      hasThreadFilter: true,
+      limit: 10,
+    });
+
+    const whereShape = flattenSqlShape(capturedWhere);
+    expect(whereShape).toContain('conversation:slack_beta:sl:C123');
+    expect(whereShape).not.toContain('conversation:sl:C123');
+    expect(whereShape).toContain('provider_account_id');
+    expect(whereShape).toContain('thread:slack_beta:sl:C123:');
+    expect(whereShape).toContain('external_ref_json');
+    expect(whereShape).toContain('::jsonb');
+    expect(whereShape).toContain('thread_id');
+  });
+
+  it('lists each canonical thread id once with one representative external ref', async () => {
+    const groupBy = vi.fn(() => ({
+      orderBy: vi.fn(async () => [
+        {
+          thread_id: 'thread:sl:C123:1710000001.000100',
+          external_ref_json: JSON.stringify({
+            chat_jid: 'sl:C123',
+            thread_id: '1710000001.000100',
+            external_message_id: '1710000001.000100',
+          }),
+        },
+      ]),
+    }));
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ groupBy })),
+        })),
+      })),
+      selectDistinct: vi.fn(),
+    };
+    const repository = new PostgresCanonicalMessageRepository(db as never);
+
+    await expect(repository.listThreadIds('sl:C123')).resolves.toEqual([
+      '1710000001.000100',
+    ]);
+    expect(db.selectDistinct).not.toHaveBeenCalled();
+    expect(groupBy).toHaveBeenCalledTimes(1);
+  });
+
+  it('scopes pagination cursor message ids to the provider account', async () => {
+    let capturedWhere: unknown;
+    const lateralLimit = vi.fn(() => ({
+      as: vi.fn(() => ({ payloadJson: sql`first_part.payload_json` })),
+    }));
+    const db = {
+      select: vi
+        .fn()
+        .mockReturnValueOnce({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              orderBy: vi.fn(() => ({ limit: lateralLimit })),
+            })),
+          })),
+        })
+        .mockReturnValueOnce({
+          from: vi.fn(() => ({
+            leftJoinLateral: vi.fn(() => ({
+              where: vi.fn((condition: unknown) => {
+                capturedWhere = condition;
+                return {
+                  orderBy: vi.fn(() => ({
+                    limit: vi.fn(async () => []),
+                  })),
+                };
+              }),
+            })),
+          })),
+        }),
+    };
+    const repository = new PostgresCanonicalMessageRepository(db as never);
+
+    await repository.listContextMessages({
+      jids: ['sl:C123'],
+      providerAccountId: 'slack_beta',
+      after: {
+        chatJid: 'sl:C123',
+        id: '1710000001.000100',
+        timestamp: '2026-05-06T00:00:00.000Z',
+      },
+      before: {
+        chatJid: 'sl:C123',
+        id: '1710000002.000100',
+        timestamp: '2026-05-06T00:01:00.000Z',
+      },
+      beforeOrAt: {
+        chatJid: 'sl:C123',
+        id: '1710000003.000100',
+        timestamp: '2026-05-06T00:02:00.000Z',
+      },
+      limit: 10,
+    });
+
+    const whereShape = flattenSqlShape(capturedWhere);
+    expect(whereShape).toContain(
+      'message:slack_beta:sl:C123:1710000001.000100',
+    );
+    expect(whereShape).toContain(
+      'message:slack_beta:sl:C123:1710000002.000100',
+    );
+    expect(whereShape).toContain(
+      'message:slack_beta:sl:C123:1710000003.000100',
+    );
   });
 
   it('includes Slack self-thread roots but excludes replies from recent top-level reads', async () => {
@@ -566,6 +735,208 @@ describe('CanonicalMessageOpsService', () => {
     expect(tx.insert).toHaveBeenCalledTimes(2);
   });
 
+  it('uses explicit provider account when saving inbound channel messages', async () => {
+    const insertedValues: unknown[] = [];
+    const tx = {
+      select: vi.fn(),
+      insert: vi.fn(() => ({
+        values: vi.fn((values: unknown) => {
+          insertedValues.push(values);
+          return { onConflictDoUpdate: vi.fn(async () => undefined) };
+        }),
+      })),
+      delete: vi.fn(),
+    };
+    const graph = {
+      ensureConversation: vi.fn(async () => 'conversation:slack_beta:sl:C123'),
+      ensureThread: vi.fn(async () => 'thread:slack_beta:sl:C123:root'),
+      getConversationInstallationId: vi.fn(async () => 'slack_alpha'),
+      ensureParticipant: vi.fn(async () => undefined),
+    };
+    const repository = new PostgresCanonicalMessageRepository({} as never);
+    Object.assign(repository, { graph });
+
+    await repository.saveMessageWithExecutor(
+      tx as never,
+      {
+        id: '1710000001.000100',
+        chat_jid: 'sl:C123',
+        provider: 'slack',
+        providerAccountId: 'slack_beta',
+        sender: 'U123',
+        sender_name: 'Ravi',
+        content: 'hello',
+        timestamp: '2026-05-06T00:00:00.000Z',
+        thread_id: 'root',
+      },
+      {},
+    );
+
+    expect(graph.ensureConversation).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.objectContaining({ providerAccountId: 'slack_beta' }),
+      tx,
+    );
+    expect(graph.ensureThread).toHaveBeenCalledWith(
+      'sl:C123',
+      'root',
+      tx,
+      expect.objectContaining({ providerAccountId: 'slack_beta' }),
+    );
+    expect(graph.getConversationInstallationId).not.toHaveBeenCalled();
+    expect(insertedValues[0]).toMatchObject({
+      id: 'message:slack_beta:sl:C123:1710000001.000100',
+      providerAccountId: 'slack_beta',
+      conversationId: 'conversation:slack_beta:sl:C123',
+      threadId: 'thread:slack_beta:sl:C123:root',
+    });
+  });
+
+  it.each([
+    { name: 'top-level', threadId: undefined, storedThreadId: null },
+    {
+      name: 'threaded',
+      threadId: 'root',
+      storedThreadId: 'thread:slack_beta:sl:C123:root',
+    },
+  ])(
+    'updates an existing provider-account $name message on redelivery',
+    async ({ threadId, storedThreadId }) => {
+      const insertedValues: unknown[] = [];
+      const tx = {
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(async () => [
+                { id: 'message:slack_beta:sl:C123:provider-event-1' },
+              ]),
+            })),
+          })),
+        })),
+        insert: vi.fn(() => ({
+          values: vi.fn((values: unknown) => {
+            insertedValues.push(values);
+            return { onConflictDoUpdate: vi.fn(async () => undefined) };
+          }),
+        })),
+        delete: vi.fn(),
+      };
+      const repository = new PostgresCanonicalMessageRepository({} as never);
+      Object.assign(repository, {
+        graph: {
+          ensureConversation: vi.fn(
+            async () => 'conversation:slack_beta:sl:C123',
+          ),
+          ensureThread: vi.fn(async () => storedThreadId),
+          getConversationInstallationId: vi.fn(async () => 'slack_beta'),
+          ensureParticipant: vi.fn(async () => undefined),
+        },
+      });
+
+      await repository.saveMessageWithExecutor(
+        tx as never,
+        {
+          id: 'local-retry-id',
+          chat_jid: 'sl:C123',
+          provider: 'slack',
+          providerAccountId: 'slack_beta',
+          sender: 'U123',
+          sender_name: 'Ravi',
+          content: 'redelivered',
+          timestamp: '2026-05-06T00:00:00.000Z',
+          external_message_id: 'provider-event-1',
+          ...(threadId ? { thread_id: threadId } : {}),
+        },
+        {},
+      );
+
+      expect(tx.select).toHaveBeenCalledTimes(1);
+      expect(insertedValues[0]).toMatchObject({
+        id: 'message:slack_beta:sl:C123:provider-event-1',
+        providerAccountId: 'slack_beta',
+        conversationId: 'conversation:slack_beta:sl:C123',
+        threadId: storedThreadId,
+        externalMessageId: 'provider-event-1',
+      });
+      expect(insertedValues[1]).toMatchObject({
+        messageId: 'message:slack_beta:sl:C123:provider-event-1',
+      });
+    },
+  );
+
+  it('uses live admission provider account before ensuring conversation scope', async () => {
+    const insertedValues: unknown[] = [];
+    const tx = {
+      select: vi.fn(),
+      insert: vi.fn(() => ({
+        values: vi.fn((values: unknown) => {
+          insertedValues.push(values);
+          if (
+            values &&
+            typeof values === 'object' &&
+            String((values as Record<string, unknown>).id).startsWith(
+              'live-admission:',
+            )
+          ) {
+            return {
+              onConflictDoNothing: vi.fn(() => ({
+                returning: vi.fn(async () => [values]),
+              })),
+            };
+          }
+          return { onConflictDoUpdate: vi.fn(async () => undefined) };
+        }),
+      })),
+      delete: vi.fn(),
+    };
+    const graph = {
+      ensureConversation: vi.fn(async () => 'conversation:slack_beta:sl:C123'),
+      ensureThread: vi.fn(async () => 'thread:slack_beta:sl:C123:root'),
+      getConversationInstallationId: vi.fn(async () => 'slack_alpha'),
+      ensureParticipant: vi.fn(async () => undefined),
+    };
+    const repository = new PostgresCanonicalMessageRepository({} as never);
+    Object.assign(repository, { graph });
+
+    await repository.saveMessageWithExecutor(
+      tx as never,
+      {
+        id: '1710000001.000100',
+        chat_jid: 'sl:C123',
+        provider: 'slack',
+        sender: 'U123',
+        sender_name: 'Ravi',
+        content: 'hello',
+        timestamp: '2026-05-06T00:00:00.000Z',
+        thread_id: 'root',
+      },
+      {
+        liveAdmission: {
+          appId: 'app-one',
+          agentId: 'alpha',
+          providerAccountId: 'slack_beta',
+        },
+      },
+    );
+
+    expect(graph.ensureConversation).toHaveBeenCalledWith(
+      'sl:C123',
+      expect.objectContaining({ providerAccountId: 'slack_beta' }),
+      tx,
+    );
+    expect(graph.ensureThread).toHaveBeenCalledWith(
+      'sl:C123',
+      'root',
+      tx,
+      expect.objectContaining({ providerAccountId: 'slack_beta' }),
+    );
+    expect(graph.getConversationInstallationId).not.toHaveBeenCalled();
+    expect(insertedValues[0]).toMatchObject({
+      id: 'message:slack_beta:sl:C123:1710000001.000100',
+      providerAccountId: 'slack_beta',
+    });
+  });
+
   it('agent-qualifies live admission work item identity and queue jid', async () => {
     const insertedValues: unknown[] = [];
     const tx = {
@@ -626,11 +997,12 @@ describe('CanonicalMessageOpsService', () => {
     );
 
     expect(admissionRow).toMatchObject({
-      id: 'live-admission:app-one:agent:alpha:message:sl:C123:1710000001.000100',
+      id: 'live-admission:app-one:agent:alpha:channel-providerAccount:default:slack:message:channel-providerAccount:default:slack:sl:C123:1710000001.000100',
       agentId: 'agent:alpha',
-      queueJid: 'sl:C123::thread:thread-1::agent:agent%3Aalpha',
+      queueJid:
+        'sl:C123::thread:thread-1::agent:agent%3Aalpha::provider_account:channel-providerAccount%3Adefault%3Aslack',
       idempotencyKey:
-        'live-admission:app-one:agent:alpha:slack:sl:C123:thread-1:1710000001.000100',
+        'live-admission:app-one:agent:alpha:channel-providerAccount:default:slack:sl:C123:thread-1:1710000001.000100',
     });
   });
 

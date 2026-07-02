@@ -12,13 +12,16 @@ import type { ModelWorkload } from '../../shared/model-catalog.js';
 
 export interface RuntimeProviderSettings {
   enabled: boolean;
-  defaultConnection?: string;
 }
 
-export interface RuntimeProviderConnectionSettings {
+export interface RuntimeProviderAccountSettings {
+  agentId: string;
   provider: string;
   label: string;
+  status?: 'active' | 'disabled';
   runtimeSecretRefs: Record<string, string>;
+  externalIdentityRef?: Record<string, string>;
+  config?: Record<string, string>;
 }
 
 export type RuntimeConversationKind =
@@ -31,12 +34,26 @@ export type RuntimeConversationKind =
   | 'web';
 
 export interface RuntimeConfiguredConversation {
-  providerConnection: string;
+  providerConnection?: string;
+  providerAccount: string;
   externalId: string;
   kind: RuntimeConversationKind;
   displayName: string;
   senderPolicy: import('./sender-allowlist.js').ChatAllowlistEntry;
   controlApprovers: string[];
+  installedAgents: Record<string, RuntimeConfiguredConversationInstall>;
+}
+
+export interface RuntimeConfiguredConversationInstall {
+  agentId: string;
+  providerAccountId: string;
+  threadId?: string;
+  status: 'active' | 'disabled';
+  addedAt: string;
+  memoryScope: 'conversation' | 'user' | 'agent' | 'app';
+  trigger?: string;
+  requiresTrigger?: boolean;
+  model?: string;
 }
 
 export type EmbeddingProviderName = string;
@@ -108,7 +125,9 @@ export interface RuntimeAgentSettings {
 
 export interface RuntimeConfiguredAgentBinding {
   jid: string;
+  threadId?: string;
   provider?: string;
+  providerAccountId?: string;
   name?: string;
   trigger: string;
   addedAt: string;
@@ -119,10 +138,12 @@ export interface RuntimeConfiguredAgentBinding {
 export interface RuntimeConfiguredBinding {
   agent: string;
   conversation: string;
+  installKey?: string;
+  threadId?: string;
   trigger: string;
   addedAt: string;
   requiresTrigger: boolean;
-  memoryScope: 'conversation' | 'user' | 'agent';
+  memoryScope: 'conversation' | 'user' | 'agent' | 'app';
   model?: string;
 }
 
@@ -288,8 +309,14 @@ export interface RuntimeCustomModelAlias {
 export interface RuntimeSettings {
   desiredState: RuntimeDesiredStateSettings;
   providers: Record<string, RuntimeProviderSettings>;
-  providerConnections: Record<string, RuntimeProviderConnectionSettings>;
+  providerAccounts: Record<string, RuntimeProviderAccountSettings>;
   conversations: Record<string, RuntimeConfiguredConversation>;
+  conversationInstalls: Record<
+    string,
+    RuntimeConfiguredConversationInstall & {
+      conversationId: string;
+    }
+  >;
   bindings: Record<string, RuntimeConfiguredBinding>;
   agents: Record<string, RuntimeConfiguredAgent>;
   storage: RuntimeStorageSettings;

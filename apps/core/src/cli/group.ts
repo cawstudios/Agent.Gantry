@@ -78,7 +78,7 @@ function displayNameForConfiguredConversation(
   const existingConversation = Object.values(settings.conversations).find(
     (conversation) => {
       const connection =
-        settings.providerConnections[conversation.providerConnection];
+        settings.providerAccounts[conversation.providerAccount];
       return (
         connection?.provider === provider &&
         (conversation.externalId === jid ||
@@ -207,8 +207,12 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
     const settings = loadRuntimeSettings(runtimeHome);
 
     if (normalized.startsWith('tg:')) {
+      const providerAccountId = Object.entries(settings.providerAccounts).find(
+        ([, account]) => account.provider === 'telegram',
+      )?.[0];
       const token = await getProviderRuntimeSecret({
         providerId: 'telegram',
+        providerAccountId,
         key: 'bot_token',
         defaultEnvName: 'TELEGRAM_BOT_TOKEN',
         settings,
@@ -222,7 +226,7 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
       if (!token) {
         p.log.error('Telegram bot token runtime secret is missing.');
         p.log.info(
-          'Next action: run `gantry provider connect telegram` or configure provider_connections.telegram_default.runtime_secret_refs.bot_token.',
+          'Next action: run `gantry provider connect telegram` or configure provider_accounts.telegram_default.runtime_secret_refs.bot_token.',
         );
         return 1;
       }

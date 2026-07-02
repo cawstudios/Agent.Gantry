@@ -343,7 +343,7 @@ describe('blocked copy', () => {
     );
   });
 
-  it('reports one provider command when the conversation binding is invalid', async () => {
+  it('reports one provider command when the conversation install is invalid', async () => {
     const { runVerifyStep, warn } = await loadVerifyStep({
       runtimeConfigured: true,
       hasProcessableGroup: false,
@@ -452,7 +452,7 @@ async function loadGroupStep() {
   };
 }
 
-describe('conversation binding labels', () => {
+describe('conversation install labels', () => {
   it('uses the selected Slack conversation label in the ready draft', async () => {
     const {
       runGroupStep,

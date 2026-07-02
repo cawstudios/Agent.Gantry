@@ -335,7 +335,7 @@ setRegisteredGroup('telegram:dev-team', {
 });
 ```
 
-Folder names follow the convention `{channel}_{group-name}` (e.g., `slack_engineering`, `telegram_dev-team`). Trigger behavior is stored on each conversation binding as `requiresTrigger`.
+Folder names follow the convention `{channel}_{group-name}` (e.g., `slack_engineering`, `telegram_dev-team`). Conversation install metadata owns the conversation-to-agent setup state.
 
 Additional mounts appear under `/workspace/extra/` in the runtime workspace.
 

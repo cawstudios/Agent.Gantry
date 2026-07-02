@@ -32,12 +32,12 @@ import {
 import { GroupQueue } from '../../runtime/group-queue.js';
 import { conversationRouteKeysForRemoval } from '../../runtime/conversation-route-removal.js';
 import {
-  findConversationRouteForQueue,
   makeAgentThreadQueueKey,
   makeThreadQueueKey,
   parseAgentThreadQueueKey,
 } from '../../shared/thread-queue-key.js';
 import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
+import { resolveConversationRoute } from './runtime-app-routes.js';
 import type {
   RuntimeAgentSessionRepository,
   RuntimeChatMetadataRepository,
@@ -65,6 +65,7 @@ import type { AgentExecutionAdapter } from '../../application/agent-execution/ag
 import type { AgentExecutionAdapterRegistry } from '../../application/agent-execution/agent-execution-adapter-registry.js';
 import { registerMemoryLlmClient } from '../../memory/memory-llm-port.js';
 import type { RunnerSandboxProvider } from '../../shared/runner-sandbox-provider.js';
+import { createMutableChannelRuntime } from './runtime-app-channel-runtime.js';
 export type RuntimeAppRepository = RuntimeRouterStateRepository &
   RuntimeMessageRepository &
   RuntimeConversationRouteRepository &
@@ -103,7 +104,7 @@ export interface RuntimeApp {
   clearSessionForChatJid: (
     chatJid: string,
     threadId?: string | null,
-    metadata?: { memoryUserId?: string },
+    metadata?: { memoryUserId?: string; providerAccountId?: string | null },
   ) => Promise<void>;
   processGroupMessages: (
     chatJid: string,
@@ -143,20 +144,6 @@ export interface RuntimeAppOptions {
   opsRepository?: RuntimeAppRepository;
   processRole?: ProcessRole;
 }
-
-function resolveConversationRoute(
-  routes: Record<string, ConversationRoute>,
-  chatJid: string,
-  threadId?: string | null,
-  agentId?: string | null,
-): ConversationRoute | undefined {
-  return findConversationRouteForQueue(
-    routes,
-    makeAgentThreadQueueKey(chatJid, agentId, threadId),
-    (route) => agentIdForFolder(route.folder),
-  );
-}
-
 export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let conversationRoutes: Record<string, ConversationRoute> = {};
   let lastAgentTimestamp: Record<string, string> = {};
@@ -191,17 +178,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   let credentialBrokerConfigKey = '';
   const credentialBindingPromises = new Map<string, Promise<void>>();
   const ops = () => options.opsRepository ?? getRuntimeRepositories();
-  let channelRuntime: GroupProcessingDeps['channelRuntime'] = {
-    hasChannel: () => false,
-    supportsStreaming: () => false,
-    supportsProgress: () => false,
-    sendMessage: async () => {},
-    sendStreamingChunk: async () => false,
-    resetStreaming: () => {},
-    setTyping: async () => {},
-    sendProgressUpdate: async () => {},
-  };
-
+  const channelRuntime = createMutableChannelRuntime();
   function getCredentialBroker(): Promise<AgentCredentialBroker | undefined> {
     const brokerConfig = getCredentialBrokerRuntimeConfig();
     const configKey = `${brokerConfig.mode}:${brokerConfig.gatewayBindHost}`;
@@ -229,7 +206,6 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     });
     return credentialBrokerPromise;
   }
-
   async function ensureCredentialProfileBinding(input: {
     jid: string;
     group: ConversationRoute;
@@ -385,16 +361,34 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     const existing = lastAgentTimestamp[chatJid];
     if (existing) return existing;
     const parsed = parseAgentThreadQueueKey(chatJid);
+    const providerScopedBaseKey = parsed.providerAccountId
+      ? makeAgentThreadQueueKey(
+          parsed.chatJid,
+          undefined,
+          parsed.threadId,
+          parsed.providerAccountId,
+        )
+      : undefined;
     if (parsed.threadId) {
       const baseExisting =
-        lastAgentTimestamp[makeThreadQueueKey(parsed.chatJid, parsed.threadId)];
+        (providerScopedBaseKey && lastAgentTimestamp[providerScopedBaseKey]) ||
+        (!parsed.providerAccountId &&
+          lastAgentTimestamp[
+            makeThreadQueueKey(parsed.chatJid, parsed.threadId)
+          ]);
       return baseExisting ? (lastAgentTimestamp[chatJid] = baseExisting) : '';
     }
-    const baseExisting = parsed.agentId && lastAgentTimestamp[parsed.chatJid];
+    const baseExisting =
+      parsed.agentId &&
+      (providerScopedBaseKey
+        ? lastAgentTimestamp[providerScopedBaseKey]
+        : lastAgentTimestamp[parsed.chatJid]);
     if (baseExisting) return (lastAgentTimestamp[chatJid] = baseExisting);
 
     const baseChatJid = parsed.chatJid;
-    const botCursor = await ops().getLastBotMessageCursor(baseChatJid);
+    const botCursor = await ops().getLastBotMessageCursor(baseChatJid, {
+      providerAccountId: parsed.providerAccountId,
+    });
     if (botCursor) {
       const encoded = encodeGroupMessageCursor(botCursor);
       logger.info(
@@ -432,6 +426,8 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     const routeKey = makeAgentThreadQueueKey(
       jid,
       agentIdForFolder(group.folder),
+      undefined,
+      group.providerAccountId,
     );
     await registerGroupEntry(conversationRoutes, routeKey, group, {
       assistantName: ASSISTANT_NAME,
@@ -513,55 +509,41 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
   async function clearSessionForChatJid(
     chatJid: string,
     threadId?: string | null,
-    metadata: { memoryUserId?: string } = {},
+    metadata: { memoryUserId?: string; providerAccountId?: string | null } = {},
   ): Promise<void> {
-    const { chatJid: conversationJid, agentId } =
-      parseAgentThreadQueueKey(chatJid);
+    const {
+      chatJid: conversationJid,
+      agentId,
+      providerAccountId: routeProviderAccountId,
+    } = parseAgentThreadQueueKey(chatJid);
+    const providerAccountId =
+      routeProviderAccountId ?? metadata.providerAccountId;
     const group = resolveConversationRoute(
       conversationRoutes,
       conversationJid,
       threadId,
       agentId,
+      providerAccountId,
     );
     if (!group) return;
     await ops().deleteSession(group.folder, threadId, {
       conversationJid,
+      providerAccountId,
       conversationKind: group.conversationKind,
       memoryUserId: metadata.memoryUserId,
     });
   }
 
   const groupProcessor = createGroupProcessor({
-    channelRuntime: {
-      hasChannel: (chatJid) => channelRuntime.hasChannel(chatJid),
-      supportsStreaming: (chatJid) => channelRuntime.supportsStreaming(chatJid),
-      supportsProgress: (chatJid) => channelRuntime.supportsProgress(chatJid),
-      sendMessage: (chatJid, rawText, options) =>
-        channelRuntime.sendMessage(chatJid, rawText, options),
-      sendStreamingChunk: (chatJid, rawText, options) =>
-        channelRuntime.sendStreamingChunk(chatJid, rawText, options),
-      resetStreaming: (chatJid) => channelRuntime.resetStreaming(chatJid),
-      setTyping: (chatJid, isTyping) =>
-        channelRuntime.setTyping(chatJid, isTyping),
-      sendProgressUpdate: (chatJid, text, options) =>
-        channelRuntime.sendProgressUpdate(chatJid, text, options),
-      renderAgentTodo: (chatJid, render) =>
-        channelRuntime.renderAgentTodo?.(chatJid, render) ??
-        Promise.resolve(false),
-      hydrateConversationContext: (request) =>
-        channelRuntime.hydrateConversationContext?.(request) ??
-        Promise.resolve({
-          providerId: 'unknown',
-          attempted: false,
-          skipped: true,
-          reason: 'unsupported',
-        }),
-      isControlApproverAllowed: (input) =>
-        channelRuntime.isControlApproverAllowed?.(input) ??
-        Promise.resolve(false),
-    },
-    getGroup: (chatJid, threadId, agentId) =>
-      resolveConversationRoute(conversationRoutes, chatJid, threadId, agentId),
+    channelRuntime: channelRuntime.proxy,
+    getGroup: (chatJid, threadId, agentId, providerAccountId) =>
+      resolveConversationRoute(
+        conversationRoutes,
+        chatJid,
+        threadId,
+        agentId,
+        providerAccountId,
+      ),
     clearSession: async (workspaceFolder, threadId, metadata) => {
       await ops().deleteSession(workspaceFolder, threadId, metadata);
     },
@@ -654,7 +636,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       lastAgentTimestamp[chatJid] = timestamp;
     },
     setChannelRuntime: (runtime) => {
-      channelRuntime = runtime;
+      channelRuntime.set(runtime);
     },
   };
 }

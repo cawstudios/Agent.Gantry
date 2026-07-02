@@ -138,6 +138,16 @@ function getPublicConfiguredAgents(settings: RuntimeSettings) {
   );
 }
 
+function getPublicConfiguredConversations(settings: RuntimeSettings) {
+  return Object.fromEntries(
+    Object.entries(settings.conversations).map(([conversationId, entry]) => {
+      const { providerConnection: _providerConnection, ...conversation } =
+        entry;
+      return [conversationId, conversation];
+    }),
+  );
+}
+
 export function getPublicRuntimeSettings() {
   const settings = getRuntimeSettingsForConfig();
   return {
@@ -151,8 +161,9 @@ export function getPublicRuntimeSettings() {
     },
     agents: getPublicConfiguredAgents(settings),
     providers: settings.providers,
-    providerConnections: settings.providerConnections,
-    conversations: settings.conversations,
+    providerAccounts: settings.providerAccounts,
+    conversations: getPublicConfiguredConversations(settings),
+    conversationInstalls: settings.conversationInstalls,
     bindings: settings.bindings,
     modelAliases: settings.modelAliases,
     memory: {

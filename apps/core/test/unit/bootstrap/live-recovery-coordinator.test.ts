@@ -343,6 +343,43 @@ describe('live-turn host lease acquisition', () => {
     );
   });
 
+  it('scopes recovered live-turn lookup to the provider account', async () => {
+    const queueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      null,
+      'slack-workspace-2',
+    );
+    const getAgentTurnContext = vi.fn(async () => ({
+      appId: 'default',
+      agentSessionId: 'session-workspace-2',
+    }));
+
+    await expect(
+      liveTurnScopeForQueue({
+        app: {
+          getConversationRoutes: () => ({
+            [queueJid]: {
+              folder: 'alpha',
+              conversationKind: 'channel',
+            },
+          }),
+        },
+        opsRepository: { getAgentTurnContext },
+        executionAdapter: { id: 'anthropic:claude-agent-sdk' },
+        queueJid,
+      }),
+    ).resolves.toEqual({
+      appId: 'default',
+      agentSessionId: 'session-workspace-2',
+      conversationId: 'sl:C123',
+      threadId: null,
+    });
+    expect(getAgentTurnContext).toHaveBeenCalledWith(
+      expect.objectContaining({ providerAccountId: 'slack-workspace-2' }),
+    );
+  });
+
   it('does not resolve a thread route for a top-level live-turn queue', async () => {
     const getAgentTurnContext = vi.fn();
 
@@ -435,7 +472,12 @@ describe('live-turn host lease acquisition', () => {
           conversationId: 'chat-1',
           threadId: null,
         },
-        queueJid: 'chat-1',
+        queueJid: makeAgentThreadQueueKey(
+          'chat-1',
+          'agent:alpha',
+          undefined,
+          'slack_beta',
+        ),
         liveRunId: 'run-active',
         chatJid: 'chat-1',
         threadId: null,
@@ -451,6 +493,14 @@ describe('live-turn host lease acquisition', () => {
     ).resolves.toBe(true);
 
     expect(routeMessage).toHaveBeenCalledOnce();
-    expect(enqueueMessageCheck).toHaveBeenCalledWith('chat-1');
+    expect(enqueueMessageCheck).toHaveBeenCalledWith(
+      makeAgentThreadQueueKey('chat-1', 'agent:alpha', undefined, 'slack_beta'),
+    );
+    expect(getMessagesSince).toHaveBeenCalledWith(
+      'chat-1',
+      '2024-01-01T00:00:00.000Z::0',
+      1,
+      { threadId: null, providerAccountId: 'slack_beta' },
+    );
   });
 });

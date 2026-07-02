@@ -25,7 +25,9 @@ export const RuntimeSettingsConfiguredAgentBindingSchema = z
   .object({
     jid: z.string().trim().min(1),
     provider: z.string().trim().min(1).optional(),
+    providerAccountId: z.string().trim().min(1).optional(),
     name: z.string().trim().min(1).optional(),
+    threadId: z.string().trim().min(1).optional(),
     trigger: z.string().trim().min(1),
     addedAt: z.string().trim().min(1),
     requiresTrigger: z.boolean(),
@@ -83,21 +85,24 @@ export const RuntimeSettingsConfiguredAgentSchema = z
 export const RuntimeSettingsProviderSchema = z
   .object({
     enabled: z.boolean(),
-    defaultConnection: z.string().optional(),
   })
   .strict();
 
-export const RuntimeSettingsProviderConnectionSchema = z
+export const RuntimeSettingsProviderAccountSchema = z
   .object({
+    agentId: z.string().trim().min(1),
     provider: z.string().trim().min(1),
     label: z.string(),
+    status: z.enum(['active', 'disabled']).optional(),
     runtimeSecretRefs: z.record(z.string(), z.string()),
+    externalIdentityRef: z.record(z.string(), z.string()).optional(),
+    config: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
 export const RuntimeSettingsConversationSchema = z
   .object({
-    providerConnection: z.string().trim().min(1),
+    providerAccount: z.string().trim().min(1),
     externalId: z.string().trim().min(1),
     kind: z.enum([
       'dm',
@@ -116,17 +121,36 @@ export const RuntimeSettingsConversationSchema = z
       })
       .strict(),
     controlApprovers: z.array(z.string().trim().min(1)),
+    installedAgents: z.record(
+      z.string(),
+      z
+        .object({
+          agentId: z.string().trim().min(1),
+          providerAccountId: z.string().trim().min(1),
+          threadId: z.string().trim().min(1).optional(),
+          status: z.enum(['active', 'disabled']),
+          addedAt: z.string().trim().min(1),
+          memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
+          trigger: z.string().optional(),
+          requiresTrigger: z.boolean().optional(),
+          model: z.string().optional(),
+        })
+        .strict(),
+    ),
   })
   .strict();
 
 export const RuntimeSettingsBindingSchema = z
   .object({
     agent: z.string().trim().min(1),
+    providerAccountId: z.string().trim().min(1).optional(),
+    installKey: z.string().trim().min(1).optional(),
     conversation: z.string().trim().min(1),
+    threadId: z.string().trim().min(1).optional(),
     trigger: z.string().trim().min(1),
     addedAt: z.string().trim().min(1),
     requiresTrigger: z.boolean(),
-    memoryScope: z.enum(['conversation', 'user', 'agent']),
+    memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
     model: z.string().optional(),
   })
   .strict();
@@ -149,12 +173,30 @@ export const RuntimeSettingsPublicSchema = z
       .strict(),
     agents: z.record(z.string(), RuntimeSettingsConfiguredAgentSchema),
     providers: z.record(z.string(), RuntimeSettingsProviderSchema),
-    providerConnections: z.record(
+    providerAccounts: z.record(
       z.string(),
-      RuntimeSettingsProviderConnectionSchema,
+      RuntimeSettingsProviderAccountSchema,
     ),
     conversations: z.record(z.string(), RuntimeSettingsConversationSchema),
     bindings: z.record(z.string(), RuntimeSettingsBindingSchema),
+    conversationInstalls: z.record(
+      z.string(),
+      z
+        .object({
+          agentId: z.string().trim().min(1),
+          providerAccountId: z.string().trim().min(1),
+          conversationId: z.string().trim().min(1),
+          threadId: z.string().trim().min(1).optional(),
+          status: z.enum(['active', 'disabled']),
+          addedAt: z.string().trim().min(1),
+          memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
+          trigger: z.string().optional(),
+          requiresTrigger: z.boolean().optional(),
+          model: z.string().optional(),
+        })
+        .strict(),
+    ),
+    modelAliases: z.record(z.string(), z.unknown()).optional(),
     memory: z
       .object({
         enabled: z.boolean(),

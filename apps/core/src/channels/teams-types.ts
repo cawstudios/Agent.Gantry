@@ -45,7 +45,7 @@ export interface TeamsMessageAttachment {
   sizeBytes?: number;
 }
 
-export interface TeamsContextMessage extends TeamsInboundMessage {}
+export type TeamsContextMessage = TeamsInboundMessage;
 
 export interface TeamsSdkMessageListInput {
   conversationId: string;
@@ -124,6 +124,8 @@ export type TeamsChannelOpts = Pick<
   | 'onChatMetadata'
   | 'isControlApproverAllowed'
   | 'onMessageAction'
+  | 'providerAccountId'
+  | 'agentId'
 >;
 
 export interface PendingTeamsPermissionPrompt {
@@ -172,31 +174,35 @@ export function teamsConversationIdFromJid(jid: string): string | null {
 export async function readTeamsCredentials(
   secrets?: RuntimeSecretProvider,
   settings?: {
-    providers: Record<string, { defaultConnection?: string } | undefined>;
-    providerConnections: Record<
+    providerAccounts: Record<
       string,
-      { runtimeSecretRefs: Record<string, string | undefined> } | undefined
+      | {
+          provider: string;
+          runtimeSecretRefs: Record<string, string | undefined>;
+        }
+      | undefined
     >;
   },
+  providerAccountId = '',
 ): Promise<TeamsChannelCredentials | null> {
   const clientId = await getProviderRuntimeSecret({
     providerId: 'teams',
+    providerAccountId,
     key: 'client_id',
-    defaultEnvName: 'TEAMS_CLIENT_ID',
     settings,
     secrets,
   });
   const clientSecret = await getProviderRuntimeSecret({
     providerId: 'teams',
+    providerAccountId,
     key: 'client_secret',
-    defaultEnvName: 'TEAMS_CLIENT_SECRET',
     settings,
     secrets,
   });
   const tenantId = await getProviderRuntimeSecret({
     providerId: 'teams',
+    providerAccountId,
     key: 'tenant_id',
-    defaultEnvName: 'TEAMS_TENANT_ID',
     settings,
     secrets,
   });

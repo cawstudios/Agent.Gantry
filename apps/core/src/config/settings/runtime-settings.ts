@@ -55,7 +55,7 @@ export {
   writeDesiredRuntimeSettings,
 } from './desired-settings-writer.js';
 
-const DEFAULT_PROVIDER_CONNECTION_IDS: Record<string, string> = {
+const DEFAULT_PROVIDER_ACCOUNT_IDS: Record<string, string> = {
   app: 'app_default',
   discord: 'discord_default',
   slack: 'slack_default',
@@ -117,6 +117,34 @@ export interface EnsureConfiguredConversationBindingInput {
   requiresTrigger: boolean;
   persona?: AgentPersona;
   approverIds?: string[];
+}
+
+export function ensureConfiguredAgent(
+  settings: RuntimeSettings,
+  input: {
+    agentId: string;
+    agentName: string;
+    agentFolder?: string;
+    persona?: AgentPersona;
+  },
+): void {
+  const agentId = input.agentId.trim();
+  const folder = (input.agentFolder ?? input.agentId).trim();
+  if (!isValidWorkspaceFolder(agentId)) {
+    throw new Error(`Invalid agent id for settings: ${agentId}`);
+  }
+  if (!isValidWorkspaceFolder(folder)) {
+    throw new Error(`Invalid agent folder for settings: ${folder}`);
+  }
+  settings.agents[agentId] ??= {
+    name: input.agentName.trim() || settings.agent.name,
+    folder,
+    persona: input.persona ?? 'developer',
+    bindings: {},
+    sources: { skills: [], mcpServers: [], tools: [] },
+    capabilities: [],
+    accessPreset: 'full',
+  };
 }
 
 export function saveRuntimeSettings(
@@ -278,8 +306,7 @@ export function addControlSenderForAgent(
   for (const [conversationId, conversation] of Object.entries(
     settings.conversations,
   )) {
-    const connection =
-      settings.providerConnections[conversation.providerConnection];
+    const connection = settings.providerAccounts[conversation.providerAccount];
     if (connection?.provider !== providerId) continue;
     const binding = Object.values(settings.bindings).find(
       (candidate) =>
@@ -311,37 +338,42 @@ export function ensureConfiguredConversationBinding(
   if (!provider) {
     throw new Error(`Unsupported provider for conversation id: ${input.jid}`);
   }
+  const agentId = input.agentId.trim();
+  const existingProviderAccountId = Object.entries(
+    settings.providerAccounts,
+  ).find(
+    ([, account]) =>
+      account.provider === provider.id && account.agentId === agentId,
+  )?.[0];
+  const defaultProviderAccountId =
+    DEFAULT_PROVIDER_ACCOUNT_IDS[provider.id] || `${provider.id}_default`;
   const providerConnectionId =
-    settings.providers[provider.id]?.defaultConnection ||
-    DEFAULT_PROVIDER_CONNECTION_IDS[provider.id] ||
-    `${provider.id}_default`;
+    existingProviderAccountId ??
+    (!settings.providerAccounts[defaultProviderAccountId] ||
+    settings.providerAccounts[defaultProviderAccountId].agentId === agentId
+      ? defaultProviderAccountId
+      : stableSettingsId(
+          `${provider.id}_${agentId}`,
+          settings.providerAccounts,
+          `${provider.id}:${agentId}`,
+        ));
   settings.providers[provider.id] = {
     enabled: true,
-    defaultConnection: providerConnectionId,
   };
-  settings.providerConnections[providerConnectionId] ??= {
+  settings.providerAccounts[providerConnectionId] ??= {
+    agentId,
     provider: provider.id,
     label: `${provider.label} Default`,
     runtimeSecretRefs: { ...(DEFAULT_RUNTIME_SECRET_REFS[provider.id] || {}) },
   };
 
-  const agentId = input.agentId.trim();
   const folder = input.agentFolder.trim();
-  if (!isValidWorkspaceFolder(agentId)) {
-    throw new Error(`Invalid agent id for settings: ${agentId}`);
-  }
-  if (!isValidWorkspaceFolder(folder)) {
-    throw new Error(`Invalid agent folder for settings: ${folder}`);
-  }
-  settings.agents[agentId] ??= {
-    name: input.agentName.trim() || settings.agent.name,
-    folder,
-    persona: input.persona ?? 'developer',
-    bindings: {},
-    sources: { skills: [], mcpServers: [], tools: [] },
-    capabilities: [],
-    accessPreset: 'full',
-  };
+  ensureConfiguredAgent(settings, {
+    agentId,
+    agentName: input.agentName,
+    agentFolder: folder,
+    persona: input.persona,
+  });
 
   const externalId = stripProviderPrefix(input.jid, provider.id);
   const conversationId = configuredConversationId({
@@ -361,6 +393,7 @@ export function ensureConfiguredConversationBinding(
     .sort();
   settings.conversations[conversationId] = {
     providerConnection: providerConnectionId,
+    providerAccount: providerConnectionId,
     externalId,
     kind: provider.isGroupJid(input.jid) ? 'channel' : 'dm',
     displayName: input.displayName.trim() || input.jid,
@@ -369,6 +402,7 @@ export function ensureConfiguredConversationBinding(
       mode: 'trigger',
     },
     controlApprovers,
+    installedAgents: existingConversation?.installedAgents ?? {},
   };
 
   const existingBindingEntry = Object.entries(settings.bindings).find(
@@ -392,9 +426,20 @@ export function ensureConfiguredConversationBinding(
     memoryScope: existingBinding?.memoryScope || 'conversation',
     model: existingBinding?.model,
   };
+  settings.conversations[conversationId].installedAgents[agentId] = {
+    agentId,
+    providerAccountId: providerConnectionId,
+    status: 'active',
+    addedAt: settings.bindings[bindingId].addedAt,
+    memoryScope: settings.bindings[bindingId].memoryScope,
+    trigger: settings.bindings[bindingId].trigger,
+    requiresTrigger: settings.bindings[bindingId].requiresTrigger,
+    model: settings.bindings[bindingId].model,
+  };
   settings.agents[agentId].bindings[bindingId] = {
     jid: input.jid,
     provider: provider.id,
+    providerAccountId: providerConnectionId,
     name: input.displayName,
     trigger: input.trigger,
     addedAt: settings.bindings[bindingId].addedAt,
@@ -424,7 +469,7 @@ function configuredConversationId(input: {
 }): string {
   const existing = Object.entries(input.conversations).find(
     ([, conversation]) =>
-      conversation.providerConnection === input.providerConnectionId &&
+      conversation.providerAccount === input.providerConnectionId &&
       conversation.externalId === input.externalId,
   );
   if (existing) return existing[0];

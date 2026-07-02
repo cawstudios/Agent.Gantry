@@ -299,6 +299,96 @@ describe('recoverPendingMessages', () => {
     ]);
   });
 
+  it('scopes recovery reads to the route Provider Account', async () => {
+    mockGetMessageThreadIds.mockReturnValue([null]);
+    mockGetMessagesSince.mockReturnValue([makePendingMessage(1)]);
+
+    const deps = makeDeps({
+      getConversationRoutes: () => ({
+        'group@g.us': {
+          name: 'Team',
+          folder: 'team',
+          providerAccountId: 'slack_alpha',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      }),
+    });
+    await recoverPendingMessages(deps);
+
+    expect(mockGetMessageThreadIds).toHaveBeenCalledWith('group@g.us', {
+      providerAccountId: 'slack_alpha',
+    });
+    expect(mockGetMessagesSince).toHaveBeenCalledWith(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      50,
+      { threadId: null, providerAccountId: 'slack_alpha' },
+    );
+  });
+
+  it('recovers same agent/JID routes independently per Provider Account', async () => {
+    mockGetMessageThreadIds.mockReturnValue([null]);
+    mockGetMessagesSince.mockReturnValue([makePendingMessage(1)]);
+
+    const deps = makeDeps({
+      getConversationRoutes: () => ({
+        [makeAgentThreadQueueKey(
+          'group@g.us',
+          'agent:team',
+          undefined,
+          'slack_alpha',
+        )]: {
+          name: 'Alpha',
+          folder: 'team',
+          providerAccountId: 'slack_alpha',
+          trigger: '@Team',
+          added_at: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+        [makeAgentThreadQueueKey(
+          'group@g.us',
+          'agent:team',
+          undefined,
+          'slack_beta',
+        )]: {
+          name: 'Beta',
+          folder: 'team',
+          providerAccountId: 'slack_beta',
+          trigger: '@Team',
+          added_at: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+        },
+      }),
+    });
+    await recoverPendingMessages(deps);
+
+    expect(deps.enqueued.sort()).toEqual(
+      [
+        makeAgentThreadQueueKey(
+          'group@g.us',
+          'agent:team',
+          null,
+          'slack_alpha',
+        ),
+        makeAgentThreadQueueKey('group@g.us', 'agent:team', null, 'slack_beta'),
+      ].sort(),
+    );
+    expect(mockGetMessagesSince).toHaveBeenCalledWith(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      50,
+      { threadId: null, providerAccountId: 'slack_alpha' },
+    );
+    expect(mockGetMessagesSince).toHaveBeenCalledWith(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      50,
+      { threadId: null, providerAccountId: 'slack_beta' },
+    );
+  });
+
   it('checks all registered groups', async () => {
     mockGetMessagesSince.mockReturnValue([
       {
@@ -650,7 +740,12 @@ describe('thread queue routing', () => {
   });
 
   it('selects the agent route from an agent-qualified live admission queue', async () => {
-    const queueJid = makeAgentThreadQueueKey('group@g.us', 'agent:team2');
+    const queueJid = makeAgentThreadQueueKey(
+      'group@g.us',
+      'agent:team2',
+      undefined,
+      'slack_beta',
+    );
     const msg = {
       id: 'sdk-msg-1',
       chat_jid: 'group@g.us',
@@ -676,6 +771,7 @@ describe('thread queue routing', () => {
         [queueJid]: {
           name: 'Team 2',
           folder: 'team2',
+          providerAccountId: 'slack_beta',
           trigger: '@Team2',
           added_at: '2024-01-01T00:00:00.000Z',
           requiresTrigger: false,
@@ -723,7 +819,7 @@ describe('thread queue routing', () => {
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       50,
-      { threadId: null },
+      { threadId: null, providerAccountId: 'slack_beta' },
     );
   });
 
@@ -893,6 +989,16 @@ describe('thread queue routing', () => {
     });
     const deps = makeDeps({
       handleActiveControlCommand,
+      getConversationRoutes: () => ({
+        'group@g.us': {
+          name: 'Team',
+          folder: 'team',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+          requiresTrigger: false,
+          providerAccountId: 'slack_alpha',
+        },
+      }),
     });
     const { processLiveAdmissionWorkItem } =
       await import('@core/runtime/message-loop.js');
@@ -930,6 +1036,11 @@ describe('thread queue routing', () => {
     ).resolves.toBe('completed');
 
     expect(handleActiveControlCommand).toHaveBeenCalledOnce();
+    expect(handleActiveControlCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group: expect.objectContaining({ providerAccountId: 'slack_alpha' }),
+      }),
+    );
     expect(decodeGroupMessageCursor(deps.cursors['group@g.us'])).toEqual({
       timestamp: '2024-01-01T00:00:01.000Z',
       id: '1',

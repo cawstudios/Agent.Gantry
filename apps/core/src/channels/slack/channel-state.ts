@@ -127,6 +127,8 @@ export abstract class SlackChannelState {
     | 'runtimeSettings'
     | 'isControlApproverAllowed'
     | 'onMessageAction'
+    | 'providerAccountId'
+    | 'agentId'
   >;
   protected botUserId: string | null = null;
   protected userNameCache = new Map<string, string>();
@@ -582,16 +584,15 @@ export abstract class SlackChannelState {
   ): Promise<SlackAttachmentDownload | null> {
     const url = file.url_private_download || file.url_private;
     if (!url) return null;
-
-    const groups = findConversationRoutesForChat(
-      this.opts.conversationRoutes(),
-      jid,
-      threadId,
-    );
-    if (groups.length < 1) {
-      return null;
-    }
-
+    const groups = targetFolder
+      ? []
+      : findConversationRoutesForChat(
+          this.opts.conversationRoutes(),
+          jid,
+          threadId,
+          this.opts.providerAccountId,
+        );
+    if (!targetFolder && groups.length < 1) return null;
     const filename = this.sanitizeFilename(
       file.name || file.title || 'attachment.bin',
     );

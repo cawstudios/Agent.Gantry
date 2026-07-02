@@ -61,11 +61,11 @@ endpoints on the running runtime:
 - `client.jobs` — `create`, `list`, `get`, `update`, `delete`, `pause`, `resume`, `trigger`, `wait`
 - `client.runs` — `list`, `get`
 - `client.models` — `list`, `defaults.get`, `defaults.update`, `preview`
-- `client.agents` — admin CRUD plus `skills`, `mcpServers`, `conversationBindings`
+- `client.agents` — admin CRUD plus `skills`, `mcpServers`, `conversationInstalls`
 - `client.skills` — install, list, and inspect skills
 - `client.mcpServers` — catalog of MCP servers
 - `client.providers` — list channel providers
-- `client.providerConnections` — CRUD plus `discoverConversations`
+- `client.providerAccounts` — CRUD plus `discoverConversations`
 - `client.conversations` — `list`, `get`, `messages`, get/set `approvers`
 - `client.webhooks` — `register`, `list`, `update`, `delete`, `test`, `replayDeadLetter`, `purgeDeadLetter`
 - `client.memory` — `save`, `search`, `list`, `patch`, `delete`, plus `dreaming.trigger` / `dreaming.status`

@@ -52,7 +52,7 @@ export const ids = {
   memory: id('memoryId', 'Memory item id.'),
   modelCredentialProvider: id('providerId', 'Model credential provider id.'),
   profileFileKind: id('kind', 'Profile file kind (soul | agents).'),
-  providerConnection: id('providerConnectionId', 'Provider connection id.'),
+  providerAccount: id('providerAccountId', 'Provider account id.'),
   run: id('runId', 'Run id.'),
   server: id('serverId', 'MCP server id.'),
   session: id('sessionId', 'Session id.'),

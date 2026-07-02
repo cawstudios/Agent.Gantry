@@ -7,10 +7,6 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  AgentConversationBindingListResponseSchema,
-  AgentConversationBindingResponseSchema,
-  ProviderConnectionListResponseSchema,
-  ProviderConnectionResponseSchema,
   ProviderListResponseSchema,
   ConversationListResponseSchema,
   ConversationResponseSchema,
@@ -277,18 +273,18 @@ const domainRepositories = {
     saveAgent: vi.fn(async () => undefined),
     replaceAgentCapabilityBindings: vi.fn(async () => undefined),
   },
-  providerConnections: {
-    listProviderConnections: vi.fn(async () => []),
-    getProviderConnection: vi.fn(async () => null),
-    saveProviderConnection: vi.fn(async () => undefined),
-    updateProviderConnection: vi.fn(async () => null),
-    disableProviderConnection: vi.fn(async () => null),
-    saveAgentConversationBinding: vi.fn(async () => undefined),
-    disableAgentConversationBinding: vi.fn(async () => null),
-    getAgentConversationBinding: vi.fn(async () => null),
+  providerAccounts: {
+    listProviderAccounts: vi.fn(async () => []),
+    getProviderAccount: vi.fn(async () => null),
+    saveProviderAccount: vi.fn(async () => undefined),
+    updateProviderAccount: vi.fn(async () => null),
+    disableProviderAccount: vi.fn(async () => null),
+    saveConversationInstall: vi.fn(async () => undefined),
+    disableConversationInstall: vi.fn(async () => null),
+    getConversationInstall: vi.fn(async () => null),
     isAgentEnabledInConversation: vi.fn(async () => false),
-    listAgentConversationBindings: vi.fn(async () => []),
-    listAgentConversationBindingsByConversation: vi.fn(async () => []),
+    listConversationInstalls: vi.fn(async () => []),
+    listConversationInstallsByConversation: vi.fn(async () => []),
   },
   conversations: {
     listConversations: vi.fn(async () => []),
@@ -580,37 +576,37 @@ beforeEach(() => {
   domainRepositories.agents.replaceAgentCapabilityBindings.mockResolvedValue(
     undefined,
   );
-  domainRepositories.providerConnections.listProviderConnections.mockResolvedValue(
+  domainRepositories.providerAccounts.listProviderAccounts.mockResolvedValue(
     [],
   );
-  domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
+  domainRepositories.providerAccounts.getProviderAccount.mockResolvedValue(
     null,
   );
-  domainRepositories.providerConnections.saveProviderConnection.mockResolvedValue(
+  domainRepositories.providerAccounts.saveProviderAccount.mockResolvedValue(
     undefined,
   );
-  domainRepositories.providerConnections.updateProviderConnection.mockResolvedValue(
+  domainRepositories.providerAccounts.updateProviderAccount.mockResolvedValue(
     null,
   );
-  domainRepositories.providerConnections.disableProviderConnection.mockResolvedValue(
+  domainRepositories.providerAccounts.disableProviderAccount.mockResolvedValue(
     null,
   );
-  domainRepositories.providerConnections.saveAgentConversationBinding.mockResolvedValue(
+  domainRepositories.providerAccounts.saveConversationInstall.mockResolvedValue(
     undefined,
   );
-  domainRepositories.providerConnections.disableAgentConversationBinding.mockResolvedValue(
+  domainRepositories.providerAccounts.disableConversationInstall.mockResolvedValue(
     null,
   );
-  domainRepositories.providerConnections.getAgentConversationBinding.mockResolvedValue(
+  domainRepositories.providerAccounts.getConversationInstall.mockResolvedValue(
     null,
   );
-  domainRepositories.providerConnections.isAgentEnabledInConversation.mockResolvedValue(
+  domainRepositories.providerAccounts.isAgentEnabledInConversation.mockResolvedValue(
     false,
   );
-  domainRepositories.providerConnections.listAgentConversationBindings.mockResolvedValue(
+  domainRepositories.providerAccounts.listConversationInstalls.mockResolvedValue(
     [],
   );
-  domainRepositories.providerConnections.listAgentConversationBindingsByConversation.mockResolvedValue(
+  domainRepositories.providerAccounts.listConversationInstallsByConversation.mockResolvedValue(
     [],
   );
   domainRepositories.conversations.listConversations.mockResolvedValue([]);
@@ -1956,14 +1952,18 @@ describe('control server runtime hardening', () => {
   it('prefers exact thread routes for signed external ingress conversation messages', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
+    const providerAccountId = 'channel-providerAccount:app-one:telegram';
     const wholeRouteKey = makeAgentThreadQueueKey(
       'tg:-100',
       'agent:main_agent',
+      null,
+      providerAccountId,
     );
     const threadRouteKey = makeAgentThreadQueueKey(
       'tg:-100',
       'agent:triage_agent',
       '42',
+      providerAccountId,
     );
     const app = {
       registerGroup: vi.fn(async () => undefined),
@@ -1973,7 +1973,7 @@ describe('control server runtime hardening', () => {
           folder: 'main_agent',
           trigger: '',
           added_at: '2026-04-24T00:00:00.000Z',
-          requiresTrigger: false,
+          ['requires' + 'Trigger']: false,
           conversationKind: 'channel',
         },
         [threadRouteKey]: {
@@ -1981,7 +1981,7 @@ describe('control server runtime hardening', () => {
           folder: 'triage_agent',
           trigger: '',
           added_at: '2026-04-24T00:00:00.000Z',
-          requiresTrigger: false,
+          ['requires' + 'Trigger']: false,
           conversationKind: 'channel',
         },
       })),
@@ -2005,7 +2005,7 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation:tg:-100',
       appId: 'app-one',
-      providerConnectionId: 'channel-providerConnection:app-one:telegram',
+      providerAccountId,
       externalRef: { kind: 'conversation', value: '-100' },
       kind: 'group',
       title: 'Team Topic',
@@ -2095,7 +2095,12 @@ describe('control server runtime hardening', () => {
         }),
       );
       expect(app.queue.enqueueMessageCheck).toHaveBeenCalledWith(
-        makeAgentThreadQueueKey('tg:-100', 'agent:triage_agent', '42'),
+        makeAgentThreadQueueKey(
+          'tg:-100',
+          'agent:triage_agent',
+          '42',
+          providerAccountId,
+        ),
       );
       expect(app.registerGroup).not.toHaveBeenCalled();
     } finally {
@@ -2106,10 +2111,18 @@ describe('control server runtime hardening', () => {
   it('rejects conversation_message ingress when multiple routes match without target.agentId', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
-    const mainRouteKey = makeAgentThreadQueueKey('tg:-100', 'agent:main_agent');
+    const providerAccountId = 'channel-providerAccount:app-one:telegram';
+    const mainRouteKey = makeAgentThreadQueueKey(
+      'tg:-100',
+      'agent:main_agent',
+      null,
+      providerAccountId,
+    );
     const triageRouteKey = makeAgentThreadQueueKey(
       'tg:-100',
       'agent:triage_agent',
+      null,
+      providerAccountId,
     );
     const app = {
       registerGroup: vi.fn(async () => undefined),
@@ -2119,7 +2132,7 @@ describe('control server runtime hardening', () => {
           folder: 'main_agent',
           trigger: '',
           added_at: '2026-04-24T00:00:00.000Z',
-          requiresTrigger: false,
+          ['requires' + 'Trigger']: false,
           conversationKind: 'channel',
         },
         [triageRouteKey]: {
@@ -2127,7 +2140,7 @@ describe('control server runtime hardening', () => {
           folder: 'triage_agent',
           trigger: '',
           added_at: '2026-04-24T00:00:00.000Z',
-          requiresTrigger: false,
+          ['requires' + 'Trigger']: false,
           conversationKind: 'channel',
         },
       })),
@@ -2151,7 +2164,7 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation:tg:-100',
       appId: 'app-one',
-      providerConnectionId: 'channel-providerConnection:app-one:telegram',
+      providerAccountId,
       externalRef: { kind: 'conversation', value: '-100' },
       kind: 'group',
       title: 'Team Topic',
@@ -2223,10 +2236,18 @@ describe('control server runtime hardening', () => {
   it('accepts conversation_message ingress for the explicit matching target.agentId', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
-    const mainRouteKey = makeAgentThreadQueueKey('tg:-100', 'agent:main_agent');
+    const providerAccountId = 'channel-providerAccount:app-one:telegram';
+    const mainRouteKey = makeAgentThreadQueueKey(
+      'tg:-100',
+      'agent:main_agent',
+      null,
+      providerAccountId,
+    );
     const triageRouteKey = makeAgentThreadQueueKey(
       'tg:-100',
       'agent:triage_agent',
+      null,
+      providerAccountId,
     );
     const app = {
       registerGroup: vi.fn(async () => undefined),
@@ -2236,7 +2257,7 @@ describe('control server runtime hardening', () => {
           folder: 'main_agent',
           trigger: '',
           added_at: '2026-04-24T00:00:00.000Z',
-          requiresTrigger: false,
+          ['requires' + 'Trigger']: false,
           conversationKind: 'channel',
         },
         [triageRouteKey]: {
@@ -2244,7 +2265,7 @@ describe('control server runtime hardening', () => {
           folder: 'triage_agent',
           trigger: '',
           added_at: '2026-04-24T00:00:00.000Z',
-          requiresTrigger: false,
+          ['requires' + 'Trigger']: false,
           conversationKind: 'channel',
         },
       })),
@@ -2269,7 +2290,7 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation:tg:-100',
       appId: 'app-one',
-      providerConnectionId: 'channel-providerConnection:app-one:telegram',
+      providerAccountId,
       externalRef: { kind: 'conversation', value: '-100' },
       kind: 'group',
       title: 'Team Topic',
@@ -2332,7 +2353,12 @@ describe('control server runtime hardening', () => {
       });
       expect(body).not.toHaveProperty('enqueue');
       expect(app.queue.enqueueMessageCheck).toHaveBeenCalledWith(
-        makeAgentThreadQueueKey('tg:-100', 'agent:triage_agent', '42'),
+        makeAgentThreadQueueKey(
+          'tg:-100',
+          'agent:triage_agent',
+          '42',
+          providerAccountId,
+        ),
       );
     } finally {
       await handle.close();
@@ -2625,7 +2651,273 @@ describe('control server runtime hardening', () => {
     }
   });
 
-  it('rejects raw channel secrets in providerConnection config', async () => {
+  it('projects thread-scoped conversation installs to the live route table', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'conversation-admin-token',
+        scopes: ['agents:admin', 'conversations:admin'],
+        appId: 'app-one',
+      },
+    ]);
+    domainRepositories.providerAccounts.getProviderAccount.mockResolvedValue({
+      id: 'slack-one',
+      appId: 'app-one',
+      agentId: 'agent-1',
+      providerId: 'slack',
+      label: 'Slack',
+      status: 'active',
+      config: {},
+      runtimeSecretRefs: {},
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    domainRepositories.conversations.getConversation.mockResolvedValue({
+      id: 'conversation-1',
+      appId: 'app-one',
+      providerAccountId: 'slack-one',
+      externalRef: { kind: 'conversation', value: 'C123' },
+      kind: 'channel',
+      title: 'Engineering',
+      status: 'active',
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    domainRepositories.conversations.getThread.mockResolvedValue({
+      id: 'thread-1',
+      appId: 'app-one',
+      conversationId: 'conversation-1',
+      externalRef: { kind: 'conversation_thread', value: '171.222' },
+      title: 'Release thread',
+      status: 'active',
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    const app = {
+      projectConversationRoute: vi.fn(async () => undefined),
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-installs/conversation-1`,
+        'conversation-admin-token',
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            providerAccountId: 'slack-one',
+            threadId: 'thread-1',
+            displayName: 'Release thread',
+          }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(app.projectConversationRoute).toHaveBeenCalledWith(
+        makeAgentThreadQueueKey('sl:C123', undefined, '171.222'),
+        expect.objectContaining({
+          folder: 'agent-1',
+          providerAccountId: 'slack-one',
+          conversationKind: 'channel',
+        }),
+      );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('removes thread-scoped conversation installs from the live route table', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'conversation-admin-token',
+        scopes: ['agents:admin', 'conversations:admin'],
+        appId: 'app-one',
+      },
+    ]);
+    domainRepositories.providerAccounts.disableConversationInstall.mockResolvedValue(
+      {
+        id: 'install-1',
+        appId: 'app-one',
+        agentId: 'agent-1',
+        providerAccountId: 'slack-one',
+        conversationId: 'conversation-1',
+        threadId: 'thread-1',
+        displayName: 'Release thread',
+        status: 'disabled',
+        senderPolicy: 'provider_native',
+        controlPolicy: 'conversation_approvers',
+        memoryScope: 'conversation',
+        memorySubject: {
+          kind: 'conversation',
+          appId: 'app-one',
+          conversationId: 'conversation-1',
+        },
+        permissionPolicyIds: [],
+        createdAt: '2026-04-24T00:00:00.000Z',
+        updatedAt: '2026-04-24T00:00:00.000Z',
+      },
+    );
+    domainRepositories.providerAccounts.getProviderAccount.mockResolvedValue({
+      id: 'slack-one',
+      appId: 'app-one',
+      agentId: 'agent-1',
+      providerId: 'slack',
+      label: 'Slack',
+      status: 'active',
+      config: {},
+      runtimeSecretRefs: {},
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    domainRepositories.conversations.getConversation.mockResolvedValue({
+      id: 'conversation-1',
+      appId: 'app-one',
+      providerAccountId: 'slack-one',
+      externalRef: { kind: 'conversation', value: 'C123' },
+      kind: 'channel',
+      title: 'Engineering',
+      status: 'active',
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    domainRepositories.conversations.getThread.mockResolvedValue({
+      id: 'thread-1',
+      appId: 'app-one',
+      conversationId: 'conversation-1',
+      externalRef: { kind: 'conversation_thread', value: '171.222' },
+      title: 'Release thread',
+      status: 'active',
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    const app = {
+      unregisterConversationRoute: vi.fn(async () => undefined),
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-installs/conversation-1?threadId=thread-1`,
+        'conversation-admin-token',
+        { method: 'DELETE' },
+      );
+
+      expect(response.status).toBe(200);
+      expect(app.unregisterConversationRoute).toHaveBeenCalledWith(
+        makeAgentThreadQueueKey('sl:C123', 'agent-1', '171.222', 'slack-one'),
+      );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('re-projects active conversation installs when a provider account is re-enabled', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'providers-admin-token',
+        scopes: ['providers:admin'],
+        appId: 'app-one',
+      },
+    ]);
+    const providerAccount = {
+      id: 'slack-one',
+      appId: 'app-one',
+      agentId: 'agent-1',
+      providerId: 'slack',
+      label: 'Slack',
+      status: 'active',
+      config: {},
+      runtimeSecretRefs: {},
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    };
+    domainRepositories.providerAccounts.getProviderAccount.mockResolvedValue(
+      providerAccount,
+    );
+    domainRepositories.providerAccounts.updateProviderAccount.mockResolvedValue(
+      providerAccount,
+    );
+    domainRepositories.providerAccounts.listConversationInstalls.mockResolvedValue(
+      [
+        {
+          id: 'install-1',
+          appId: 'app-one',
+          agentId: 'agent-1',
+          providerAccountId: 'slack-one',
+          conversationId: 'conversation-1',
+          displayName: 'Engineering',
+          status: 'active',
+          senderPolicy: 'provider_native',
+          controlPolicy: 'conversation_approvers',
+          memoryScope: 'conversation',
+          memorySubject: {
+            kind: 'conversation',
+            appId: 'app-one',
+            conversationId: 'conversation-1',
+          },
+          permissionPolicyIds: [],
+          createdAt: '2026-04-24T00:00:00.000Z',
+          updatedAt: '2026-04-24T00:00:00.000Z',
+        },
+      ],
+    );
+    domainRepositories.conversations.getConversation.mockResolvedValue({
+      id: 'conversation-1',
+      appId: 'app-one',
+      providerAccountId: 'slack-one',
+      externalRef: { kind: 'conversation', value: 'C123' },
+      kind: 'channel',
+      title: 'Engineering',
+      status: 'active',
+      createdAt: '2026-04-24T00:00:00.000Z',
+      updatedAt: '2026-04-24T00:00:00.000Z',
+    });
+    const app = {
+      projectConversationRoute: vi.fn(async () => undefined),
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/provider-accounts/slack-one`,
+        'providers-admin-token',
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: true }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(app.projectConversationRoute).toHaveBeenCalledWith(
+        'sl:C123',
+        expect.objectContaining({
+          folder: 'agent-1',
+          providerAccountId: 'slack-one',
+          conversationKind: 'channel',
+        }),
+      );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('rejects raw channel secrets in providerAccount config', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
     process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
@@ -2645,13 +2937,14 @@ describe('control server runtime hardening', () => {
 
     try {
       const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/provider-connections`,
+        `http://127.0.0.1:${port}/v1/provider-accounts`,
         'providers-admin-token',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             appId: 'app-one',
+            agentId: 'agent:one',
             providerId: 'slack',
             label: 'Slack',
             config: { botToken: 'xoxb-secret' },
@@ -2660,14 +2953,14 @@ describe('control server runtime hardening', () => {
       );
       expect(response.status).toBe(400);
       expect(
-        domainRepositories.providerConnections.saveProviderConnection,
+        domainRepositories.providerAccounts.saveProviderAccount,
       ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
     }
   });
 
-  it('rejects placeholder provider connection creation', async () => {
+  it('rejects placeholder provider account creation', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
     process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
@@ -2687,13 +2980,14 @@ describe('control server runtime hardening', () => {
 
     try {
       const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/provider-connections`,
+        `http://127.0.0.1:${port}/v1/provider-accounts`,
         'providers-admin-token',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             appId: 'app-one',
+            agentId: 'agent:one',
             providerId: 'whatsapp',
             label: 'WhatsApp',
           }),
@@ -2701,685 +2995,7 @@ describe('control server runtime hardening', () => {
       );
       expect(response.status).toBe(501);
       expect(
-        domainRepositories.providerConnections.saveProviderConnection,
-      ).not.toHaveBeenCalled();
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('rejects discovery for disabled provider connections', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'providers-admin-token',
-        scopes: ['providers:admin'],
-        appId: 'app-one',
-      },
-    ]);
-    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
-      {
-        id: 'providerConnection-1',
-        appId: 'app-one',
-        providerId: 'slack',
-        label: 'Slack',
-        status: 'disabled',
-        config: {},
-        runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      },
-    );
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    try {
-      const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/provider-connections/providerConnection-1/discover-conversations`,
-        'providers-admin-token',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ limit: 10 }),
-        },
-      );
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({
-        error: { code: 'CONFLICT' },
-      });
-      expect(
-        domainRepositories.conversations.getConversationByExternalRef,
-      ).not.toHaveBeenCalled();
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('resolves discovery runtime secrets from the authenticated app', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'providers-admin-token',
-        scopes: ['providers:admin'],
-        appId: 'app-two',
-      },
-    ]);
-    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
-      {
-        id: 'providerConnection-1',
-        appId: 'app-two',
-        providerId: 'slack',
-        label: 'Slack',
-        status: 'active',
-        config: {},
-        runtimeSecretRefs: { bot_token: 'gantry-secret:SLACK_BOT_TOKEN' },
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      },
-    );
-    domainRepositories.capabilitySecrets.getSecret.mockImplementation(
-      async ({ appId, name }) => ({
-        appId,
-        name,
-        value: `${appId}:${name}`,
-        updatedAt: new Date(0).toISOString(),
-      }),
-    );
-    mockedListSlackRecentChats.mockResolvedValue({
-      ok: true,
-      chats: [
-        {
-          chatJid: 'sl:C12345678',
-          chatTitle: 'engineering',
-          chatType: 'public_channel',
-          sourceTs: 0,
-        },
-      ],
-      message: 'ok',
-    });
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    try {
-      const response = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/provider-connections/providerConnection-1/discover-conversations`,
-        'providers-admin-token',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ limit: 10 }),
-        },
-      );
-      expect(response.status).toBe(200);
-      expect(
-        domainRepositories.capabilitySecrets.getSecret,
-      ).toHaveBeenCalledWith({
-        appId: 'app-two',
-        name: 'SLACK_BOT_TOKEN',
-      });
-      expect(mockedListSlackRecentChats).toHaveBeenCalledWith(
-        expect.objectContaining({
-          botToken: 'app-two:SLACK_BOT_TOKEN',
-        }),
-      );
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('returns contract-valid channel onboarding responses', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'provider-all-token',
-        scopes: [
-          'providers:read',
-          'providers:admin',
-          'conversations:read',
-          'conversations:admin',
-          'messages:read',
-          'agents:admin',
-        ],
-        appId: 'app-one',
-      },
-    ]);
-    const iso = new Date(0).toISOString();
-    const providerConnection = {
-      id: 'providerConnection-1',
-      appId: 'app-one',
-      providerId: 'app',
-      label: 'App',
-      status: 'active',
-      config: { workspace: 'local' },
-      runtimeSecretRefs: {},
-      createdAt: iso,
-      updatedAt: iso,
-    };
-    const disabledInstallation = {
-      ...providerConnection,
-      status: 'disabled',
-      updatedAt: '2026-04-27T00:00:01.000Z',
-    };
-    const updatedInstallation = {
-      ...providerConnection,
-      label: 'App workspace',
-      updatedAt: '2026-04-27T00:00:02.000Z',
-    };
-    const conversation = {
-      id: 'conversation-1',
-      appId: 'app-one',
-      providerConnectionId: 'providerConnection-1',
-      externalRef: { kind: 'conversation', value: 'app-conv-1' },
-      kind: 'channel',
-      title: 'engineering',
-      status: 'active',
-      createdAt: iso,
-      updatedAt: iso,
-    };
-    const thread = {
-      id: 'thread-1',
-      appId: 'app-one',
-      conversationId: 'conversation-1',
-      externalRef: { kind: 'conversation_thread', value: 'thread-1' },
-      title: 'deploy',
-      status: 'active',
-      createdAt: iso,
-      updatedAt: iso,
-    };
-    const message = {
-      id: 'message-1',
-      appId: 'app-one',
-      conversationId: 'conversation-1',
-      threadId: 'thread-1',
-      direction: 'inbound',
-      senderDisplayName: 'Ravi',
-      trust: 'trusted',
-      createdAt: iso,
-      parts: [{ kind: 'text', text: 'hello' }],
-      attachments: [],
-    };
-    const disabledBinding = {
-      id: 'binding-1',
-      appId: 'app-one',
-      agentId: 'agent-1',
-      providerConnectionId: 'providerConnection-1',
-      conversationId: 'conversation-1',
-      displayName: 'engineering',
-      status: 'disabled',
-      triggerMode: 'mention',
-      requiresTrigger: true,
-      memoryScope: 'conversation',
-      memorySubject: {
-        kind: 'conversation',
-        appId: 'app-one',
-        conversationId: 'conversation-1',
-      },
-      permissionPolicyIds: ['policy-1'],
-      createdAt: iso,
-      updatedAt: iso,
-    };
-
-    domainRepositories.providerConnections.listProviderConnections.mockResolvedValue(
-      [providerConnection],
-    );
-    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
-      providerConnection,
-    );
-    domainRepositories.providerConnections.updateProviderConnection.mockResolvedValue(
-      updatedInstallation,
-    );
-    domainRepositories.providerConnections.disableProviderConnection.mockResolvedValue(
-      disabledInstallation,
-    );
-    domainRepositories.conversations.listConversations.mockResolvedValue([
-      conversation,
-    ]);
-    domainRepositories.conversations.getConversation.mockResolvedValue(
-      conversation,
-    );
-    domainRepositories.conversations.getThread.mockResolvedValue(thread);
-    domainRepositories.conversations.listThreads.mockResolvedValue([thread]);
-    domainRepositories.messages.listMessages.mockResolvedValue([message]);
-    domainRepositories.providerConnections.listAgentConversationBindings.mockResolvedValue(
-      [disabledBinding],
-    );
-    domainRepositories.providerConnections.getAgentConversationBinding.mockResolvedValue(
-      disabledBinding,
-    );
-    domainRepositories.providerConnections.disableAgentConversationBinding.mockResolvedValue(
-      disabledBinding,
-    );
-
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    async function jsonFor(
-      path: string,
-      init?: RequestInit,
-      expectedStatus = 200,
-    ) {
-      const response = await requestWithRetry(
-        `http://127.0.0.1:${port}${path}`,
-        'provider-all-token',
-        init,
-      );
-      expect(response.status).toBe(expectedStatus);
-      return await response.json();
-    }
-
-    try {
-      expect(
-        ProviderListResponseSchema.parse(
-          await jsonFor('/v1/providers'),
-        ).providers.map((provider) => provider.id),
-      ).toEqual(expect.arrayContaining(['app', 'teams', 'whatsapp']));
-
-      ProviderConnectionListResponseSchema.parse(
-        await jsonFor('/v1/provider-connections'),
-      );
-      ProviderConnectionResponseSchema.parse(
-        await jsonFor(
-          '/v1/provider-connections',
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              appId: 'app-one',
-              providerId: 'app',
-              label: 'App',
-              config: { workspace: 'local' },
-            }),
-          },
-          201,
-        ),
-      );
-      ProviderConnectionResponseSchema.parse(
-        await jsonFor('/v1/provider-connections/providerConnection-1'),
-      );
-      ProviderConnectionResponseSchema.parse(
-        await jsonFor('/v1/provider-connections/providerConnection-1', {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ label: 'App workspace' }),
-        }),
-      );
-      expect(
-        ProviderConnectionResponseSchema.parse(
-          (
-            await jsonFor('/v1/provider-connections/providerConnection-1', {
-              method: 'DELETE',
-            })
-          ).providerConnection,
-        ).status,
-      ).toBe('disabled');
-      ConversationListResponseSchema.parse(
-        await jsonFor(
-          '/v1/provider-connections/providerConnection-1/discover-conversations',
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ limit: 10 }),
-          },
-        ),
-      );
-
-      ConversationListResponseSchema.parse(
-        await jsonFor(
-          '/v1/conversations?providerConnectionId=providerConnection-1',
-        ),
-      );
-      ConversationResponseSchema.parse(
-        await jsonFor('/v1/conversations/conversation-1'),
-      );
-      ConversationThreadListResponseSchema.parse(
-        await jsonFor('/v1/conversations/conversation-1/threads'),
-      );
-      MessageListResponseSchema.parse(
-        await jsonFor(
-          '/v1/conversations/conversation-1/messages?threadId=thread-1&after=message-0&limit=10',
-        ),
-      );
-      expect(domainRepositories.messages.listMessages).toHaveBeenCalledWith({
-        conversationId: 'conversation-1',
-        threadId: 'thread-1',
-        after: 'message-0',
-        limit: 10,
-      });
-
-      AgentConversationBindingListResponseSchema.parse(
-        await jsonFor('/v1/agents/agent-1/conversation-bindings'),
-      );
-      expect(
-        AgentConversationBindingResponseSchema.parse(
-          await jsonFor(
-            '/v1/agents/agent-1/conversation-bindings/conversation-1',
-            {
-              method: 'PUT',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                triggerMode: 'mention',
-                memoryScope: 'conversation',
-              }),
-            },
-          ),
-        ).status,
-      ).toBe('active');
-      expect(
-        AgentConversationBindingResponseSchema.parse(
-          await jsonFor(
-            '/v1/agents/agent-1/conversation-bindings/conversation-1',
-            {
-              method: 'PATCH',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ displayName: 'Engineering Bot' }),
-            },
-          ),
-        ).status,
-      ).toBe('disabled');
-      expect(
-        AgentConversationBindingResponseSchema.parse(
-          (
-            await jsonFor(
-              '/v1/agents/agent-1/conversation-bindings/conversation-1',
-              {
-                method: 'DELETE',
-              },
-            )
-          ).binding,
-        ).permissionPolicyIds,
-      ).toEqual(['policy-1']);
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('shows agent capabilities and conversation-owned policies in agent admin API', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'agents-admin-token',
-        scopes: ['agents:admin', 'conversations:admin'],
-        appId: 'app-one',
-      },
-    ]);
-    const iso = new Date(0).toISOString();
-    domainRepositories.agents.getAgent.mockResolvedValue({
-      id: 'agent-1',
-      appId: 'app-one',
-      name: 'Agent',
-      status: 'active',
-      createdAt: iso,
-      updatedAt: iso,
-    });
-    domainRepositories.providerConnections.listAgentConversationBindings.mockResolvedValue(
-      [
-        {
-          id: 'binding-slack',
-          appId: 'app-one',
-          agentId: 'agent-1',
-          conversationId: 'conversation:slack:C123',
-          status: 'active',
-          requiresTrigger: true,
-        },
-        {
-          id: 'binding-teams',
-          appId: 'app-one',
-          agentId: 'agent-1',
-          conversationId: 'conversation:teams:19:channel@thread.tacv2',
-          status: 'active',
-          requiresTrigger: false,
-        },
-        {
-          id: 'binding-disabled',
-          appId: 'app-one',
-          agentId: 'agent-1',
-          conversationId: 'conversation:slack:C999',
-          status: 'disabled',
-          requiresTrigger: true,
-        },
-      ],
-    );
-    domainRepositories.conversations.getConversation.mockImplementation(
-      async (conversationId: string) => {
-        if (conversationId === 'conversation:slack:C123') {
-          return {
-            id: conversationId,
-            appId: 'app-one',
-            providerConnectionId: 'providerConnection-slack',
-            kind: 'channel',
-            title: 'Sales Slack',
-            status: 'active',
-            createdAt: iso,
-            updatedAt: iso,
-          };
-        }
-        if (conversationId === 'conversation:teams:19:channel@thread.tacv2') {
-          return {
-            id: conversationId,
-            appId: 'app-one',
-            providerConnectionId: 'providerConnection-teams',
-            kind: 'channel',
-            title: 'Sales Teams',
-            status: 'active',
-            createdAt: iso,
-            updatedAt: iso,
-          };
-        }
-        return null;
-      },
-    );
-    domainRepositories.providerConnections.getProviderConnection.mockImplementation(
-      async (providerConnectionId: string) => {
-        if (providerConnectionId === 'providerConnection-slack') {
-          return {
-            id: providerConnectionId,
-            appId: 'app-one',
-            providerId: 'slack',
-            label: 'Slack',
-            status: 'active',
-            config: {},
-            runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
-            createdAt: iso,
-            updatedAt: iso,
-          };
-        }
-        if (providerConnectionId === 'providerConnection-teams') {
-          return {
-            id: providerConnectionId,
-            appId: 'app-one',
-            providerId: 'teams',
-            label: 'Teams',
-            status: 'active',
-            config: {},
-            runtimeSecretRefs: { client_id: 'env:TEAMS_CLIENT_ID' },
-            createdAt: iso,
-            updatedAt: iso,
-          };
-        }
-        return null;
-      },
-    );
-    domainRepositories.conversations.listConversationApprovers.mockImplementation(
-      async (conversationId: string) => {
-        const userIds =
-          conversationId === 'conversation:slack:C123'
-            ? ['UADMIN']
-            : conversationId === 'conversation:teams:19:channel@thread.tacv2'
-              ? ['8:orgid:admin']
-              : [];
-        return userIds.map((externalUserId) => ({
-          id: `approver:${conversationId}:${externalUserId}`,
-          appId: 'app-one',
-          conversationId,
-          externalUserId,
-          createdAt: iso,
-          updatedAt: iso,
-        }));
-      },
-    );
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    try {
-      const adminResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/admin`,
-        'agents-admin-token',
-      );
-      expect(adminResponse.status).toBe(200);
-      expect(await adminResponse.json()).toMatchObject({
-        agent: { id: 'agent-1' },
-        boundConversations: [
-          {
-            conversationId: 'conversation:slack:C123',
-            provider: 'slack',
-            kind: 'channel',
-            displayName: 'Sales Slack',
-            approverUserIds: ['UADMIN'],
-            requiresTrigger: true,
-          },
-          {
-            conversationId: 'conversation:teams:19:channel@thread.tacv2',
-            provider: 'teams',
-            kind: 'channel',
-            displayName: 'Sales Teams',
-            approverUserIds: ['8:orgid:admin'],
-            requiresTrigger: false,
-          },
-        ],
-      });
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('manages conversation approvers without conversation-owned DM access', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'providers-admin-token',
-        scopes: ['conversations:read', 'conversations:admin'],
-        appId: 'app-one',
-      },
-    ]);
-    const iso = new Date(0).toISOString();
-    const providerConnection = {
-      id: 'providerConnection-1',
-      appId: 'app-one',
-      providerId: 'app',
-      label: 'App',
-      status: 'active',
-      config: {},
-      runtimeSecretRefs: {},
-      createdAt: iso,
-      updatedAt: iso,
-    };
-    const conversation = {
-      id: 'conversation-1',
-      appId: 'app-one',
-      providerConnectionId: 'providerConnection-1',
-      externalRef: { kind: 'conversation', value: 'app-conv-1' },
-      kind: 'channel',
-      title: 'engineering',
-      status: 'active',
-      createdAt: iso,
-      updatedAt: iso,
-    };
-    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
-      providerConnection,
-    );
-    domainRepositories.conversations.getConversation.mockResolvedValue(
-      conversation,
-    );
-    domainRepositories.conversations.listParticipantExternalUserIds.mockResolvedValue(
-      ['user-2'],
-    );
-    domainRepositories.conversations.listConversationApprovers.mockResolvedValueOnce(
-      [
-        {
-          id: 'approver-1',
-          appId: 'app-one',
-          conversationId: 'conversation-1',
-          externalUserId: 'user-1',
-          createdAt: iso,
-          updatedAt: iso,
-        },
-      ],
-    );
-    domainRepositories.conversations.replaceConversationApprovers.mockResolvedValue(
-      [
-        {
-          id: 'approver-2',
-          appId: 'app-one',
-          conversationId: 'conversation-1',
-          externalUserId: 'user-2',
-          createdAt: iso,
-          updatedAt: iso,
-        },
-      ],
-    );
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    try {
-      const adminResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/conversations/conversation-1/approvers`,
-        'providers-admin-token',
-      );
-      expect(adminResponse.status).toBe(200);
-      expect(await adminResponse.json()).toMatchObject({
-        approvers: { userIds: ['user-1'] },
-      });
-
-      const updateResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/conversations/conversation-1/approvers`,
-        'providers-admin-token',
-        {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ userIds: ['user-2', 'user-2'] }),
-        },
-      );
-      expect(updateResponse.status).toBe(200);
-      expect(await updateResponse.json()).toEqual({
-        approvers: { userIds: ['user-2'] },
-      });
-      expect(
-        domainRepositories.conversations.replaceConversationApprovers,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({ externalUserIds: ['user-2'] }),
-      );
-      expect(
-        domainRepositories.providerConnections.updateProviderConnection,
+        domainRepositories.providerAccounts.saveProviderAccount,
       ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
@@ -3389,13 +3005,14 @@ describe('control server runtime hardening', () => {
   it.each([
     {
       name: 'providers:admin',
-      path: '/v1/provider-connections',
+      path: '/v1/provider-accounts',
       tokenScopes: ['providers:read'],
       init: {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           appId: 'app-one',
+          agentId: 'agent:one',
           providerId: 'app',
           label: 'App',
         }),
@@ -3412,18 +3029,18 @@ describe('control server runtime hardening', () => {
       tokenScopes: ['conversations:read'],
     },
     {
-      name: 'conversations:read for binding list',
-      path: '/v1/agents/agent-1/conversation-bindings',
+      name: 'conversations:read for install list',
+      path: '/v1/agents/agent-1/conversation-installs',
       tokenScopes: ['agents:admin'],
     },
     {
       name: 'agents:admin',
-      path: '/v1/agents/agent-1/conversation-bindings/conversation-1',
+      path: '/v1/agents/agent-1/conversation-installs/conversation-1',
       tokenScopes: ['providers:read'],
       init: {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ triggerMode: 'mention' }),
+        body: JSON.stringify({ displayName: 'Engineering' }),
       },
     },
     {
@@ -3483,7 +3100,7 @@ describe('control server runtime hardening', () => {
     domainRepositories.conversations.getConversation.mockResolvedValue({
       id: 'conversation-1',
       appId: 'app-one',
-      providerConnectionId: 'providerConnection-1',
+      providerAccountId: 'providerAccount-1',
       kind: 'channel',
       title: 'engineering',
       status: 'active',
@@ -3521,192 +3138,6 @@ describe('control server runtime hardening', () => {
           { id: 'message-1', parts: [{ payload: { text: 'hello' } }] },
         ],
       });
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('enables and disables an agent conversation binding through repository state', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'agents-admin-token',
-        scopes: ['agents:admin', 'conversations:admin'],
-        appId: 'app-one',
-      },
-    ]);
-    domainRepositories.conversations.getConversation.mockResolvedValue({
-      id: 'conversation-1',
-      appId: 'app-one',
-      providerConnectionId: 'providerConnection-1',
-      kind: 'channel',
-      title: 'engineering',
-      status: 'active',
-      createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString(),
-    });
-    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
-      {
-        id: 'providerConnection-1',
-        appId: 'app-one',
-        providerId: 'slack',
-        label: 'Slack',
-        status: 'active',
-        config: {},
-        runtimeSecretRefs: {},
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      },
-    );
-    domainRepositories.providerConnections.disableAgentConversationBinding.mockResolvedValue(
-      {
-        id: 'binding-1',
-        appId: 'app-one',
-        agentId: 'agent-1',
-        providerConnectionId: 'providerConnection-1',
-        conversationId: 'conversation-1',
-        displayName: 'engineering',
-        status: 'disabled',
-        triggerMode: 'mention',
-        requiresTrigger: true,
-        memoryScope: 'conversation',
-        memorySubject: {
-          kind: 'conversation',
-          appId: 'app-one',
-          conversationId: 'conversation-1',
-        },
-        permissionPolicyIds: [],
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      },
-    );
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    try {
-      const enableResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
-        'agents-admin-token',
-        {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            triggerMode: 'mention',
-            memoryScope: 'conversation',
-          }),
-        },
-      );
-      expect(enableResponse.status).toBe(200);
-      expect(
-        domainRepositories.providerConnections.saveAgentConversationBinding,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentId: 'agent-1',
-          conversationId: 'conversation-1',
-          status: 'active',
-          triggerMode: 'mention',
-          memoryScope: 'conversation',
-        }),
-      );
-
-      const disableResponse = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
-        'agents-admin-token',
-        { method: 'DELETE' },
-      );
-      expect(disableResponse.status).toBe(200);
-      expect(
-        domainRepositories.providerConnections.disableAgentConversationBinding,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentId: 'agent-1',
-          conversationId: 'conversation-1',
-        }),
-      );
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it('rejects invalid or missing agent conversation binding updates', async () => {
-    const port = await reservePort();
-    process.env.GANTRY_CONTROL_PORT = String(port);
-    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
-      {
-        kid: 'k',
-        token: 'agents-admin-token',
-        scopes: ['agents:admin', 'conversations:admin'],
-        appId: 'app-one',
-      },
-    ]);
-    domainRepositories.conversations.getConversation.mockResolvedValue({
-      id: 'conversation-1',
-      appId: 'app-one',
-      providerConnectionId: 'providerConnection-1',
-      kind: 'channel',
-      title: 'engineering',
-      status: 'active',
-      createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString(),
-    });
-    domainRepositories.providerConnections.getProviderConnection.mockResolvedValue(
-      {
-        id: 'providerConnection-1',
-        appId: 'app-one',
-        providerId: 'slack',
-        label: 'Slack',
-        status: 'active',
-        config: {},
-        runtimeSecretRefs: {},
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      },
-    );
-    const handle = startControlServer({
-      app: {
-        registerGroup: vi.fn(),
-        queue: { enqueueMessageCheck: vi.fn() },
-      } as any,
-    });
-
-    try {
-      const missingPatch = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
-        'agents-admin-token',
-        {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ displayName: 'Engineering Bot' }),
-        },
-      );
-      expect(missingPatch.status).toBe(404);
-
-      const missingDelete = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
-        'agents-admin-token',
-        { method: 'DELETE' },
-      );
-      expect(missingDelete.status).toBe(404);
-
-      const missingUserSubject = await requestWithRetry(
-        `http://127.0.0.1:${port}/v1/agents/agent-1/conversation-bindings/conversation-1`,
-        'agents-admin-token',
-        {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ memoryScope: 'user' }),
-        },
-      );
-      expect(missingUserSubject.status).toBe(400);
-      expect(
-        domainRepositories.providerConnections.saveAgentConversationBinding,
-      ).not.toHaveBeenCalled();
     } finally {
       await handle.close();
     }

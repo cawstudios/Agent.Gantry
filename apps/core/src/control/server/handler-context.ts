@@ -119,12 +119,14 @@ export type ControlRouteContext = {
   sendConversationIngressProjection?: (input: {
     conversationJid: string;
     threadId: string | null;
+    providerAccountId: string;
     text: string;
   }) => Promise<void>;
   addMessageReaction?: (
     jid: string,
     messageRef: string,
     emoji: string,
+    options?: { providerAccountId?: string },
   ) => Promise<void>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   syncSettingsFromProjection: (appId: AppId) => Promise<void>;

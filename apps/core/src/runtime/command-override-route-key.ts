@@ -19,9 +19,15 @@ export function resolveGroupProcessingRouteContext(
   group: ConversationRoute;
   commandOverrideRouteKey: string;
 } | null {
-  const { chatJid, threadId, agentId } = parseAgentThreadQueueKey(queueJid);
-  const routeKey = makeAgentThreadQueueKey(chatJid, agentId, threadId);
-  const group = deps.getGroup(chatJid, threadId, agentId);
+  const { chatJid, threadId, agentId, providerAccountId } =
+    parseAgentThreadQueueKey(queueJid);
+  const routeKey = makeAgentThreadQueueKey(
+    chatJid,
+    agentId,
+    threadId,
+    providerAccountId,
+  );
+  const group = deps.getGroup(chatJid, threadId, agentId, providerAccountId);
   if (!group) return null;
   return {
     chatJid,
@@ -33,6 +39,7 @@ export function resolveGroupProcessingRouteContext(
     commandOverrideRouteKey: resolveCommandOverrideRouteKey({
       chatJid,
       threadId,
+      providerAccountId,
       queueAgentId: agentId,
       agentFolder: group.folder,
       registeredJids: deps.getRegisteredJids(),
@@ -44,6 +51,7 @@ export function resolveGroupProcessingRouteContext(
 export function resolveCommandOverrideRouteKey(input: {
   chatJid: string;
   threadId?: string;
+  providerAccountId?: string;
   queueAgentId?: string;
   agentFolder: string;
   registeredJids: Set<string>;
@@ -53,13 +61,35 @@ export function resolveCommandOverrideRouteKey(input: {
   const routeAgentId = agentIdForFolder(input.agentFolder);
   const candidates = [
     input.threadId
-      ? makeAgentThreadQueueKey(input.chatJid, routeAgentId, input.threadId)
+      ? makeAgentThreadQueueKey(
+          input.chatJid,
+          routeAgentId,
+          input.threadId,
+          input.providerAccountId,
+        )
       : null,
-    makeAgentThreadQueueKey(input.chatJid, routeAgentId),
+    makeAgentThreadQueueKey(
+      input.chatJid,
+      routeAgentId,
+      null,
+      input.providerAccountId,
+    ),
     input.queueAgentId
-      ? makeAgentThreadQueueKey(input.chatJid, input.queueAgentId)
+      ? makeAgentThreadQueueKey(
+          input.chatJid,
+          input.queueAgentId,
+          null,
+          input.providerAccountId,
+        )
       : null,
-    input.chatJid,
+    input.providerAccountId
+      ? makeAgentThreadQueueKey(
+          input.chatJid,
+          null,
+          null,
+          input.providerAccountId,
+        )
+      : input.chatJid,
   ];
   return (
     candidates.find(

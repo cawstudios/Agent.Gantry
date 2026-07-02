@@ -26,6 +26,7 @@ import {
   agentId,
   appId,
   chatJid,
+  providerAccountId,
   memoryDefaultScope,
   memoryIpcAllowedActions,
   memoryReviewerIsControlApprover,
@@ -70,6 +71,7 @@ export function writeIpcFile(dir: string, data: object): string {
     ...existingContext,
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     ...(threadId ? { threadId } : {}),
     ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
   };

@@ -86,6 +86,7 @@ export function createPrepareSessionArchiveHandler(input: {
         input.executionAdapter,
       ),
       conversationJid: input.chatJid,
+      providerAccountId: input.group.providerAccountId,
       threadId: input.threadId,
       conversationKind: input.group.conversationKind,
       memoryUserId: input.memoryUserId,

@@ -27,6 +27,16 @@ export function resolveExecutionContext(
   );
   if (!executionConversation) return null;
   const executionThreadId = normalizeOptional(job.execution_context?.threadId);
+  const notificationRoutes = resolveJobNotificationRoutes(job);
+  const primaryExecutionRoute = notificationRoutes.find(
+    (route) =>
+      route.conversationJid === executionConversation &&
+      (executionThreadId === undefined ||
+        (route.threadId ?? null) === executionThreadId),
+  );
+  const executionProviderAccountId = normalizeOptional(
+    primaryExecutionRoute?.providerAccountId,
+  );
   const explicitAgentId = normalizeOptional(
     (job.execution_context as Record<string, unknown> | undefined)?.agentId,
   );
@@ -45,6 +55,7 @@ export function resolveExecutionContext(
           executionConversation,
           executionAgentId,
           executionThreadId,
+          executionProviderAccountId,
         ),
         (route) => agentIdForJobWorkspaceKey(route.folder),
       )
@@ -54,10 +65,6 @@ export function resolveExecutionContext(
         executionThreadId,
       );
   if (!group) return null;
-  const notificationRoutes = resolveJobNotificationRoutes(job);
-  const primaryExecutionRoute = notificationRoutes.find(
-    (route) => route.conversationJid === executionConversation,
-  );
   const stopAliasJids = Array.from(
     new Set([
       executionConversation,

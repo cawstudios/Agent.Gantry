@@ -8,7 +8,6 @@ import { parseAgentRelationshipMode } from '../../shared/agent-relationship-mode
 import type {
   AgentAccessPreset,
   RuntimeConfiguredAgent,
-  RuntimeConfiguredAgentBinding,
   RuntimeConfiguredAgentCapability,
   RuntimeConfiguredAgentSourceRef,
   RuntimeConfiguredAgentSources,
@@ -253,116 +252,6 @@ function parseConfiguredAgentSelections(
   });
 }
 
-function parseConfiguredAgentBindings(
-  raw: unknown,
-  pathPrefix: string,
-  fallback: {
-    jid?: unknown;
-    name?: string;
-    trigger?: unknown;
-    addedAt?: unknown;
-    requiresTrigger?: unknown;
-    model?: string;
-  },
-): Record<string, RuntimeConfiguredAgentBinding> {
-  if (raw === undefined) {
-    const jid =
-      fallback.jid === undefined
-        ? ''
-        : parseStringValue(fallback.jid, `${pathPrefix}.primary.jid`);
-    if (!jid) return {};
-    return {
-      primary: {
-        jid,
-        name: fallback.name,
-        trigger: parseStringValue(
-          fallback.trigger,
-          `${pathPrefix}.primary.trigger`,
-          '@Default Agent',
-        ),
-        addedAt: parseStringValue(
-          fallback.addedAt,
-          `${pathPrefix}.primary.added_at`,
-          new Date(0).toISOString(),
-        ),
-        requiresTrigger: parseOptionalBooleanValue(
-          fallback.requiresTrigger,
-          `${pathPrefix}.primary.requires_trigger`,
-          true,
-        ),
-        model: fallback.model,
-      },
-    };
-  }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error(`${pathPrefix} must be a mapping`);
-  }
-  const result: Record<string, RuntimeConfiguredAgentBinding> = {};
-  for (const [bindingId, bindingRaw] of Object.entries(
-    raw as Record<string, unknown>,
-  )) {
-    const bindingPath = `${pathPrefix}.${bindingId}`;
-    if (!/^[A-Za-z0-9_.:@-]{1,96}$/.test(bindingId)) {
-      throw new Error(`${bindingPath} must use a stable binding id`);
-    }
-    if (
-      typeof bindingRaw !== 'object' ||
-      bindingRaw === null ||
-      Array.isArray(bindingRaw)
-    ) {
-      throw new Error(`${bindingPath} must be a mapping`);
-    }
-    const map = bindingRaw as Record<string, unknown>;
-    for (const key of Object.keys(map)) {
-      if (
-        key !== 'jid' &&
-        key !== 'provider' &&
-        key !== 'name' &&
-        key !== 'trigger' &&
-        key !== 'added_at' &&
-        key !== 'requires_trigger' &&
-        key !== 'model'
-      ) {
-        throw new Error(
-          `${bindingPath}.${key} is not supported. Configure jid, provider, name, trigger, added_at, requires_trigger, or model.`,
-        );
-      }
-    }
-    const model =
-      map.model === undefined
-        ? undefined
-        : typeof map.model === 'string' && map.model.trim() === ''
-          ? undefined
-          : parseStringValue(map.model, `${bindingPath}.model`);
-    if (model) {
-      const resolved = resolveModelSelectionForWorkload(model, 'chat');
-      if (!resolved.ok) {
-        throw new Error(`${bindingPath}.model is invalid: ${resolved.message}`);
-      }
-    }
-    result[bindingId] = {
-      jid: parseStringValue(map.jid, `${bindingPath}.jid`),
-      provider:
-        map.provider === undefined
-          ? undefined
-          : parseStringValue(map.provider, `${bindingPath}.provider`),
-      name:
-        map.name === undefined
-          ? undefined
-          : parseStringValue(map.name, `${bindingPath}.name`),
-      trigger: parseStringValue(map.trigger, `${bindingPath}.trigger`),
-      addedAt: parseStringValue(map.added_at, `${bindingPath}.added_at`),
-      requiresTrigger: parseOptionalBooleanValue(
-        map.requires_trigger,
-        `${bindingPath}.requires_trigger`,
-        true,
-      ),
-      model,
-    };
-  }
-  return result;
-}
-
 export function parseConfiguredAgents(
   raw: unknown,
 ): Record<string, RuntimeConfiguredAgent> {
@@ -391,19 +280,14 @@ export function parseConfiguredAgents(
         key !== 'name' &&
         key !== 'persona' &&
         key !== 'relationship_mode' &&
-        key !== 'jid' &&
-        key !== 'trigger' &&
-        key !== 'added_at' &&
-        key !== 'requires_trigger' &&
         key !== 'model' &&
         key !== 'agent_harness' &&
         key !== 'one_time_job_default_model' &&
         key !== 'recurring_job_default_model' &&
-        key !== 'bindings' &&
         key !== 'access'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, model, agent_harness, job model defaults, bindings, or access.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, model, agent_harness, job model defaults, or access. Install agents under conversations.*.installed_agents.`,
         );
       }
     }
@@ -470,21 +354,7 @@ export function parseConfiguredAgents(
       ),
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,
-      bindings: parseConfiguredAgentBindings(
-        map.bindings,
-        `${pathPrefix}.bindings`,
-        {
-          jid: map.jid,
-          name:
-            typeof map.name === 'string' && map.name.trim()
-              ? map.name.trim()
-              : undefined,
-          trigger: map.trigger,
-          addedAt: map.added_at,
-          requiresTrigger: map.requires_trigger,
-          model,
-        },
-      ),
+      bindings: {},
       ...parseConfiguredAgentAccess(map.access, `${pathPrefix}.access`),
     };
   }

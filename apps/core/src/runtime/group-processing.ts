@@ -14,7 +14,10 @@ import { finalizeGroupAgentUserVisibleOutput } from './group-output-finalization
 import { formatMessages } from '../messaging/router.js';
 import type { AgentOutput } from './agent-spawn.js';
 import { handleSessionCommand } from '../session/session-commands.js';
-import type { GroupProcessingDeps } from './group-processing-types.js';
+import type {
+  GroupProcessOptions,
+  GroupProcessingDeps,
+} from './group-processing-types.js';
 import { getGroupMemoryStatus } from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { settleDeliveryAttempt } from '../jobs/delivery.js';
@@ -66,26 +69,6 @@ type ActiveTurnUiCleanup = {
   token: symbol;
   cancel: () => void | Promise<void>;
 };
-type GroupProcessOptions = {
-  queued?: boolean;
-  memoryContext?: {
-    userId?: string;
-    source?: 'message' | 'command';
-    threadId?: string | null;
-    recallQuery?: string;
-  };
-  existingRunId?: string;
-  existingRunLeaseToken?: string;
-  existingRunLeaseWorkerInstanceId?: string;
-  existingRunLeaseFencingVersion?: number;
-  finalRetry?: boolean;
-  onRunResult?: (result: GroupAgentRunResult) => void;
-  onFirstProgress?: (input: {
-    jid: string;
-    messageRef: string;
-  }) => Promise<void> | void;
-  onLiveStopActionToken?: (token: string) => Promise<void> | void;
-};
 const activeTurnUiCleanupByQueue = new Map<string, ActiveTurnUiCleanup>();
 export function createGroupProcessor(deps: GroupProcessingDeps) {
   const collectSessionMemory = deps.collectSessionMemory;
@@ -102,10 +85,12 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
   ): Promise<boolean> {
     const routeContext = resolveGroupProcessingRouteContext(deps, queueJid);
     if (!routeContext) return true;
-    const { chatJid, threadId, agentId, routeKey, turnAppId, group } =
-      routeContext;
+    const { chatJid, threadId, turnAppId, group } = routeContext;
     const { commandOverrideRouteKey } = routeContext;
-    if (!deps.channelRuntime.hasChannel(chatJid)) {
+    const channelAccount = group.providerAccountId
+      ? { providerAccountId: group.providerAccountId }
+      : undefined;
+    if (!deps.channelRuntime.hasChannel(chatJid, channelAccount)) {
       logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
       return true;
     }
@@ -118,7 +103,12 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         sinceCursor: await deps.getCursor(queueJid),
         pageSize: config.MESSAGE_FETCH_PAGE_SIZE,
         maxMessages: config.MAX_MESSAGES_PER_PROMPT,
-        options: scopedQueue ? { threadId: threadId ?? null } : undefined,
+        options: {
+          ...(scopedQueue ? { threadId: threadId ?? null } : {}),
+          ...(group.providerAccountId
+            ? { providerAccountId: group.providerAccountId }
+            : {}),
+        },
       });
     if (missedMessages.length === 0) return true;
     const latestMessage = missedMessages[missedMessages.length - 1];
@@ -146,11 +136,16 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let progressGeneration = streamGeneration;
     const turnOptions = createGroupTurnOptionBuilders({
       activeThreadId,
+      providerAccountId: group.providerAccountId,
       streamGeneration: () => streamGeneration,
       progressGeneration: () => progressGeneration,
     });
     const { buildMessageOptions, buildStreamingOptions, buildProgressOptions } =
       turnOptions;
+    const setTurnTyping = (isTyping: boolean) =>
+      channelAccount
+        ? deps.channelRuntime.setTyping(chatJid, isTyping, channelAccount)
+        : deps.channelRuntime.setTyping(chatJid, isTyping);
     const sendMessageToChannel = async (
       text: string,
       options?: MessageSendOptions,
@@ -188,7 +183,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       deps: {
         sendMessage: (text, options) =>
           sendMessageToChannel(text, buildMessageOptions(options?.threadId)),
-        setTyping: (typing) => deps.channelRuntime.setTyping(chatJid, typing),
+        setTyping: setTurnTyping,
         runAgent: (prompt, onOutput, commandOptions) =>
           runAgent(group, prompt, chatJid, queueJid, onOutput, {
             ...commandOptions,
@@ -253,6 +248,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           deps.clearSession(group.folder, activeThreadId, {
             appId: turnAppId,
             conversationJid: chatJid,
+            providerAccountId: group.providerAccountId,
             conversationKind: group.conversationKind,
             memoryUserId,
           }),
@@ -325,6 +321,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         groupName: group.name,
         agentFolder: group.folder,
         chatJid,
+        providerAccountId: group.providerAccountId,
         activeThreadId,
         latestMessage,
         currentMessages: missedMessages,
@@ -342,6 +339,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       chatJid,
       groupName: group.name,
       channelRuntime: deps.channelRuntime,
+      providerAccountId: group.providerAccountId,
       logger,
     });
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -359,7 +357,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let typingActive = false;
     const setTypingState = (isTyping: boolean) => (
       (typingActive = isTyping),
-      deps.channelRuntime.setTyping(chatJid, isTyping)
+      setTurnTyping(isTyping)
     );
     await setTypingState(true);
     let startedAt = currentTimeMs();
@@ -384,7 +382,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let backgroundDemoteTimer: ReturnType<typeof setTimeout> | null = null;
     let backgroundDemoted = false;
     const turnUiToken = Symbol(queueJid);
-    const supportsProgress = deps.channelRuntime.supportsProgress(chatJid);
+    const supportsProgress = deps.channelRuntime.supportsProgress(
+      chatJid,
+      channelAccount,
+    );
     const sendControlOnlyProgress = async () => {
       if (!supportsProgress) return;
       await sendProgressToChannel('', {
@@ -435,11 +436,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       resetActiveElapsed();
       typingActive = true;
       progressHeartbeat?.resume();
-      void deps.channelRuntime
-        .setTyping(chatJid, true)
-        .catch((err) =>
-          logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-        );
+      void setTurnTyping(true).catch((err) =>
+        logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+      );
       const progressReady = sendRunningProgress().finally(() => {
         if (userVisibleTurnProgressReady === progressReady) {
           userVisibleTurnProgressReady = null;
@@ -488,6 +487,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       getLastAgentProgressAt: () => lastAgentProgressAt,
       getElapsedMs: activeElapsedMs,
       chatJid,
+      providerAccountId: group.providerAccountId,
       groupName: group.name,
       channelRuntime: deps.channelRuntime,
       buildProgressOptions,
@@ -525,8 +525,10 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     let sawTerminalDeliveryFailure = false;
     let awaitingResponseReceipt = false;
     let outputCallbackError: unknown;
-    const supportsStreamingChunks =
-      deps.channelRuntime.supportsStreaming(chatJid);
+    const supportsStreamingChunks = deps.channelRuntime.supportsStreaming(
+      chatJid,
+      channelAccount,
+    );
     const startNextStreamingMessage = () => {
       progressGeneration = streamGeneration = streamingGenerationCounter += 1;
       activeGenerationHasOutput = false;

@@ -289,20 +289,21 @@ const todoUpdateHandler: TaskHandler = async (context) => {
   const threadId = context.data.authThreadId || context.data.threadId || null;
   if (context.deps.renderAgentTodo) {
     await context.deps
-      .renderAgentTodo(conversationId, {
-        summary,
-        items,
-        threadId,
-        updatedAt,
-        ...(context.data.liveStopActionToken
-          ? {
-              stop: {
-                label: 'Stop',
-                actionToken: context.data.liveStopActionToken,
-              },
-            }
-          : {}),
-      })
+      .renderAgentTodo(
+        conversationId,
+        {
+          summary,
+          items,
+          threadId,
+          updatedAt,
+          stop: context.data.liveStopActionToken
+            ? { label: 'Stop', actionToken: context.data.liveStopActionToken }
+            : undefined,
+        },
+        context.data.providerAccountId
+          ? { providerAccountId: context.data.providerAccountId }
+          : undefined,
+      )
       .catch((err) => {
         logger.debug(
           { err, conversationId },

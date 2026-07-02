@@ -14,10 +14,12 @@ import {
 } from '../config/settings/runtime-home.js';
 import {
   allocateDefaultAgentFolder,
+  DEFAULT_AGENT_FOLDER,
   defaultTriggerForAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
 import {
+  ensureConfiguredAgent,
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
@@ -30,6 +32,7 @@ import {
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
+import { providerAccountIdForAgent } from './provider-utils.js';
 
 export interface SlackTokenValidation {
   ok: boolean;
@@ -578,23 +581,15 @@ export async function runSlackConnectCommand(
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   settings.providers.slack.enabled = true;
-  const providerConnectionId =
-    settings.providers.slack.defaultConnection || 'slack_default';
-  settings.providers.slack.defaultConnection = providerConnectionId;
-  settings.providerConnections[providerConnectionId] = {
-    provider: 'slack',
-    label:
-      settings.providerConnections[providerConnectionId]?.label ||
-      'Slack Default',
-    runtimeSecretRefs: {
-      ...(settings.providerConnections[providerConnectionId]
-        ?.runtimeSecretRefs || {}),
-      bot_token: botSecret.ref,
-      app_token: appSecret.ref,
-    },
-  };
+  let providerAccountId = 'slack_default';
+  const providerAgentId = registeredFolder || DEFAULT_AGENT_FOLDER;
+  ensureConfiguredAgent(settings, {
+    agentId: providerAgentId,
+    agentName: conversationRouteName || settings.agent.name,
+    agentFolder: providerAgentId,
+  });
   if (registeredFolder) {
-    ensureConfiguredConversationBinding(settings, {
+    const binding = ensureConfiguredConversationBinding(settings, {
       agentId: registeredFolder,
       agentName: conversationRouteName || settings.agent.name,
       agentFolder: registeredFolder,
@@ -605,7 +600,26 @@ export async function runSlackConnectCommand(
       requiresTrigger: true,
       approverIds,
     });
+    providerAccountId = binding.providerConnectionId;
+  } else {
+    providerAccountId = providerAccountIdForAgent(settings, {
+      providerId: 'slack',
+      agentId: providerAgentId,
+      defaultAccountId: providerAccountId,
+    });
   }
+  settings.providerAccounts[providerAccountId] = {
+    agentId: providerAgentId,
+    provider: 'slack',
+    label:
+      settings.providerAccounts[providerAccountId]?.label || 'Slack Default',
+    runtimeSecretRefs: {
+      ...(settings.providerAccounts[providerAccountId]?.runtimeSecretRefs ||
+        {}),
+      bot_token: botSecret.ref,
+      app_token: appSecret.ref,
+    },
+  };
   await writeDesiredRuntimeSettings({
     runtimeHome,
     settings,

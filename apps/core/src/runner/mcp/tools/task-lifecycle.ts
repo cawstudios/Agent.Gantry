@@ -11,6 +11,7 @@ import {
   TASKS_DIR,
   agentId,
   appId,
+  providerAccountId,
   threadId,
 } from '../context.js';
 import { formatTaskFailureLines } from '../formatting.js';
@@ -38,6 +39,7 @@ async function submitTaskLifecycleRequest(input: {
     taskId,
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     runHandle: process.env.GANTRY_AGENT_RUN_HANDLE || undefined,
     ...(jobId ? { jobId } : {}),
     ...(jobRunId ? { runId: jobRunId } : {}),

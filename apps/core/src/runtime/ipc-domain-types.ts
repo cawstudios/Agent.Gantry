@@ -62,10 +62,15 @@ export interface IpcDeps {
   requestUserAnswer: (
     request: UserQuestionRequest,
   ) => Promise<UserQuestionResponse>;
-  renderAgentTodo?: (jid: string, render: AgentTodoRender) => Promise<boolean>;
+  renderAgentTodo?: (
+    jid: string,
+    render: AgentTodoRender,
+    options?: { providerAccountId?: string },
+  ) => Promise<boolean>;
   renderRichInteraction?: (
     jid: string,
     request: RichInteractionRequest,
+    options?: { providerAccountId?: string },
   ) => Promise<boolean>;
   mcpHostnameLookup?: HostnameLookup;
   opsRepository: RuntimeJobRepository;

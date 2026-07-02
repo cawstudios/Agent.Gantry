@@ -382,6 +382,7 @@ describe('createGroupProcessor', () => {
         'sl:C123',
         '1700.1',
         'agent:triage',
+        undefined,
       );
     });
 
@@ -4468,7 +4469,7 @@ describe('createGroupProcessor', () => {
         'group1@g.us',
         'cursor-ts-123',
         50,
-        undefined,
+        {},
       );
     });
 
@@ -4676,6 +4677,7 @@ describe('createGroupProcessor', () => {
     it('persists provider hydration and rebuilds incomplete selected conversation context', async () => {
       const group = makeGroup({
         folder: 'my-group',
+        providerAccountId: 'telegram_account_2',
         requiresTrigger: false,
         conversationKind: 'channel',
       });
@@ -4730,17 +4732,24 @@ describe('createGroupProcessor', () => {
 
       expect(channel.hydrateConversationContext).toHaveBeenCalledWith({
         conversationJid: 'tg:-100123',
+        providerAccountId: 'telegram_account_2',
         threadId: '42',
         latestMessage: current,
         limits: { channelMessages: 30, threadMessages: 50 },
       });
       expect((deps.opsRepository as any).storeMessage).toHaveBeenNthCalledWith(
         1,
-        hydratedRoot,
+        expect.objectContaining({
+          id: hydratedRoot.id,
+          providerAccountId: 'telegram_account_2',
+        }),
       );
       expect((deps.opsRepository as any).storeMessage).toHaveBeenNthCalledWith(
         2,
-        hydratedReply,
+        expect.objectContaining({
+          id: hydratedReply.id,
+          providerAccountId: 'telegram_account_2',
+        }),
       );
       expect(
         (deps.opsRepository as any).getFirstThreadMessages.mock

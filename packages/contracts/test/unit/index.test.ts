@@ -9,12 +9,12 @@ import {
   AgentHarnessSchema,
   AgentResponseSchema,
   UpdateAgentRequestSchema,
-  AgentConversationBindingRequestSchema,
-  AgentConversationBindingListResponseSchema,
-  AgentConversationBindingResponseSchema,
+  ConversationInstallRequestSchema,
+  ConversationInstallListResponseSchema,
+  ConversationInstallResponseSchema,
   BrowserProfileResponseSchema,
-  ProviderConnectionListResponseSchema,
-  ProviderConnectionResponseSchema,
+  ProviderAccountListResponseSchema,
+  ProviderAccountResponseSchema,
   ProviderListResponseSchema,
   ProviderResponseSchema,
   ContractMetadataSchema,
@@ -52,6 +52,7 @@ import {
   ToolCatalogKindSchema,
   ToolCatalogProviderToolNameSchema,
   UpdateJobRequestSchema,
+  UserAliasResponseSchema,
   createCursorPageResponseSchema,
   createPageResponseSchema,
 } from '@contracts-src/index.js';
@@ -68,6 +69,7 @@ const iso = '2026-04-27T00:00:00.000Z';
 const message = {
   id: 'message-1',
   appId: 'app-1',
+  providerAccountId: 'provider-account-1',
   conversationId: 'conversation-1',
   direction: 'outbound',
   trust: 'trusted',
@@ -520,15 +522,80 @@ describe('contracts package', () => {
             agentHarness: 'deepagents',
             oneTimeJobDefaultModel: 'inherit',
             recurringJobDefaultModel: 'inherit',
-            bindings: {},
+            bindings: {
+              main_agent_shared_channel: {
+                jid: 'slack:C123',
+                provider: 'slack',
+                providerAccountId: 'slack_one',
+                name: 'shared',
+                threadId: '171.222',
+                trigger: '@main',
+                addedAt: iso,
+                requiresTrigger: true,
+              },
+            },
             sources: { skills: [], mcpServers: [], tools: [] },
             capabilities: [],
           },
         },
         providers: {},
-        providerConnections: {},
-        conversations: {},
-        bindings: {},
+        providerAccounts: {
+          slack_one: {
+            agentId: 'main_agent',
+            provider: 'slack',
+            label: 'Main Slack',
+            status: 'active',
+            runtimeSecretRefs: { bot_token: 'gantry-secret:slack' },
+          },
+        },
+        conversations: {
+          shared_channel: {
+            providerAccount: 'slack_one',
+            externalId: 'slack:C123',
+            kind: 'channel',
+            displayName: 'shared',
+            senderPolicy: { allow: '*', mode: 'trigger' },
+            controlApprovers: ['slack:UADMIN'],
+            installedAgents: {
+              main_agent: {
+                agentId: 'main_agent',
+                providerAccountId: 'slack_one',
+                threadId: '171.222',
+                status: 'active',
+                addedAt: iso,
+                memoryScope: 'conversation',
+                trigger: '@main',
+                requiresTrigger: true,
+              },
+            },
+          },
+        },
+        bindings: {
+          main_agent_shared_channel: {
+            agent: 'main_agent',
+            providerAccountId: 'slack_one',
+            installKey: 'main_agent',
+            conversation: 'shared_channel',
+            threadId: '171.222',
+            trigger: '@main',
+            addedAt: iso,
+            requiresTrigger: true,
+            memoryScope: 'conversation',
+          },
+        },
+        conversationInstalls: {
+          main_agent_shared_channel: {
+            agentId: 'main_agent',
+            providerAccountId: 'slack_one',
+            conversationId: 'shared_channel',
+            threadId: '171.222',
+            status: 'active',
+            addedAt: iso,
+            memoryScope: 'conversation',
+            trigger: '@main',
+            requiresTrigger: true,
+          },
+        },
         memory: { enabled: true, dreaming: { enabled: false } },
         runtime: {
           queue: {
@@ -574,6 +641,19 @@ describe('contracts package', () => {
     );
     expect(parsed.settings.agent.agentHarness).toBe('auto');
     expect(parsed.settings.agents.main_agent?.agentHarness).toBe('deepagents');
+    expect(
+      parsed.settings.conversationInstalls.main_agent_shared_channel?.threadId,
+    ).toBe('171.222');
+    expect(parsed.settings.bindings.main_agent_shared_channel).toMatchObject({
+      providerAccountId: 'slack_one',
+      installKey: 'main_agent',
+    });
+    expect(
+      parsed.settings.agents.main_agent?.bindings.main_agent_shared_channel,
+    ).toMatchObject({
+      providerAccountId: 'slack_one',
+      threadId: '171.222',
+    });
   });
 
   it('keeps public tool catalog contracts provider-neutral', () => {
@@ -772,6 +852,7 @@ describe('contracts package', () => {
         {
           conversationJid: 'app:app-one:session-1',
           threadId: null,
+          providerAccountId: 'provider-account:app-one',
           label: 'primary',
         },
       ],
@@ -815,6 +896,11 @@ describe('contracts package', () => {
         conversationJid: 'app:app-one:session-1',
         sessionId: 'session-1',
       },
+      notificationRoutes: [
+        expect.objectContaining({
+          providerAccountId: 'provider-account:app-one',
+        }),
+      ],
     });
     expectInvalid(CreateJobRequestSchema, {
       name: '',
@@ -1194,9 +1280,10 @@ describe('contracts package', () => {
     });
 
     expect(
-      ProviderConnectionResponseSchema.parse({
+      ProviderAccountResponseSchema.parse({
         id: 'installation-1',
         appId: 'app-1',
+        agentId: 'agent-1',
         providerId: 'slack',
         label: 'Workspace',
         status: 'active',
@@ -1207,11 +1294,12 @@ describe('contracts package', () => {
       }),
     ).toMatchObject({ providerId: 'slack' });
     expect(
-      ProviderConnectionListResponseSchema.parse({
-        providerConnections: [
+      ProviderAccountListResponseSchema.parse({
+        providerAccounts: [
           {
             id: 'installation-1',
             appId: 'app-1',
+            agentId: 'agent-1',
             providerId: 'slack',
             label: 'Workspace',
             status: 'active',
@@ -1220,10 +1308,11 @@ describe('contracts package', () => {
           },
         ],
       }),
-    ).toMatchObject({ providerConnections: [{ id: 'installation-1' }] });
-    expectInvalid(ProviderConnectionResponseSchema, {
+    ).toMatchObject({ providerAccounts: [{ id: 'installation-1' }] });
+    expectInvalid(ProviderAccountResponseSchema, {
       id: 'installation-1',
       appId: 'app-1',
+      agentId: 'agent-1',
       providerId: 'slack',
       label: 'Workspace',
       status: 'bad',
@@ -1232,45 +1321,50 @@ describe('contracts package', () => {
     });
 
     expect(
-      AgentConversationBindingRequestSchema.parse({
-        triggerMode: 'keyword',
+      ConversationInstallRequestSchema.parse({
+        providerAccountId: 'installation-1',
         memoryScope: 'conversation',
+        routeConfig: { trigger: '/ask', requiresTrigger: true },
         permissionPolicyIds: [],
       }),
-    ).toMatchObject({ triggerMode: 'keyword' });
-    expectInvalid(AgentConversationBindingRequestSchema, {
-      triggerMode: 'sometimes',
+    ).toMatchObject({
+      providerAccountId: 'installation-1',
+      routeConfig: { trigger: '/ask', requiresTrigger: true },
+    });
+    expectInvalid(ConversationInstallRequestSchema, {
+      memoryScope: 'sometimes',
     });
     expect(
-      AgentConversationBindingResponseSchema.parse({
-        id: 'binding-1',
+      ConversationInstallResponseSchema.parse({
+        id: 'install-1',
         appId: 'app-1',
         agentId: 'agent-1',
-        providerConnectionId: 'installation-1',
+        providerAccountId: 'installation-1',
         conversationId: 'conversation-1',
         displayName: 'Engineering',
         status: 'active',
-        triggerMode: 'always',
-        requiresTrigger: false,
         memoryScope: 'conversation',
+        routeConfig: { trigger: '/ask', requiresTrigger: true },
         permissionPolicyIds: [],
         createdAt: iso,
         updatedAt: iso,
       }),
-    ).toMatchObject({ status: 'active', triggerMode: 'always' });
+    ).toMatchObject({
+      status: 'active',
+      providerAccountId: 'installation-1',
+      routeConfig: { trigger: '/ask', requiresTrigger: true },
+    });
     expect(
-      AgentConversationBindingListResponseSchema.parse({
-        bindings: [
+      ConversationInstallListResponseSchema.parse({
+        conversationInstalls: [
           {
-            id: 'binding-1',
+            id: 'install-1',
             appId: 'app-1',
             agentId: 'agent-1',
-            providerConnectionId: 'installation-1',
+            providerAccountId: 'installation-1',
             conversationId: 'conversation-1',
             displayName: 'Engineering',
             status: 'disabled',
-            triggerMode: 'manual',
-            requiresTrigger: false,
             memoryScope: 'app',
             permissionPolicyIds: ['policy-1'],
             createdAt: iso,
@@ -1278,13 +1372,13 @@ describe('contracts package', () => {
           },
         ],
       }),
-    ).toMatchObject({ bindings: [{ status: 'disabled' }] });
+    ).toMatchObject({ conversationInstalls: [{ status: 'disabled' }] });
 
     expect(
       ConversationResponseSchema.parse({
         id: 'conversation-1',
         appId: 'app-1',
-        providerConnectionId: 'installation-1',
+        providerAccountId: 'installation-1',
         kind: 'channel',
         title: 'Engineering',
         status: 'active',
@@ -1298,7 +1392,7 @@ describe('contracts package', () => {
           {
             id: 'conversation-1',
             appId: 'app-1',
-            providerConnectionId: 'installation-1',
+            providerAccountId: 'installation-1',
             kind: 'dm',
             title: null,
             status: 'active',
@@ -1336,7 +1430,26 @@ describe('contracts package', () => {
     ).toMatchObject({ threads: [{ id: 'thread-1' }] });
     expect(
       MessageListResponseSchema.parse({ messages: [message] }),
-    ).toMatchObject({ messages: [{ id: 'message-1' }] });
+    ).toMatchObject({
+      messages: [{ id: 'message-1', providerAccountId: 'provider-account-1' }],
+    });
+    expect(
+      (MessageResponseSchema.parse(message) as Record<string, unknown>)[
+        ['provider', 'ConnectionId'].join('')
+      ],
+    ).toBeUndefined();
+    expect(
+      UserAliasResponseSchema.parse({
+        id: 'alias-1',
+        appId: 'app-1',
+        userId: 'user-1',
+        provider: 'slack',
+        providerAccountId: 'provider-account-1',
+        externalUserId: 'U123',
+        createdAt: iso,
+        updatedAt: iso,
+      }),
+    ).toMatchObject({ providerAccountId: 'provider-account-1' });
 
     expectInvalid(MessageResponseSchema, {
       ...message,

@@ -182,11 +182,12 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
     providers: Object.fromEntries(
       listChannelProviders().map((provider) => [
         provider.id,
-        { enabled: false, defaultConnection: undefined },
+        { enabled: false },
       ]),
     ),
-    providerConnections: {},
+    providerAccounts: {},
     conversations: {},
+    conversationInstalls: {},
     bindings: {},
     agents: {},
     storage,

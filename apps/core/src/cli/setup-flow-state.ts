@@ -300,8 +300,7 @@ function firstConversationApprovers(
   providerId: string,
 ): string[] {
   for (const conversation of Object.values(settings.conversations)) {
-    const connection =
-      settings.providerConnections[conversation.providerConnection];
+    const connection = settings.providerAccounts[conversation.providerAccount];
     if (connection?.provider === providerId) {
       return conversation.controlApprovers;
     }

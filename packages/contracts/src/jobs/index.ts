@@ -114,6 +114,7 @@ export const JobNotificationRouteSchema = z
   .object({
     conversationJid: z.string(),
     threadId: z.string().nullable(),
+    providerAccountId: z.string().nullable().optional(),
     label: z.string().min(1),
   })
   .strict();

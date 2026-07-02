@@ -62,8 +62,7 @@ export function findConversationIdForAgent(
     if (binding.agent !== agentId) continue;
     const conversation = settings.conversations[binding.conversation];
     if (!conversation) continue;
-    const connection =
-      settings.providerConnections[conversation.providerConnection];
+    const connection = settings.providerAccounts[conversation.providerAccount];
     if (connection?.provider === providerId) return binding.conversation;
   }
   return null;
@@ -76,8 +75,8 @@ export function conversationIdsForProvider(
   return Object.entries(settings.conversations)
     .filter(
       ([, conversation]) =>
-        settings.providerConnections[conversation.providerConnection]
-          ?.provider === providerId,
+        settings.providerAccounts[conversation.providerAccount]?.provider ===
+        providerId,
     )
     .map(([conversationId]) => conversationId);
 }
@@ -105,17 +104,23 @@ export async function pruneAgentSenderPolicyOverride(
       const conversation = settings.conversations[binding.conversation];
       if (!conversation) continue;
       const connection =
-        settings.providerConnections[conversation.providerConnection];
+        settings.providerAccounts[conversation.providerAccount];
       if (connection?.provider !== channel) continue;
       if (!agentBinding?.jid && conversation.externalId !== externalId) {
         continue;
       }
       delete settings.bindings[bindingId];
       delete settings.agents[folder]?.bindings[bindingId];
-      const stillReferenced = Object.values(settings.bindings).some(
-        (candidate) => candidate.conversation === binding.conversation,
-      );
-      if (!stillReferenced) {
+      const installKey =
+        binding.installKey ??
+        Object.entries(conversation.installedAgents).find(
+          ([, install]) =>
+            install.agentId === folder &&
+            (install.threadId ?? '') === (binding.threadId ?? ''),
+        )?.[0] ??
+        folder;
+      delete conversation.installedAgents[installKey];
+      if (Object.keys(conversation.installedAgents).length === 0) {
         delete settings.conversations[binding.conversation];
       }
       pruned = true;

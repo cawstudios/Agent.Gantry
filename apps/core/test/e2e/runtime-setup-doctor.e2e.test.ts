@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ensureConfiguredAgent } from '@core/config/settings/runtime-settings.js';
+
 import { createRuntimeHomeFixture } from '../harness/runtime-home-fixture.js';
 
 const fixtures: Array<{ cleanup(): void }> = [];
@@ -21,14 +23,36 @@ function makeFixture() {
     mutateSettings(settings) {
       settings.providers.slack = {
         enabled: true,
-        defaultConnection: 'slack_default',
       };
-      settings.providerConnections.slack_default = {
+      ensureConfiguredAgent(settings, {
+        agentId: 'main_agent',
+        agentName: 'Main Agent',
+      });
+      settings.providerAccounts.slack_default = {
+        agentId: 'main_agent',
         provider: 'slack',
         label: 'Test Slack Workspace',
         runtimeSecretRefs: {
           app_token: 'SLACK_APP_TOKEN',
           bot_token: 'SLACK_BOT_TOKEN',
+        },
+      };
+      settings.conversations.slack_test_channel = {
+        providerConnection: 'slack_default',
+        providerAccount: 'slack_default',
+        externalId: 'slack:C0123456789',
+        kind: 'channel',
+        displayName: 'test-channel',
+        senderPolicy: { allow: '*', mode: 'trigger' },
+        controlApprovers: ['slack:UADMIN'],
+        installedAgents: {
+          main_agent: {
+            agentId: 'main_agent',
+            providerAccountId: 'slack_default',
+            status: 'active',
+            addedAt: new Date(0).toISOString(),
+            memoryScope: 'conversation',
+          },
         },
       };
       settings.credentialBroker.mode = 'gantry';

@@ -127,28 +127,34 @@ function createTestOpts(
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
+    providerAccountId: 'telegram_default',
     conversationRoutes: vi.fn(() => ({
       'tg:100200300': {
         name: 'Test Group',
         folder: 'test-group',
         trigger: '@Andy',
         added_at: '2024-01-01T00:00:00.000Z',
+        providerAccountId: 'telegram_default',
       },
     })),
     runtimeSettings: vi.fn(() => ({
       providers: {
         telegram: { enabled: true },
       },
-      providerConnections: {
+      providerAccounts: {
         telegram_default: {
+          agentId: 'whatsapp_main',
           provider: 'telegram',
           label: 'Telegram',
-          runtimeSecretRefs: {},
+          runtimeSecretRefs: {
+            bot_token: 'env:TELEGRAM_BOT_TOKEN',
+          },
         },
       },
       conversations: {
         whatsapp_main_conversation: {
           providerConnection: 'telegram_default',
+          providerAccount: 'telegram_default',
           externalId: '100200300',
           kind: 'group',
           displayName: 'Test Group',
@@ -509,6 +515,7 @@ describe('TelegramChannel', () => {
         'Test Group',
         'telegram',
         true,
+        { providerAccountId: 'telegram_default' },
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
@@ -531,6 +538,7 @@ describe('TelegramChannel', () => {
             folder: 'test-group',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -609,6 +617,7 @@ describe('TelegramChannel', () => {
         'Test Group',
         'telegram',
         true,
+        { providerAccountId: 'telegram_default' },
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
@@ -632,6 +641,7 @@ describe('TelegramChannel', () => {
         'Ravi',
         'telegram',
         false,
+        { providerAccountId: 'telegram_default' },
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:999999',
@@ -749,6 +759,7 @@ describe('TelegramChannel', () => {
         'Alice', // Private chats use sender name
         'telegram',
         false,
+        { providerAccountId: 'telegram_default' },
       );
     });
 
@@ -770,6 +781,7 @@ describe('TelegramChannel', () => {
         'Project Team',
         'telegram',
         true,
+        { providerAccountId: 'telegram_default' },
       );
     });
 
@@ -1041,6 +1053,7 @@ describe('TelegramChannel', () => {
             folder: 'test-group',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -1063,6 +1076,33 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('ignores Telegram media routes from another provider account', async () => {
+      const opts = createTestOpts({
+        conversationRoutes: vi.fn(() => ({
+          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage')]: {
+            name: 'Other Account Group',
+            folder: 'other-account',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_other',
+          },
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await triggerMediaMessage(
+        'message:photo',
+        createMediaCtx({
+          extra: { photo: [{ file_id: 'photo_id', width: 800 }] },
+        }),
+      );
+      await flushPromises();
+
+      expect(currentBot().api.getFile).not.toHaveBeenCalled();
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
     it('does not download media when multiple matching group route folders exist', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
@@ -1071,12 +1111,14 @@ describe('TelegramChannel', () => {
             folder: 'test-triage',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
           [makeAgentThreadQueueKey('tg:100200300', 'agent:ops')]: {
             name: 'Ops',
             folder: 'test-ops',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -1118,12 +1160,14 @@ describe('TelegramChannel', () => {
             folder: 'test-triage',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
           [makeAgentThreadQueueKey('tg:100200300', 'agent:ops')]: {
             name: 'Ops',
             folder: 'test-ops',
             trigger: '@Ops',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -1168,12 +1212,14 @@ describe('TelegramChannel', () => {
             folder: 'test-triage',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
           [makeAgentThreadQueueKey('tg:100200300', 'agent:ops', '77')]: {
             name: 'Ops',
             folder: 'test-ops',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -1219,6 +1265,7 @@ describe('TelegramChannel', () => {
             folder: 'test-topic',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -1245,6 +1292,7 @@ describe('TelegramChannel', () => {
             folder: 'test-topic',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            providerAccountId: 'telegram_default',
           },
         })),
       });
@@ -1637,6 +1685,7 @@ describe('TelegramChannel', () => {
         expect.objectContaining({
           chat_jid: 'tg:999999',
           provider: 'telegram',
+          providerAccountId: 'telegram_default',
           sender: '99001',
           content: '[Photo]',
         }),
@@ -2034,6 +2083,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessageAction).toHaveBeenCalledWith({
         kind: 'scheduler_run_now',
         conversationJid: 'tg:100200300',
+        providerAccountId: 'telegram_default',
         threadId: '42',
         userId: '111',
         jobId: 'job-1',
@@ -2076,6 +2126,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessageAction).toHaveBeenCalledWith({
         kind: 'live_turn_stop',
         conversationJid: 'tg:100200300',
+        providerAccountId: 'telegram_default',
         threadId: '42',
         userId: '111',
         actionToken: 'token-1',
@@ -3565,6 +3616,98 @@ describe('TelegramChannel', () => {
       await decisionPromise;
     });
 
+    it('sends oversized permission full view files only to this Telegram provider account approvers', async () => {
+      const base = createTestOpts().runtimeSettings!();
+      const opts = createTestOpts({
+        runtimeSettings: vi.fn(() => ({
+          ...base,
+          providerAccounts: {
+            ...base.providerAccounts,
+            telegram_other: {
+              ...base.providerAccounts.telegram_default,
+              label: 'Telegram Other',
+            },
+          },
+          conversations: {
+            other_account_conversation: {
+              ...base.conversations.whatsapp_main_conversation,
+              providerConnection: 'telegram_other',
+              providerAccount: 'telegram_other',
+              externalId: '-100200300',
+              controlApprovers: ['999'],
+            },
+            this_account_conversation: {
+              ...base.conversations.whatsapp_main_conversation,
+              providerConnection: 'telegram_default',
+              providerAccount: 'telegram_default',
+              externalId: '-100200300',
+              controlApprovers: ['12345'],
+            },
+          },
+          bindings: {
+            other_account_binding: {
+              ...base.bindings.whatsapp_main_binding,
+              conversation: 'other_account_conversation',
+            },
+            this_account_binding: {
+              ...base.bindings.whatsapp_main_binding,
+              conversation: 'this_account_conversation',
+            },
+          },
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:-100200300',
+        {
+          requestId: 'perm-profile-provider-account',
+          providerAccountId: 'telegram_default',
+          sourceAgentFolder: 'whatsapp_main',
+          toolName: 'request_agent_profile_update',
+          title: 'Update AGENTS.md',
+          interaction: {
+            id: 'perm-profile-provider-account',
+            title: 'Update AGENTS.md',
+            body: 's'.repeat(1000),
+            requestContext: {
+              requestId: 'perm-profile-provider-account',
+              sourceAgentFolder: 'whatsapp_main',
+              targetJid: 'tg:-100200300',
+              toolName: 'request_agent_profile_update',
+            },
+            files: [
+              {
+                path: 'AGENTS.md',
+                preview: 'x'.repeat(7000),
+                truncated: false,
+                sizeBytes: 7000,
+                contentHash: 'abc123',
+              },
+            ],
+          },
+        },
+      );
+      await flushPromises();
+
+      const targets = currentBot().api.sendDocument.mock.calls.map(
+        (call) => call[0],
+      );
+      expect(targets).toEqual(['12345']);
+      expect(targets).not.toContain('999');
+
+      await triggerCallbackQuery({
+        callbackQuery: {
+          data: 'perm:allow_once:perm-profile-provider-account',
+        },
+        chat: { id: -100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+      await decisionPromise;
+    });
+
     it('fails closed when oversized permission full view delivery fails', async () => {
       const opts = createTelegramGroupApprovalOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -4349,14 +4492,12 @@ describe('createTelegramChannel factory', () => {
     }
   });
 
-  it('returns a TelegramChannel when token is available', async () => {
+  it('returns a TelegramChannel when Provider Account refs point at env token', async () => {
     const saved = process.env.TELEGRAM_BOT_TOKEN;
     process.env.TELEGRAM_BOT_TOKEN = 'test-token-from-env';
     try {
       const result = await createTelegramChannel({
-        onMessage: vi.fn(),
-        onChatMetadata: vi.fn(),
-        conversationRoutes: () => ({}),
+        ...createTestOpts(),
         runtimeSecrets: new EnvRuntimeSecretProvider(),
       });
       expect(result).not.toBeNull();
@@ -4371,12 +4512,16 @@ describe('createTelegramChannel factory', () => {
     const result = await createTelegramChannel({
       onMessage: vi.fn(),
       onChatMetadata: vi.fn(),
+      providerAccountId: 'telegram_default',
       conversationRoutes: () => ({}),
       runtimeSettings: () =>
         ({
-          providers: { telegram: { defaultConnection: 'telegram_default' } },
-          providerConnections: {
+          providers: { telegram: { enabled: true } },
+          providerAccounts: {
             telegram_default: {
+              agentId: 'default',
+              provider: 'telegram',
+              label: 'Telegram',
               runtimeSecretRefs: {
                 bot_token: 'gantry-secret:TELEGRAM_BOT_TOKEN',
               },

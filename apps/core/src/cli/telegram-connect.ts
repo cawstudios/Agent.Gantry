@@ -3,10 +3,12 @@ import '../channels/register-builtins.js';
 import { ensureRuntimeLayout } from '../config/settings/runtime-home.js';
 import { listTelegramRecentChats } from './telegram-chat-discovery.js';
 import {
+  ensureConfiguredAgent,
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
+import { DEFAULT_AGENT_FOLDER } from './main-agent.js';
 import {
   normalizeTelegramChatJid,
   readTelegramFromRuntimeEnv,
@@ -15,6 +17,7 @@ import {
   verifyTelegramChatAccess,
 } from './telegram.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
+import { providerAccountIdForAgent } from './provider-utils.js';
 
 type TelegramChatChoice =
   | {
@@ -277,25 +280,18 @@ export async function runTelegramConnectCommand(
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   settings.providers.telegram.enabled = true;
-  const providerConnectionId =
-    settings.providers.telegram.defaultConnection || 'telegram_default';
-  settings.providers.telegram.defaultConnection = providerConnectionId;
-  settings.providerConnections[providerConnectionId] = {
-    provider: 'telegram',
-    label:
-      settings.providerConnections[providerConnectionId]?.label ||
-      'Telegram Default',
-    runtimeSecretRefs: {
-      ...(settings.providerConnections[providerConnectionId]
-        ?.runtimeSecretRefs || {}),
-      bot_token: tokenSecret.ref,
-    },
-  };
+  let providerAccountId = 'telegram_default';
+  const providerAgentId = registeredFolder || DEFAULT_AGENT_FOLDER;
+  ensureConfiguredAgent(settings, {
+    agentId: providerAgentId,
+    agentName: conversationRouteName || settings.agent.name,
+    agentFolder: providerAgentId,
+  });
   if (registeredFolder) {
     const approverIds = parseTelegramApproverIds(
       approverInput || adminSenderId || '',
     );
-    ensureConfiguredConversationBinding(settings, {
+    const binding = ensureConfiguredConversationBinding(settings, {
       agentId: registeredFolder,
       agentName: conversationRouteName || settings.agent.name,
       agentFolder: registeredFolder,
@@ -305,6 +301,7 @@ export async function runTelegramConnectCommand(
       requiresTrigger: false,
       approverIds,
     });
+    providerAccountId = binding.providerConnectionId;
     if (approverIds.length > 0) {
       p.log.success(
         `Enabled session/admin commands and permission approvals for Telegram sender(s) ${approverIds.join(', ')}.`,
@@ -314,7 +311,24 @@ export async function runTelegramConnectCommand(
         'No Telegram conversation approver was configured. Run `gantry provider connect telegram` again and enter your own Telegram user ID if you want chat commands.',
       );
     }
+  } else {
+    providerAccountId = providerAccountIdForAgent(settings, {
+      providerId: 'telegram',
+      agentId: providerAgentId,
+      defaultAccountId: providerAccountId,
+    });
   }
+  settings.providerAccounts[providerAccountId] = {
+    agentId: providerAgentId,
+    provider: 'telegram',
+    label:
+      settings.providerAccounts[providerAccountId]?.label || 'Telegram Default',
+    runtimeSecretRefs: {
+      ...(settings.providerAccounts[providerAccountId]?.runtimeSecretRefs ||
+        {}),
+      bot_token: tokenSecret.ref,
+    },
+  };
   await writeDesiredRuntimeSettings({
     runtimeHome,
     settings,

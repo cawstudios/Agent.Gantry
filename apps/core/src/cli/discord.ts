@@ -11,6 +11,7 @@ import {
 } from '../channels/discord-setup-discovery.js';
 import { ensureRuntimeLayout } from '../config/settings/runtime-home.js';
 import {
+  ensureConfiguredAgent,
   ensureConfiguredConversationBinding,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
@@ -18,6 +19,7 @@ import {
 import { openRuntimeGroupDb } from './runtime-group-db.js';
 import {
   allocateDefaultAgentFolder,
+  DEFAULT_AGENT_FOLDER,
   defaultTriggerForAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
@@ -28,6 +30,7 @@ import {
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
+import { providerAccountIdForAgent } from './provider-utils.js';
 
 type DiscordChannelChoice =
   | { type: 'selected'; channel: DiscordDiscoveredChannel }
@@ -267,26 +270,18 @@ export async function runDiscordConnectCommand(
   const settings = loadRuntimeSettings(runtimeHome);
   const previousSettings = structuredClone(settings);
   const previousDiscordEnabled = settings.providers.discord?.enabled ?? false;
-  const providerConnectionId =
-    settings.providers.discord?.defaultConnection || 'discord_default';
+  let providerAccountId = 'discord_default';
+  const providerAgentId = registeredFolder || DEFAULT_AGENT_FOLDER;
   settings.providers.discord = {
     enabled: channelChoice.type === 'selected' || previousDiscordEnabled,
-    defaultConnection: providerConnectionId,
   };
-  settings.providerConnections[providerConnectionId] = {
-    provider: 'discord',
-    label:
-      settings.providerConnections[providerConnectionId]?.label ||
-      'Discord Default',
-    runtimeSecretRefs: {
-      ...(settings.providerConnections[providerConnectionId]
-        ?.runtimeSecretRefs || {}),
-      bot_token: botSecret.ref,
-      application_id: applicationSecret.ref,
-    },
-  };
+  ensureConfiguredAgent(settings, {
+    agentId: providerAgentId,
+    agentName: registeredChatTitle || settings.agent.name,
+    agentFolder: providerAgentId,
+  });
   if (registeredFolder) {
-    ensureConfiguredConversationBinding(settings, {
+    const binding = ensureConfiguredConversationBinding(settings, {
       agentId: registeredFolder,
       agentName: conversationRouteName || settings.agent.name,
       agentFolder: registeredFolder,
@@ -296,7 +291,26 @@ export async function runDiscordConnectCommand(
       requiresTrigger: false,
       approverIds,
     });
+    providerAccountId = binding.providerConnectionId;
+  } else {
+    providerAccountId = providerAccountIdForAgent(settings, {
+      providerId: 'discord',
+      agentId: providerAgentId,
+      defaultAccountId: providerAccountId,
+    });
   }
+  settings.providerAccounts[providerAccountId] = {
+    agentId: providerAgentId,
+    provider: 'discord',
+    label:
+      settings.providerAccounts[providerAccountId]?.label || 'Discord Default',
+    runtimeSecretRefs: {
+      ...(settings.providerAccounts[providerAccountId]?.runtimeSecretRefs ||
+        {}),
+      bot_token: botSecret.ref,
+      application_id: applicationSecret.ref,
+    },
+  };
   await writeDesiredRuntimeSettings({
     runtimeHome,
     settings,

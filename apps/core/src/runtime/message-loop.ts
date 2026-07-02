@@ -48,8 +48,15 @@ export interface MessageLoopDeps {
   getOrRecoverCursor: (chatJid: string) => Promise<string> | string;
   setAgentCursor: (chatJid: string, timestamp: string) => void;
   saveState: () => Promise<void> | void;
-  hasChannel: (chatJid: string) => boolean;
-  setTyping: (chatJid: string, isTyping: boolean) => Promise<void>;
+  hasChannel: (
+    chatJid: string,
+    options?: { providerAccountId?: string },
+  ) => boolean;
+  setTyping: (
+    chatJid: string,
+    isTyping: boolean,
+    options?: { providerAccountId?: string },
+  ) => Promise<void>;
   sendProgressUpdate: (
     chatJid: string,
     text: string,
@@ -102,6 +109,7 @@ async function resolveConversationRoute(
   chatJid: string,
   agentId?: string | null,
   threadId?: string | null,
+  providerAccountId?: string | null,
 ): Promise<ConversationRoute | undefined> {
   const conversationRoutes = deps.getConversationRoutes();
   const selectedAgentId = agentId ? agentIdForFolder(agentId) : null;
@@ -110,6 +118,7 @@ async function resolveConversationRoute(
     chatJid,
     selectedAgentId,
     threadId,
+    providerAccountId,
   );
   if (selectedRoute) return selectedRoute[1];
 
@@ -117,6 +126,7 @@ async function resolveConversationRoute(
     chatJid,
     selectedAgentId,
     threadId,
+    providerAccountId,
   )) {
     const persistedRoute =
       await deps.opsRepository?.getConversationRoute?.(routeKey);
@@ -131,6 +141,7 @@ async function resolveConversationRoute(
         persistedKey.chatJid,
         agentIdForFolder(persistedRoute.folder),
         persistedKey.threadId,
+        persistedKey.providerAccountId,
       );
       conversationRoutes[canonicalRouteKey] = persistedRoute;
       return persistedRoute;
@@ -144,8 +155,10 @@ function selectConversationRouteEntry(
   chatJid: string,
   selectedAgentId?: string | null,
   threadId?: string | null,
+  providerAccountId?: string | null,
 ): [string, ConversationRoute] | undefined {
   const requestedThreadId = normalizeThreadQueueId(threadId);
+  const requestedProviderAccountId = providerAccountId?.trim();
   const exactThreadRoutes: Array<[string, ConversationRoute]> = [];
   const wholeConversationRoutes: Array<[string, ConversationRoute]> = [];
 
@@ -153,6 +166,12 @@ function selectConversationRouteEntry(
     const [key, route] = entry;
     const parsed = parseAgentThreadQueueKey(key);
     if (parsed.chatJid !== chatJid) continue;
+    if (
+      requestedProviderAccountId &&
+      route.providerAccountId !== requestedProviderAccountId
+    ) {
+      continue;
+    }
     if (selectedAgentId && agentIdForFolder(route.folder) !== selectedAgentId) {
       continue;
     }
@@ -187,18 +206,35 @@ function persistedRouteLookupKeys(
   chatJid: string,
   selectedAgentId?: string | null,
   threadId?: string | null,
+  providerAccountId?: string | null,
 ): string[] {
   const keys: string[] = [];
   if (selectedAgentId && normalizeThreadQueueId(threadId)) {
-    keys.push(makeAgentThreadQueueKey(chatJid, selectedAgentId, threadId));
+    keys.push(
+      makeAgentThreadQueueKey(
+        chatJid,
+        selectedAgentId,
+        threadId,
+        providerAccountId,
+      ),
+    );
   }
   if (normalizeThreadQueueId(threadId)) {
-    keys.push(makeAgentThreadQueueKey(chatJid, null, threadId));
+    keys.push(
+      makeAgentThreadQueueKey(chatJid, null, threadId, providerAccountId),
+    );
   }
   if (selectedAgentId) {
-    keys.push(makeAgentThreadQueueKey(chatJid, selectedAgentId));
+    keys.push(
+      makeAgentThreadQueueKey(
+        chatJid,
+        selectedAgentId,
+        null,
+        providerAccountId,
+      ),
+    );
   }
-  keys.push(chatJid);
+  keys.push(makeAgentThreadQueueKey(chatJid, null, null, providerAccountId));
   return [...new Set(keys)];
 }
 
@@ -220,7 +256,10 @@ async function hasTriggerOwnedThreadRoot(input: {
     input.chatJid,
     '',
     MESSAGE_FETCH_PAGE_SIZE,
-    { threadId: input.threadId },
+    {
+      threadId: input.threadId,
+      providerAccountId: input.group.providerAccountId,
+    },
   );
   if (rootCandidates.length === 0) return false;
 
@@ -259,16 +298,20 @@ async function processQueueMessages(
   },
 ): Promise<MessageAdmissionProcessingResult> {
   const opsRepository = resolveMessageRepository(deps);
-  const { chatJid, threadId, agentId } = parseAgentThreadQueueKey(queueJid);
+  const { chatJid, threadId, agentId, providerAccountId } =
+    parseAgentThreadQueueKey(queueJid);
   const group = await resolveConversationRoute(
     deps,
     chatJid,
     agentId,
     threadId,
+    providerAccountId,
   );
   if (!group) return 'listener_degraded';
 
-  if (!deps.hasChannel(chatJid)) {
+  if (
+    !deps.hasChannel(chatJid, { providerAccountId: group.providerAccountId })
+  ) {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return 'listener_degraded';
   }
@@ -328,7 +371,12 @@ async function processQueueMessages(
       sinceCursor: recoveredCursor,
       pageSize: MESSAGE_FETCH_PAGE_SIZE,
       maxMessages: MAX_MESSAGES_PER_PROMPT,
-      options: { threadId: threadId ?? null },
+      options: {
+        threadId: threadId ?? null,
+        ...(group.providerAccountId
+          ? { providerAccountId: group.providerAccountId }
+          : {}),
+      },
     }));
   let initialBatch = replay.messages;
   if (initialBatch.length === 0) {
@@ -405,11 +453,14 @@ async function processQueueMessages(
   if (replay.hasMore) {
     return enqueueMessageCheck(deps, queueJid);
   }
-  deps
-    .setTyping(chatJid, true)
-    .catch((err: unknown) =>
-      logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-    );
+  const typing = group.providerAccountId
+    ? deps.setTyping(chatJid, true, {
+        providerAccountId: group.providerAccountId,
+      })
+    : deps.setTyping(chatJid, true);
+  typing.catch((err: unknown) =>
+    logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+  );
   return 'completed';
 }
 
@@ -418,9 +469,8 @@ export async function processLiveAdmissionWorkItem(
   item: LiveAdmissionWorkItem,
 ): Promise<MessageAdmissionProcessingResult> {
   const opsRepository = resolveMessageRepository(deps);
-  const { chatJid, threadId, agentId } = parseAgentThreadQueueKey(
-    item.queueJid,
-  );
+  const { chatJid, threadId, agentId, providerAccountId } =
+    parseAgentThreadQueueKey(item.queueJid);
   const parsedAgentId = agentId ? agentIdForFolder(agentId) : null;
   const itemAgentId = item.agentId ? agentIdForFolder(item.agentId) : null;
   if (
@@ -447,7 +497,10 @@ export async function processLiveAdmissionWorkItem(
     sinceCursor: recoveredCursor,
     pageSize: MESSAGE_FETCH_PAGE_SIZE,
     maxMessages: MAX_MESSAGES_PER_PROMPT,
-    options: { threadId: threadId ?? null },
+    options: {
+      threadId: threadId ?? null,
+      ...(providerAccountId ? { providerAccountId } : {}),
+    },
   });
   const messages = replay.messages;
   if (messages.length === 0) return 'completed';
@@ -467,7 +520,9 @@ export async function recoverPendingMessages(
   )) {
     const parsed = parseAgentThreadQueueKey(routeKey);
     const routeAgentId = parsed.agentId || agentIdForFolder(group.folder);
-    const dedupeKey = `${parsed.chatJid}::${parsed.threadId ?? ''}::${routeAgentId}`;
+    const routeProviderAccountId =
+      parsed.providerAccountId || group.providerAccountId || '';
+    const dedupeKey = `${parsed.chatJid}::${parsed.threadId ?? ''}::${routeAgentId}::${routeProviderAccountId}`;
     if (!routesByChatAgentThread.has(dedupeKey) || parsed.agentId) {
       routesByChatAgentThread.set(dedupeKey, [routeKey, group]);
     }
@@ -477,10 +532,12 @@ export async function recoverPendingMessages(
   for (const [routeKey] of Object.entries(dedupedRoutes)) {
     const parsed = parseAgentThreadQueueKey(routeKey);
     if (!parsed.threadId) continue;
+    const providerAccountKey = parsed.providerAccountId ?? '';
+    const exactRouteKey = `${parsed.chatJid}::${providerAccountKey}`;
     const exactThreads =
-      exactRouteThreadsByChat.get(parsed.chatJid) ?? new Set<string>();
+      exactRouteThreadsByChat.get(exactRouteKey) ?? new Set<string>();
     exactThreads.add(parsed.threadId);
-    exactRouteThreadsByChat.set(parsed.chatJid, exactThreads);
+    exactRouteThreadsByChat.set(exactRouteKey, exactThreads);
   }
   for (const [routeKey, group] of routesByChatAgentThread.values()) {
     const parsedRoute = parseAgentThreadQueueKey(routeKey);
@@ -491,13 +548,16 @@ export async function recoverPendingMessages(
 
     const threadIds = parsedRoute.threadId
       ? [parsedRoute.threadId]
-      : await opsRepository.getMessageThreadIds(chatJid);
+      : await opsRepository.getMessageThreadIds(chatJid, {
+          providerAccountId: group.providerAccountId,
+        });
     for (const threadId of threadIds) {
       // Thread-scoped routes own provider threads globally; recovery must match live admission.
+      const exactRouteKey = `${chatJid}::${group.providerAccountId ?? ''}`;
       if (
         !parsedRoute.threadId &&
         threadId &&
-        exactRouteThreadsByChat.get(chatJid)?.has(threadId)
+        exactRouteThreadsByChat.get(exactRouteKey)?.has(threadId)
       ) {
         continue;
       }
@@ -506,19 +566,21 @@ export async function recoverPendingMessages(
         chatJid,
         routeAgentId,
         threadId,
+        group.providerAccountId,
       );
       if (selectedRoute?.[0] !== routeKey) continue;
       const queueJid = makeAgentThreadQueueKey(
         chatJid,
         agentIdForFolder(group.folder),
         threadId,
+        group.providerAccountId,
       );
       const pending = await collectPendingMessagesSince({
         getMessagesSince: opsRepository.getMessagesSince.bind(opsRepository),
         chatJid,
         sinceCursor: await deps.getOrRecoverCursor(queueJid),
         pageSize: MESSAGE_FETCH_PAGE_SIZE,
-        options: { threadId },
+        options: { threadId, providerAccountId: group.providerAccountId },
       });
       if (pending.messages.length > 0) {
         pendingCount += pending.messages.length;

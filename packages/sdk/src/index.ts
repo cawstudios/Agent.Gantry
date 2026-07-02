@@ -2,10 +2,10 @@ import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
 import type {
-  AgentConversationBindingInput,
   ConversationDiscoveryInput,
-  ProviderConnectionInput,
-  ProviderConnectionPatch,
+  ConversationInstallInput,
+  ProviderAccountInput,
+  ProviderAccountPatch,
 } from './provider-types.js';
 import { createAgentAdminClient } from './agents.js';
 import { createAgentSkillsClient, createSkillsClient } from './skills.js';
@@ -65,13 +65,10 @@ export type ResponseMode = 'sse' | 'webhook' | 'both' | 'none';
 export type MemorySubjectType = 'user' | 'group' | 'channel' | 'common';
 export type DreamPhase = 'light' | 'rem' | 'deep' | 'all';
 
-/** The deployment process role a Gantry runtime serves as. */
 export type ProcessRole = 'all' | 'control' | 'live-worker' | 'job-worker';
 
-/** Response shape of `GET /v1/health`. */
 export interface HealthResponse {
   status: string;
-  /** Process role of the runtime serving this control API. */
   processRole: ProcessRole;
   transport:
     | { kind: 'tcp'; port: number }
@@ -468,50 +465,50 @@ export class GantryClient {
       }),
   };
 
-  readonly providerConnections = {
-    create: (input: ProviderConnectionInput) =>
+  readonly providerAccounts = {
+    create: (input: ProviderAccountInput) =>
       this.transport.request<Record<string, unknown>>({
         method: 'POST',
-        path: '/v1/provider-connections',
+        path: '/v1/provider-accounts',
         body: input,
       }),
     list: () =>
-      this.transport.request<{ providerConnections: unknown[] }>({
+      this.transport.request<{ providerAccounts: unknown[] }>({
         method: 'GET',
-        path: '/v1/provider-connections',
+        path: '/v1/provider-accounts',
       }),
-    get: (providerConnectionId: string) =>
+    get: (providerAccountId: string) =>
       this.transport.request<Record<string, unknown>>({
         method: 'GET',
-        path: `/v1/provider-connections/${encodeURIComponent(providerConnectionId)}`,
+        path: `/v1/provider-accounts/${encodeURIComponent(providerAccountId)}`,
       }),
-    update: (providerConnectionId: string, patch: ProviderConnectionPatch) =>
+    update: (providerAccountId: string, patch: ProviderAccountPatch) =>
       this.transport.request<Record<string, unknown>>({
         method: 'PATCH',
-        path: `/v1/provider-connections/${encodeURIComponent(providerConnectionId)}`,
+        path: `/v1/provider-accounts/${encodeURIComponent(providerAccountId)}`,
         body: patch,
       }),
-    delete: (providerConnectionId: string) =>
+    delete: (providerAccountId: string) =>
       this.transport.request<{
         deleted: boolean;
-        providerConnection?: unknown;
+        providerAccount?: unknown;
       }>({
         method: 'DELETE',
-        path: `/v1/provider-connections/${encodeURIComponent(providerConnectionId)}`,
+        path: `/v1/provider-accounts/${encodeURIComponent(providerAccountId)}`,
       }),
     discoverConversations: (
-      providerConnectionId: string,
+      providerAccountId: string,
       input: ConversationDiscoveryInput = {},
     ) =>
       this.transport.request<{ conversations: unknown[] }>({
         method: 'POST',
-        path: `/v1/provider-connections/${encodeURIComponent(providerConnectionId)}/discover-conversations`,
+        path: `/v1/provider-accounts/${encodeURIComponent(providerAccountId)}/discover-conversations`,
         body: input,
       }),
   };
 
   readonly conversations = {
-    list: (input: { providerConnectionId?: string } = {}) =>
+    list: (input: { providerAccountId?: string } = {}) =>
       this.transport.request<{ conversations: unknown[] }>({
         method: 'GET',
         path: `/v1/conversations${querySuffix(input)}`,
@@ -548,30 +545,30 @@ export class GantryClient {
     mcpServers: mcpServerClients.createAgentMcpServersClient({
       request: this.request,
     }),
-    conversationBindings: {
+    conversationInstalls: {
       list: (agentId: string) =>
-        this.transport.request<{ bindings: unknown[] }>({
+        this.transport.request<{ conversationInstalls: unknown[] }>({
           method: 'GET',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-installs`,
         }),
       enable: (
         agentId: string,
         conversationId: string,
-        input: AgentConversationBindingInput = {},
+        input: ConversationInstallInput = {},
       ) =>
         this.transport.request<Record<string, unknown>>({
           method: 'PUT',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings/${encodeURIComponent(conversationId)}`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-installs/${encodeURIComponent(conversationId)}`,
           body: input,
         }),
       update: (
         agentId: string,
         conversationId: string,
-        patch: AgentConversationBindingInput,
+        patch: ConversationInstallInput,
       ) =>
         this.transport.request<Record<string, unknown>>({
           method: 'PATCH',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings/${encodeURIComponent(conversationId)}`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-installs/${encodeURIComponent(conversationId)}`,
           body: patch,
         }),
       disable: (
@@ -579,9 +576,12 @@ export class GantryClient {
         conversationId: string,
         input: { threadId?: string } = {},
       ) =>
-        this.transport.request<{ disabled: boolean; binding?: unknown }>({
+        this.transport.request<{
+          disabled: boolean;
+          conversationInstall?: unknown;
+        }>({
           method: 'DELETE',
-          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-bindings/${encodeURIComponent(conversationId)}${querySuffix(input)}`,
+          path: `/v1/agents/${encodeURIComponent(agentId)}/conversation-installs/${encodeURIComponent(conversationId)}${querySuffix(input)}`,
         }),
     },
   };

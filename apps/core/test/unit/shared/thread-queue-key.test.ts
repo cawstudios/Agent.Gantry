@@ -29,6 +29,69 @@ describe('thread queue keys', () => {
     });
   });
 
+  it('keeps provider-account-qualified route keys addressable by chat and agent', () => {
+    const queueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:triage',
+      'thread:one',
+      'slack_one',
+    );
+
+    expect(parseThreadQueueKey(queueJid)).toEqual({
+      chatJid: 'sl:C123',
+      threadId: 'thread:one',
+    });
+    expect(parseAgentThreadQueueKey(queueJid)).toEqual({
+      chatJid: 'sl:C123',
+      threadId: 'thread:one',
+      agentId: 'agent:triage',
+      providerAccountId: 'slack_one',
+    });
+  });
+
+  it('does not collapse same chat and agent routes across provider accounts', () => {
+    const routes = {
+      [makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'one')]: {
+        folder: 'triage',
+        providerAccountId: 'one',
+      },
+      [makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'two')]: {
+        folder: 'triage',
+        providerAccountId: 'two',
+      },
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:triage'),
+        () => 'agent:triage',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('matches unscoped migrated route keys by stored provider account', () => {
+    const route = { folder: 'triage', providerAccountId: 'one' };
+    const routes = {
+      [makeAgentThreadQueueKey('sl:C123', 'agent:triage')]: route,
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'one'),
+        () => 'agent:triage',
+      ),
+    ).toBe(route);
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'two'),
+        () => 'agent:triage',
+      ),
+    ).toBeUndefined();
+  });
+
   it('parses old thread-only keys unchanged', () => {
     const queueJid = makeThreadQueueKey('sl:C123', 'thread:one');
 
@@ -111,6 +174,29 @@ describe('thread queue keys', () => {
       [
         makeAgentThreadQueueKey('sl:C123', 'agent:triage'),
         { folder: 'triage' },
+      ],
+    ]);
+  });
+
+  it('filters chat routes by provider account', () => {
+    const routes = {
+      [makeAgentThreadQueueKey('sl:C123', 'agent:alpha', undefined, 'acct-a')]:
+        {
+          folder: 'alpha',
+          providerAccountId: 'acct-a',
+        },
+      [makeAgentThreadQueueKey('sl:C123', 'agent:beta', undefined, 'acct-b')]: {
+        folder: 'beta',
+        providerAccountId: 'acct-b',
+      },
+    };
+
+    expect(
+      findConversationRoutesForChat(routes, 'sl:C123', null, 'acct-b'),
+    ).toEqual([
+      [
+        makeAgentThreadQueueKey('sl:C123', 'agent:beta', undefined, 'acct-b'),
+        { folder: 'beta', providerAccountId: 'acct-b' },
       ],
     ]);
   });

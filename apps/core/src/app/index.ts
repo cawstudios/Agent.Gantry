@@ -386,12 +386,15 @@ export async function startGantryRuntime(
           durability: 'required',
           throwOnMissing: true,
           messageOptions: input.threadId
-            ? { threadId: input.threadId }
-            : undefined,
+            ? {
+                threadId: input.threadId,
+                providerAccountId: input.providerAccountId,
+              }
+            : { providerAccountId: input.providerAccountId },
         });
       },
-      addMessageReaction: (jid, messageRef, emoji) =>
-        channelWiring.addReaction(jid, messageRef, emoji),
+      addMessageReaction: (jid, messageRef, emoji, options) =>
+        channelWiring.addReaction(jid, messageRef, emoji, options),
     });
   } catch (err) {
     await liveRecoveryCoordinatorLeaseManager.stop();

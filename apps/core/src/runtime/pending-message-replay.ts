@@ -10,7 +10,7 @@ export type GetMessagesSince = (
   conversationJid: string,
   sinceCursor: string,
   limit?: number,
-  options?: { threadId?: string | null },
+  options?: { threadId?: string | null; providerAccountId?: string | null },
 ) => Promise<NewMessage[]>;
 
 export interface PendingMessageReplay {
@@ -25,7 +25,7 @@ export async function collectPendingMessagesSince(input: {
   sinceCursor: string;
   pageSize: number;
   maxMessages?: number;
-  options?: { threadId?: string | null };
+  options?: { threadId?: string | null; providerAccountId?: string | null };
 }): Promise<PendingMessageReplay> {
   const pageSize = Math.max(1, Math.floor(input.pageSize));
   const maxMessages = Math.max(

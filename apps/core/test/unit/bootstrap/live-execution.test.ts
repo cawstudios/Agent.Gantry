@@ -64,6 +64,64 @@ describe('startLiveExecutionServices', () => {
     );
   });
 
+  it('scopes live admission session lookup to the provider account', async () => {
+    const queueJid = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:alpha',
+      null,
+      'slack-workspace-2',
+    );
+    const getAgentTurnContext = vi.fn(async () => ({
+      appId: 'default',
+      agentSessionId: 'session-workspace-2',
+    }));
+    const processor = buildLiveAdmissionProcessor({
+      liveTurnAuthority: {
+        ownedRunId: vi.fn(),
+        ownedFence: vi.fn(),
+        ownsQueue: vi.fn(() => false),
+        getActiveLiveTurn: vi.fn(async () => undefined),
+        admit: vi.fn(async () => ({
+          outcome: 'claimed',
+          fence: {
+            leaseToken: 'lease-1',
+            workerInstanceId: 'worker-1',
+            fencingVersion: 1,
+          },
+        })),
+        finalize: vi.fn(async () => true),
+        registerStopAliases: vi.fn(async () => undefined),
+        routeMessage: vi.fn(),
+      } as any,
+      app: {
+        getConversationRoutes: () => ({
+          [queueJid]: {
+            folder: 'alpha',
+            conversationKind: 'channel',
+          },
+        }),
+        processGroupMessages: vi.fn(async () => true),
+        getOrRecoverCursor: vi.fn(async () => ''),
+        setAgentCursor: vi.fn(),
+        saveState: vi.fn(),
+      },
+      opsRepository: {
+        getAgentTurnContext,
+        createSessionAgentRun: vi.fn(async () => 'run-1'),
+      },
+      executionAdapter: { id: 'anthropic:claude-agent-sdk' },
+      messageFetchPageSize: 50,
+      timezone: 'UTC',
+      enqueueMessageCheck: vi.fn(),
+      warn: vi.fn(),
+    });
+
+    await expect(processor(queueJid)).resolves.toBe(true);
+    expect(getAgentTurnContext).toHaveBeenCalledWith(
+      expect.objectContaining({ providerAccountId: 'slack-workspace-2' }),
+    );
+  });
+
   it('does not admit a top-level live queue through a thread-only route', async () => {
     const getAgentTurnContext = vi.fn();
     const processor = buildLiveAdmissionProcessor({

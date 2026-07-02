@@ -40,10 +40,7 @@ import {
   loadPatternsContext,
   markPatternsContextSurfaced,
 } from '../shared/pattern-candidate-block.js';
-import {
-  patternSubjectForScope,
-  type PatternSubjectScope,
-} from '../shared/pattern-candidate-subject.js';
+import { patternSubjectForScope } from '../shared/pattern-candidate-subject.js';
 import { memoryAgentIdForWorkspaceFolder } from '../memory/app-memory-boundaries.js';
 import {
   executionProviderIdForCandidate,
@@ -56,10 +53,7 @@ import {
   proactiveSurfacingAllowed,
   publishProactiveSurfacingOutcomeEvent,
 } from './proactive-surfacing-gate.js';
-import {
-  forwardRuntimeEvents,
-  RUNTIME_EVENT_TYPES,
-} from './runtime-event-forwarding.js';
+import { forwardRuntimeEvents } from './runtime-event-forwarding.js';
 import { isMissingProviderSessionError } from './failover-eligibility.js';
 import { logger, redactString } from '../infrastructure/logging/logger.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
@@ -72,7 +66,6 @@ export type GroupAgentRunResult = 'success' | 'error' | 'stopped';
 function redactRuntimeError(error: string | undefined): string | undefined {
   return error ? redactString(error) : undefined;
 }
-
 function isStoppedByRequest(output: AgentOutput): boolean {
   return (
     output.status === 'error' &&
@@ -185,6 +178,7 @@ export function createGroupAgentRunner(input: {
       agentFolder: group.folder,
       executionProviderId,
       conversationJid: chatJid,
+      providerAccountId: group.providerAccountId,
       threadId: sessionThreadId,
       conversationKind: group.conversationKind,
       memoryUserId: options?.memoryContext?.userId,
@@ -262,6 +256,7 @@ export function createGroupAgentRunner(input: {
           appId: runtimeAppId,
           executionProviderId,
           conversationJid: chatJid,
+          providerAccountId: group.providerAccountId,
           conversationKind: group.conversationKind,
           memoryUserId: options?.memoryContext?.userId,
           expectedAgentSessionId: turnContext.agentSessionId,
@@ -702,7 +697,9 @@ export function createGroupAgentRunner(input: {
             });
           }
         }
-      } catch {}
+      } catch {
+        // Ignore proactive surfacing metric failures.
+      }
       return 'success';
     } catch (err) {
       logger.error({ group: group.name, err }, 'Agent error');

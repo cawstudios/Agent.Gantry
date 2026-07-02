@@ -10,6 +10,7 @@ import {
 } from '../config/settings/runtime-home.js';
 import {
   applyModelPreset,
+  ensureConfiguredAgent,
   loadDesiredRuntimeSettingsForWrite,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
@@ -23,6 +24,7 @@ import {
 import { gantryRuntimeSecretRef } from '../domain/ports/runtime-secret-provider.js';
 import { runPostgresMigrations } from '../postgres-migrate.js';
 import { storeRuntimeSecretInput } from './credentials.js';
+import { DEFAULT_AGENT_FOLDER } from './main-agent.js';
 
 export interface OnboardingConfigInput {
   runtimeHome: string;
@@ -154,19 +156,19 @@ export async function persistOnboardingConfig(
         actor: 'cli:onboarding',
       }),
     );
-    settings.providers.telegram.defaultConnection ||= 'telegram_default';
-    settings.providerConnections[
-      settings.providers.telegram.defaultConnection
-    ] = {
+    ensureConfiguredAgent(settings, {
+      agentId: DEFAULT_AGENT_FOLDER,
+      agentName: settings.agent.name,
+      agentFolder: DEFAULT_AGENT_FOLDER,
+    });
+    settings.providerAccounts.telegram_default = {
+      agentId: DEFAULT_AGENT_FOLDER,
       provider: 'telegram',
       label:
-        settings.providerConnections[
-          settings.providers.telegram.defaultConnection
-        ]?.label || 'Telegram Default',
+        settings.providerAccounts.telegram_default?.label || 'Telegram Default',
       runtimeSecretRefs: {
-        ...(settings.providerConnections[
-          settings.providers.telegram.defaultConnection
-        ]?.runtimeSecretRefs || {}),
+        ...(settings.providerAccounts.telegram_default?.runtimeSecretRefs ||
+          {}),
         bot_token: gantryRuntimeSecretRef('TELEGRAM_BOT_TOKEN'),
       },
     };
@@ -186,16 +188,17 @@ export async function persistOnboardingConfig(
         actor: 'cli:onboarding',
       }),
     );
-    settings.providers.slack.defaultConnection ||= 'slack_default';
-    settings.providerConnections[settings.providers.slack.defaultConnection] = {
+    ensureConfiguredAgent(settings, {
+      agentId: DEFAULT_AGENT_FOLDER,
+      agentName: settings.agent.name,
+      agentFolder: DEFAULT_AGENT_FOLDER,
+    });
+    settings.providerAccounts.slack_default = {
+      agentId: DEFAULT_AGENT_FOLDER,
       provider: 'slack',
-      label:
-        settings.providerConnections[settings.providers.slack.defaultConnection]
-          ?.label || 'Slack Default',
+      label: settings.providerAccounts.slack_default?.label || 'Slack Default',
       runtimeSecretRefs: {
-        ...(settings.providerConnections[
-          settings.providers.slack.defaultConnection
-        ]?.runtimeSecretRefs || {}),
+        ...(settings.providerAccounts.slack_default?.runtimeSecretRefs || {}),
         bot_token: gantryRuntimeSecretRef('SLACK_BOT_TOKEN'),
         app_token: gantryRuntimeSecretRef('SLACK_APP_TOKEN'),
       },

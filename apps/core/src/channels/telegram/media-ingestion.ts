@@ -20,7 +20,9 @@ export function registerTelegramMediaHandlers(input: {
       name: string | undefined,
       provider: 'telegram',
       isGroup: boolean,
+      options?: { providerAccountId?: string },
     ) => Promise<void>;
+    providerAccountId?: string;
     onMessage: (jid: string, message: any) => Promise<void>;
     ensureMessageRoute?: (jid: string, message: any) => Promise<unknown>;
     conversationRoutes: () => Record<
@@ -50,6 +52,7 @@ export function registerTelegramMediaHandlers(input: {
       undefined,
       'telegram',
       isGroup,
+      { providerAccountId: input.opts.providerAccountId },
     );
 
     const routeGroups = input.opts.conversationRoutes;
@@ -59,12 +62,18 @@ export function registerTelegramMediaHandlers(input: {
     let groups = routeGroups();
     if (
       !isGroup &&
-      findConversationRoutesForChat(groups, chatJid, threadId).length < 1
+      findConversationRoutesForChat(
+        groups,
+        chatJid,
+        threadId,
+        input.opts.providerAccountId,
+      ).length < 1
     ) {
       await input.opts.ensureMessageRoute?.(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
         provider: 'telegram',
+        providerAccountId: input.opts.providerAccountId,
         sender: ctx.from?.id?.toString() || '',
         sender_name:
           ctx.from?.first_name ||
@@ -84,6 +93,7 @@ export function registerTelegramMediaHandlers(input: {
       groups,
       chatJid,
       threadId,
+      input.opts.providerAccountId,
     );
     if (matchingGroups.length < 1 && isGroup) return;
 

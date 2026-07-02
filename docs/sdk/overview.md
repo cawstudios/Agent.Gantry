@@ -129,7 +129,8 @@ sequenceDiagram
 - `skills`
 - `mcpServers`
 - `providers`
-- `providerConnections`
+- `providerAccounts`
+- `conversationInstalls`
 - `conversations`
 - `ingresses`
 - `webhooks`

@@ -214,6 +214,7 @@ export async function resolvePendingInteractionRecord(input: {
 export interface DurablePermissionInteractionContext {
   sourceAgentFolder: string;
   targetJid: string | null;
+  threadId: string | null;
   decisionPolicy: string | null;
   fullView?: DurablePermissionFullView;
 }
@@ -249,6 +250,15 @@ export async function findDurablePermissionInteractionByRequestId(input: {
         typeof pending.payload.conversationId === 'string'
           ? pending.payload.conversationId
           : null,
+      threadId:
+        typeof pending.payload.threadId === 'string'
+          ? pending.payload.threadId
+          : typeof pending.payload.request === 'object' &&
+              pending.payload.request !== null &&
+              'threadId' in pending.payload.request &&
+              typeof pending.payload.request.threadId === 'string'
+            ? pending.payload.request.threadId
+            : null,
       decisionPolicy:
         typeof pending.payload.decisionPolicy === 'string'
           ? pending.payload.decisionPolicy
@@ -263,7 +273,6 @@ export async function findDurablePermissionInteractionByRequestId(input: {
     return null;
   }
 }
-
 export {
   bindPendingPermissionInteractionMessage,
   findDurablePermissionInteractionByPromptMessage,
