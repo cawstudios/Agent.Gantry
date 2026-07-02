@@ -22,6 +22,7 @@ import {
   type StartAsyncCommandTaskResult,
 } from './async-command-task-service.js';
 import { asyncDelegatedPrivateCorrelation } from './async-task-execution-payload.js';
+import { createAdmittedAsyncTask } from './async-task-admission.js';
 
 const ASYNC_TASK_HEARTBEAT_MS = 15_000;
 const ASYNC_TASK_WAKE_FALLBACK_MS = 15_000;
@@ -112,7 +113,12 @@ export async function startDelegatedAgentTask(input: {
     summary: commandSummary(objective),
     now: nowIso(),
   };
-  const task = await input.createTask(createInput);
+  const created = await createAdmittedAsyncTask({
+    repository: input.repository,
+    task: createInput,
+  });
+  if (!created.ok) return created;
+  const task = created.task;
   input.queueTask({
     task,
     command: '',

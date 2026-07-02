@@ -8,8 +8,10 @@ import { persistInspectionSnapshot } from '@core/jobs/async-command-task-helpers
 import { readEncryptedAsyncTaskPayload } from '@core/jobs/async-task-execution-payload.js';
 import {
   createAsyncMcpTask,
+  executeAsyncMcpTask,
   recoverQueuedAsyncMcpTasks,
 } from '@core/jobs/async-mcp-tool-task.js';
+import { asyncTaskChangeWaiterFor } from '@core/jobs/async-task-change-waiter.js';
 import type {
   AsyncTaskCreateInput,
   AsyncTaskListFilter,
@@ -22,6 +24,7 @@ import { isAsyncTaskTerminal } from '@core/domain/ports/async-tasks.js';
 
 class MemoryAsyncTaskRepository implements AsyncTaskRepository {
   readonly tasks = new Map<string, AsyncTaskRecord>();
+  readonly listFilters: AsyncTaskListFilter[] = [];
 
   async createTask(input: AsyncTaskCreateInput): Promise<AsyncTaskRecord> {
     const task: AsyncTaskRecord = {
@@ -53,6 +56,7 @@ class MemoryAsyncTaskRepository implements AsyncTaskRepository {
   }
 
   async listTasks(filter: AsyncTaskListFilter): Promise<AsyncTaskRecord[]> {
+    this.listFilters.push(filter);
     return [...this.tasks.values()]
       .filter(
         (task) =>
@@ -365,6 +369,116 @@ describe('AsyncCommandTaskService', () => {
     expect(releases).toHaveLength(2);
   });
 
+  it('rejects async command admission when the per-agent backlog is full', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const runner: AsyncCommandRunner = {
+      run: async () => new Promise(() => undefined),
+    };
+    const service = new AsyncCommandTaskService(repository, runner);
+
+    for (let index = 0; index < 32; index += 1) {
+      await expect(
+        service.start(
+          baseInput({
+            command: `npm test ${index}`,
+            allowedToolRules: ['RunCommand(npm test *)'],
+          }),
+        ),
+      ).resolves.toMatchObject({ ok: true });
+    }
+
+    await expect(
+      service.start(
+        baseInput({
+          command: 'npm test 33',
+          allowedToolRules: ['RunCommand(npm test *)'],
+        }),
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      message:
+        'Async task backlog is full for this agent. Wait for existing tasks to finish or cancel stale tasks before starting more.',
+    });
+    expect(
+      [...repository.tasks.values()].filter(
+        (task) => task.kind === 'async_command',
+      ),
+    ).toHaveLength(32);
+  });
+
+  it('rejects delegated agent admission when the per-agent backlog is full', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const service = new AsyncCommandTaskService(repository, {
+      run: async () => ({}),
+    });
+
+    for (let index = 0; index < 32; index += 1) {
+      await expect(
+        service.startDelegatedAgent({
+          appId: 'app-1',
+          agentId: 'agent-1',
+          conversationId: 'conversation-1',
+          objective: `task ${index}`,
+          workspaceFolder: 'main_agent',
+          run: async () => new Promise(() => undefined),
+        }),
+      ).resolves.toMatchObject({ ok: true });
+    }
+
+    await expect(
+      service.startDelegatedAgent({
+        appId: 'app-1',
+        agentId: 'agent-1',
+        conversationId: 'conversation-1',
+        objective: 'task 33',
+        workspaceFolder: 'main_agent',
+        run: async () => new Promise(() => undefined),
+      }),
+    ).resolves.toMatchObject({ ok: false });
+    expect(
+      [...repository.tasks.values()].filter(
+        (task) => task.kind === 'delegated_agent',
+      ),
+    ).toHaveLength(32);
+  });
+
+  it('rejects async MCP admission when the per-agent backlog is full', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+
+    for (let index = 0; index < 32; index += 1) {
+      await expect(
+        createAsyncMcpTask({
+          repository,
+          appId: 'app-1',
+          agentId: 'agent-1',
+          conversationId: 'conversation-1',
+          serverName: 'crm',
+          toolName: `tool_${index}`,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+    }
+
+    await expect(
+      createAsyncMcpTask({
+        repository,
+        appId: 'app-1',
+        agentId: 'agent-1',
+        conversationId: 'conversation-1',
+        serverName: 'crm',
+        toolName: 'tool_33',
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message:
+        'Async task backlog is full for this agent. Wait for existing tasks to finish or cancel stale tasks before starting more.',
+    });
+    expect(
+      [...repository.tasks.values()].filter(
+        (task) => task.kind === 'mcp_tool_call',
+      ),
+    ).toHaveLength(32);
+  });
+
   it('recovers encrypted queued command payloads after active capacity frees', async () => {
     vi.stubEnv('SECRET_ENCRYPTION_KEY', Buffer.alloc(32, 9).toString('base64'));
     const repository = new MemoryAsyncTaskRepository();
@@ -415,6 +529,13 @@ describe('AsyncCommandTaskService', () => {
     await expect(
       recoveredService.recoverQueuedTasks({ appId: 'app-1' }),
     ).resolves.toBe(1);
+    expect(repository.listFilters).toContainEqual(
+      expect.objectContaining({
+        kind: 'async_command',
+        statuses: ['queued'],
+        order: 'oldest_first',
+      }),
+    );
     await waitForStatus(repository, third.task.id, 'completed');
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({ command: 'npm test 3' }),
@@ -432,9 +553,15 @@ describe('AsyncCommandTaskService', () => {
       toolName: 'create_deal',
       arguments: { name: 'Acme' },
     });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
     const callTool = vi.fn(async () => ({
       content: [{ type: 'text', text: 'created Acme' }],
     }));
+    const changed = asyncTaskChangeWaiterFor(repository).wait({
+      signal: new AbortController().signal,
+      timeoutMs: 10_000,
+    });
 
     await expect(
       recoverQueuedAsyncMcpTasks({
@@ -443,6 +570,19 @@ describe('AsyncCommandTaskService', () => {
         createProxy: () => ({ callTool }) as never,
       }),
     ).resolves.toBe(1);
+    await expect(
+      Promise.race([
+        changed.then(() => 'changed'),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 100)),
+      ]),
+    ).resolves.toBe('changed');
+    expect(repository.listFilters).toContainEqual(
+      expect.objectContaining({
+        kind: 'mcp_tool_call',
+        statuses: ['queued'],
+        order: 'oldest_first',
+      }),
+    );
 
     await waitForStatus(repository, created.task.id, 'completed');
     expect(callTool).toHaveBeenCalledWith(
@@ -528,6 +668,13 @@ describe('AsyncCommandTaskService', () => {
     await expect(
       recovered.recoverQueuedTasks({ appId: 'app-1' }),
     ).resolves.toBe(1);
+    expect(repository.listFilters).toContainEqual(
+      expect.objectContaining({
+        kind: 'delegated_agent',
+        statuses: ['queued'],
+        order: 'oldest_first',
+      }),
+    );
 
     await waitForStatus(repository, queued.task.id, 'completed');
     expect(recoveredRun).toHaveBeenCalledTimes(1);
@@ -1163,6 +1310,62 @@ describe('AsyncCommandTaskService', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('wakes delegated task waits when async MCP child tasks finish', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const service = new AsyncCommandTaskService(repository, {
+      run: async () => ({}),
+    });
+    let resolveMcp!: () => void;
+    const callTool = vi.fn(
+      () =>
+        new Promise<{ content: Array<{ type: 'text'; text: string }> }>(
+          (resolve) => {
+            resolveMcp = () =>
+              resolve({ content: [{ type: 'text', text: 'mcp done' }] });
+          },
+        ),
+    );
+    const started = await service.startDelegatedAgent({
+      appId: 'app-1',
+      agentId: 'agent-1',
+      conversationId: 'conversation-1',
+      objective: 'Run child MCP work',
+      workspaceFolder: 'main_agent',
+      run: async ({ task }) => {
+        const child = await createAsyncMcpTask({
+          repository,
+          appId: task.appId,
+          agentId: task.agentId,
+          conversationId: task.conversationId ?? 'conversation-1',
+          parentTaskId: task.id,
+          serverName: 'crm',
+          toolName: 'sync',
+          arguments: { id: 'lead-1' },
+        });
+        expect(child.ok).toBe(true);
+        if (!child.ok) return { outputSummary: 'child admission failed' };
+        void executeAsyncMcpTask({
+          repository,
+          task: child.task,
+          proxy: { callTool } as never,
+          appId: task.appId,
+          agentId: task.agentId,
+          serverName: 'crm',
+          toolName: 'sync',
+          arguments: { id: 'lead-1' },
+        });
+        return { outputSummary: 'delegated done' };
+      },
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    await waitForStatus(repository, started.task.id, 'running');
+    resolveMcp();
+
+    await waitForStatus(repository, started.task.id, 'completed');
   });
 
   it('fails delegated tasks when a failed child is beyond the terminal child page', async () => {

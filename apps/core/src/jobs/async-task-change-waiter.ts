@@ -1,3 +1,5 @@
+import type { AsyncTaskRepository } from '../domain/ports/async-tasks.js';
+
 export class AsyncTaskChangeWaiter {
   private readonly waiters = new Set<() => void>();
 
@@ -23,4 +25,24 @@ export class AsyncTaskChangeWaiter {
       input.signal.addEventListener('abort', done, { once: true });
     });
   }
+}
+
+const waitersByRepository = new WeakMap<
+  AsyncTaskRepository,
+  AsyncTaskChangeWaiter
+>();
+
+export function asyncTaskChangeWaiterFor(
+  repository: AsyncTaskRepository,
+): AsyncTaskChangeWaiter {
+  let waiter = waitersByRepository.get(repository);
+  if (!waiter) {
+    waiter = new AsyncTaskChangeWaiter();
+    waitersByRepository.set(repository, waiter);
+  }
+  return waiter;
+}
+
+export function notifyAsyncTaskChange(repository: AsyncTaskRepository): void {
+  asyncTaskChangeWaiterFor(repository).notify();
 }

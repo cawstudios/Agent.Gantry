@@ -5,7 +5,9 @@ import type {
   AsyncTaskCreateInput,
   AsyncTaskRecord,
   AsyncTaskRepository,
+  AsyncTaskTransitionInput,
 } from '../domain/ports/async-tasks.js';
+import { isAsyncTaskTerminal } from '../domain/ports/async-tasks.js';
 import { sanitizeOutboundLlmText } from '../shared/sensitive-material.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { serializeMcpToolResult } from '../application/mcp/mcp-tool-output-bounds.js';
@@ -23,6 +25,8 @@ import {
   asyncMcpPrivateCorrelation,
   readEncryptedAsyncTaskPayload,
 } from './async-task-execution-payload.js';
+import { notifyAsyncTaskChange } from './async-task-change-waiter.js';
+import { createAdmittedAsyncTask } from './async-task-admission.js';
 
 const RUNNING_ASYNC_MCP_STATUSES = ['running'] as const;
 const MAX_ACTIVE_ASYNC_MCP_PER_APP = 4;
@@ -71,7 +75,9 @@ export async function createAsyncMcpTask(input: {
   serverName: string;
   toolName: string;
   arguments?: Record<string, unknown>;
-}): Promise<{ ok: true; task: AsyncTaskRecord }> {
+}): Promise<
+  { ok: true; task: AsyncTaskRecord } | { ok: false; message: string }
+> {
   const now = nowIso();
   const taskId = `task_${randomUUID()}`;
   const createInput: AsyncTaskCreateInput = {
@@ -106,7 +112,10 @@ export async function createAsyncMcpTask(input: {
     now,
   };
   await recoverStaleAsyncMcpTasks(input.repository, input.appId);
-  return { ok: true, task: await input.repository.createTask(createInput) };
+  return createAdmittedAsyncTask({
+    repository: input.repository,
+    task: createInput,
+  });
 }
 
 async function recoverStaleAsyncMcpTasks(
@@ -124,7 +133,7 @@ async function recoverStaleAsyncMcpTasks(
       continue;
     }
     const now = nowIso();
-    await repository.transitionTask({
+    await transitionAsyncMcpTask(repository, {
       taskId: task.id,
       leaseToken: task.leaseToken,
       fencingVersion: task.fencingVersion,
@@ -176,6 +185,7 @@ export async function recoverQueuedAsyncMcpTasks(input: {
     agentId: input.agentId,
     kind: 'mcp_tool_call',
     statuses: ['queued'],
+    order: 'oldest_first',
     limit: input.limit ?? 100,
   });
   let recovered = 0;
@@ -264,7 +274,7 @@ export async function executeAsyncMcpTask(input: {
     const outputSummary = summarizeAsyncMcpResult(result);
     if (controller.signal.aborted) {
       const now = nowIso();
-      await input.repository.transitionTask({
+      await transitionAsyncMcpTask(input.repository, {
         taskId: input.task.id,
         leaseToken: input.task.leaseToken,
         fencingVersion: input.task.fencingVersion,
@@ -283,7 +293,7 @@ export async function executeAsyncMcpTask(input: {
     }
     if (isMcpToolErrorResult(result)) {
       const now = nowIso();
-      await input.repository.transitionTask({
+      await transitionAsyncMcpTask(input.repository, {
         taskId: input.task.id,
         leaseToken: input.task.leaseToken,
         fencingVersion: input.task.fencingVersion,
@@ -308,7 +318,7 @@ export async function executeAsyncMcpTask(input: {
       return;
     }
     const now = nowIso();
-    await input.repository.transitionTask({
+    await transitionAsyncMcpTask(input.repository, {
       taskId: input.task.id,
       leaseToken: input.task.leaseToken,
       fencingVersion: input.task.fencingVersion,
@@ -337,7 +347,7 @@ export async function executeAsyncMcpTask(input: {
       500,
     );
     const now = nowIso();
-    await input.repository.transitionTask({
+    await transitionAsyncMcpTask(input.repository, {
       taskId: input.task.id,
       leaseToken: input.task.leaseToken,
       fencingVersion: input.task.fencingVersion,
@@ -385,6 +395,17 @@ function cancelledMcpReceipt(
   };
 }
 
+async function transitionAsyncMcpTask(
+  repository: AsyncTaskRepository,
+  input: AsyncTaskTransitionInput,
+): ReturnType<AsyncTaskRepository['transitionTask']> {
+  const updated = await repository.transitionTask(input);
+  if (updated && isAsyncTaskTerminal(updated.status)) {
+    notifyAsyncTaskChange(repository);
+  }
+  return updated;
+}
+
 async function drainAsyncMcpTasks(repository: AsyncTaskRepository) {
   await withLocalAdmissionLock(repository, async () => {
     for (const execution of [...pendingAsyncMcpExecutions.values()]) {
@@ -418,7 +439,7 @@ export async function cancelAsyncMcpTask(
   const active = activeAsyncMcpControllers.get(task.id);
   const now = nowIso();
   if (active) {
-    const cancelled = await repository.transitionTask({
+    const cancelled = await transitionAsyncMcpTask(repository, {
       taskId: task.id,
       leaseToken: task.leaseToken,
       fencingVersion: task.fencingVersion,
@@ -454,7 +475,7 @@ export async function cancelAsyncMcpTask(
         'Task was cancelled in Gantry. Remote MCP work may have already run; late results will be ignored.',
     };
   }
-  const cancelled = await repository.transitionTask({
+  const cancelled = await transitionAsyncMcpTask(repository, {
     taskId: task.id,
     leaseToken: task.leaseToken,
     fencingVersion: task.fencingVersion,

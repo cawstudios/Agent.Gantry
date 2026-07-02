@@ -2,7 +2,8 @@ import type { AgentRunnerInput } from './types.js';
 import { emitJobToolActivity } from './tool-permission-events.js';
 import { log } from './logging.js';
 
-const REMOVED_NATIVE_SUBAGENT_TOOL = /^Task(Create|Get|List|Update)?$/;
+const REMOVED_NATIVE_SUBAGENT_TOOL =
+  /^Task(Create|Get|List|Output|Stop|Update)?$/;
 
 export function denyRemovedNativeSubagentTool(input: {
   toolName: string;

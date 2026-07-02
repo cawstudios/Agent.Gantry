@@ -368,6 +368,10 @@ function asyncMcpCallToolHandler(
         toolName,
         arguments: callInput.arguments ?? {},
       });
+      if (!taskResult.ok) {
+        reject(taskResult.message, 'capacity_full');
+        return;
+      }
       await enqueueAsyncMcpTask({
         repository,
         task: taskResult.task,

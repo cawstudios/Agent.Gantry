@@ -297,6 +297,42 @@ maybeDescribe('Postgres domain repositories', () => {
     ).resolves.toBeNull();
   });
 
+  it('atomically caps async task backlog admission', async () => {
+    const create = (index: number) =>
+      repositories.asyncTasks.createTaskWithBacklogAdmission?.({
+        task: {
+          id: `task-backlog-${index}`,
+          appId,
+          agentId,
+          conversationId,
+          kind: 'async_command',
+          status: 'queued',
+          admissionClass: 'task',
+          authoritySnapshotJson: {},
+          leaseToken: `lease-backlog-${index}`,
+          fencingVersion: 1,
+          now,
+        },
+        maxBacklogPerApp: 64,
+        maxBacklogPerAgent: 32,
+        statuses: ['queued', 'running', 'needs_attention'],
+      });
+
+    const created = await Promise.all(
+      Array.from({ length: 40 }, (_, index) => create(index)),
+    );
+
+    expect(created.filter(Boolean)).toHaveLength(32);
+    await expect(
+      repositories.asyncTasks.countTasksByStatus({
+        appId,
+        agentId,
+        kind: 'async_command',
+        statuses: ['queued'],
+      }),
+    ).resolves.toEqual([{ status: 'queued', count: 32 }]);
+  });
+
   it('rebinds desired-state conversation and binding upserts to the selected provider connection', async () => {
     const selectedConnectionId =
       'channel-providerAccount:test:slack-selected' as ProviderAccountId;

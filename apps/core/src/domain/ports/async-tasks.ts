@@ -92,6 +92,13 @@ export interface AsyncTaskCreateInput {
   now: string;
 }
 
+export interface AsyncTaskBacklogAdmissionInput {
+  task: AsyncTaskCreateInput;
+  maxBacklogPerApp: number;
+  maxBacklogPerAgent: number;
+  statuses: AsyncTaskStatus[];
+}
+
 export interface AsyncTaskListFilter {
   appId: string;
   agentId?: string;
@@ -102,6 +109,7 @@ export interface AsyncTaskListFilter {
   parentTaskId?: string | null;
   statuses?: AsyncTaskStatus[];
   limit?: number;
+  order?: 'newest_first' | 'oldest_first';
 }
 
 export interface AsyncTaskStatusCount {
@@ -136,6 +144,9 @@ export interface AsyncTaskClaimInput {
 
 export interface AsyncTaskRepository {
   createTask(input: AsyncTaskCreateInput): Promise<AsyncTaskRecord>;
+  createTaskWithBacklogAdmission?(
+    input: AsyncTaskBacklogAdmissionInput,
+  ): Promise<AsyncTaskRecord | null>;
   claimQueuedTask?(input: AsyncTaskClaimInput): Promise<AsyncTaskRecord | null>;
   getTask(taskId: string): Promise<AsyncTaskRecord | null>;
   listTasks(filter: AsyncTaskListFilter): Promise<AsyncTaskRecord[]>;

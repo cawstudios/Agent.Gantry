@@ -56,6 +56,7 @@ async function recoverQueuedAsyncCommandTasks(input: {
     agentId: input.agentId,
     kind: 'async_command',
     statuses: ['queued'],
+    order: 'oldest_first',
     limit: input.limit ?? 100,
   });
   let recovered = 0;
@@ -97,6 +98,7 @@ async function recoverQueuedDelegatedAgentTasks(input: {
     agentId: input.agentId,
     kind: 'delegated_agent',
     statuses: ['queued'],
+    order: 'oldest_first',
     limit: input.limit ?? 100,
   });
   let recovered = 0;

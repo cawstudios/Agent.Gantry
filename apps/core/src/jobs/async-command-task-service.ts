@@ -47,7 +47,7 @@ import {
   cancelQueuedTask,
   refreshDelegatedCancellationReceipt,
 } from './async-task-cancellation.js';
-import { AsyncTaskChangeWaiter } from './async-task-change-waiter.js';
+import { asyncTaskChangeWaiterFor } from './async-task-change-waiter.js';
 import type {
   AsyncCommandTaskServiceOptions,
   PendingAsyncTaskExecution,
@@ -55,6 +55,7 @@ import type {
 import { drainQueuedAsyncTasks } from './async-command-task-drainer.js';
 import { asyncCommandPrivateCorrelation } from './async-task-execution-payload.js';
 import { recoverQueuedAsyncTasks } from './async-command-queue-recovery.js';
+import { createAdmittedAsyncTask } from './async-task-admission.js';
 
 const SHELL_POLICY_TOOL_NAME = 'Bash';
 const MAX_ACTIVE_ASYNC_COMMANDS_PER_APP = 4;
@@ -137,7 +138,7 @@ export type StartAsyncCommandTaskResult =
 export class AsyncCommandTaskService {
   private readonly active = new Map<string, AbortController>();
   private readonly pending = new Map<string, PendingAsyncTaskExecution>();
-  private readonly taskChanges = new AsyncTaskChangeWaiter();
+  private readonly taskChanges;
   private readonly classifier = new ToolExecutionClassifier();
   private readonly policy = new ToolExecutionPolicyService();
   private readonly terminateProcess: (
@@ -155,6 +156,7 @@ export class AsyncCommandTaskService {
     private readonly runner: AsyncCommandRunner,
     options: AsyncCommandTaskServiceOptions = {},
   ) {
+    this.taskChanges = asyncTaskChangeWaiterFor(repository);
     this.terminateProcess = options.terminateProcess ?? terminateProcessHandle;
     this.prepareRun = options.prepareRun ?? (async () => undefined);
     this.createRecoveredDelegatedAgentRun =
@@ -244,7 +246,12 @@ export class AsyncCommandTaskService {
       summary: commandSummary(redactedCommand),
       now: nowIso(),
     };
-    const task = await this.repository.createTask(createInput);
+    const created = await createAdmittedAsyncTask({
+      repository: this.repository,
+      task: createInput,
+    });
+    if (!created.ok) return created;
+    const task = created.task;
     this.pending.set(task.id, {
       task,
       command,
@@ -299,7 +306,6 @@ export class AsyncCommandTaskService {
     const task = await this.repository.getTask(input.taskId);
     return task && taskInScope(task, input) ? toPublicAsyncTaskDto(task) : null;
   }
-
   async list(input: {
     appId: string;
     agentId?: string;
@@ -409,7 +415,6 @@ export class AsyncCommandTaskService {
     if (recovered > 0) await this.drainQueuedTasks();
     return recovered;
   }
-
   async cancel(
     input:
       | string
@@ -526,7 +531,6 @@ export class AsyncCommandTaskService {
     }
     return { ok: true, message: 'Task was cancelled. Nothing else changed.' };
   }
-
   private async cancelChildTasks(
     parent: AsyncTaskRecord,
   ): Promise<{ ok: true; cancelled: number } | { ok: false; message: string }> {
@@ -554,7 +558,6 @@ export class AsyncCommandTaskService {
     }
     return { ok: true, cancelled };
   }
-
   private async execute(
     task: AsyncTaskRecord,
     command: string,
@@ -681,7 +684,6 @@ export class AsyncCommandTaskService {
       void this.drainQueuedTasks();
     }
   }
-
   private async drainQueuedTasks(): Promise<void> {
     await drainQueuedAsyncTasks({
       repository: this.repository,

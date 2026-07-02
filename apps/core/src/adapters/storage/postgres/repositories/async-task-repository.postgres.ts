@@ -1,5 +1,6 @@
 import {
   and,
+  asc,
   count,
   desc,
   eq,
@@ -10,6 +11,7 @@ import {
 } from 'drizzle-orm';
 
 import type {
+  AsyncTaskBacklogAdmissionInput,
   AsyncTaskClaimInput,
   AsyncTaskCreateInput,
   AsyncTaskListFilter,
@@ -32,6 +34,45 @@ export class PostgresAsyncTaskRepository implements AsyncTaskRepository {
       .values(taskInsertValues(input))
       .returning();
     return mapRow(row);
+  }
+
+  async createTaskWithBacklogAdmission(
+    input: AsyncTaskBacklogAdmissionInput,
+  ): Promise<AsyncTaskRecord | null> {
+    return this.db.transaction(async (tx) => {
+      const task = input.task;
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`agent_async_tasks_backlog:${task.appId}:${task.kind}`}))`,
+      );
+      const [appBacklog] = await tx
+        .select({ count: count() })
+        .from(pgSchema.agentAsyncTasksPostgres)
+        .where(
+          and(
+            eq(pgSchema.agentAsyncTasksPostgres.appId, task.appId),
+            eq(pgSchema.agentAsyncTasksPostgres.kind, task.kind),
+            inArray(pgSchema.agentAsyncTasksPostgres.status, input.statuses),
+          ),
+        );
+      if ((appBacklog?.count ?? 0) >= input.maxBacklogPerApp) return null;
+      const [agentBacklog] = await tx
+        .select({ count: count() })
+        .from(pgSchema.agentAsyncTasksPostgres)
+        .where(
+          and(
+            eq(pgSchema.agentAsyncTasksPostgres.appId, task.appId),
+            eq(pgSchema.agentAsyncTasksPostgres.agentId, task.agentId),
+            eq(pgSchema.agentAsyncTasksPostgres.kind, task.kind),
+            inArray(pgSchema.agentAsyncTasksPostgres.status, input.statuses),
+          ),
+        );
+      if ((agentBacklog?.count ?? 0) >= input.maxBacklogPerAgent) return null;
+      const [row] = await tx
+        .insert(pgSchema.agentAsyncTasksPostgres)
+        .values(taskInsertValues(task))
+        .returning();
+      return mapRow(row);
+    });
   }
 
   async claimQueuedTask(
@@ -105,7 +146,11 @@ export class PostgresAsyncTaskRepository implements AsyncTaskRepository {
       .select()
       .from(pgSchema.agentAsyncTasksPostgres)
       .where(asyncTaskFilterWhere(filter))
-      .orderBy(desc(pgSchema.agentAsyncTasksPostgres.updatedAt))
+      .orderBy(
+        filter.order === 'oldest_first'
+          ? asc(pgSchema.agentAsyncTasksPostgres.updatedAt)
+          : desc(pgSchema.agentAsyncTasksPostgres.updatedAt),
+      )
       .limit(Math.min(Math.max(filter.limit ?? 50, 1), 100));
     return rows.map(mapRow);
   }
