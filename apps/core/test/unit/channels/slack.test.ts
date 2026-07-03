@@ -47,7 +47,7 @@ vi.mock('@slack/bolt', () => ({
     eventHandlers = new Map<string, ((args: any) => Promise<void>)[]>();
     commandHandlers = new Map<string, (args: any) => Promise<void>>();
     shortcutHandlers = new Map<string, (args: any) => Promise<void>>();
-    actionHandlers = new Map<string, (args: any) => Promise<void>>();
+    actionHandlers = new Map<string | RegExp, (args: any) => Promise<void>>();
     viewHandlers = new Map<string, (args: any) => Promise<void>>();
     errorHandler: ((err: Error) => Promise<void>) | null = null;
 
@@ -113,7 +113,7 @@ vi.mock('@slack/bolt', () => ({
       this.shortcutHandlers.set(name, handler);
     }
 
-    action(name: string, handler: (args: any) => Promise<void>) {
+    action(name: string | RegExp, handler: (args: any) => Promise<void>) {
       this.actionHandlers.set(name, handler);
     }
 
@@ -216,6 +216,21 @@ function createOptsWithApproverHook(
 async function flushSlackPromptRegistration(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function slackActionHandler(
+  actionId: string,
+): ((args: any) => Promise<void>) | undefined {
+  for (const [registeredActionId, handler] of appRef.current.actionHandlers) {
+    if (
+      registeredActionId === actionId ||
+      (registeredActionId instanceof RegExp &&
+        registeredActionId.test(actionId))
+    ) {
+      return handler;
+    }
+  }
+  return undefined;
 }
 
 describe('Slack channel', () => {
@@ -3074,10 +3089,20 @@ describe('Slack channel', () => {
     expect(postCall?.text).toContain('Preferred option?');
     expect(postCall?.text).not.toContain('Source: slack_main');
     expect(postCall?.text).not.toContain('Thread: 1711111111.000200');
-
-    const actionHandler = appRef.current.actionHandlers.get(
-      'gantry_userq_select',
+    const actionBlock = (postCall?.blocks as any[])?.find(
+      (block) => block.type === 'actions',
     );
+    const actionIds = actionBlock?.elements?.map(
+      (element: any) => element.action_id,
+    );
+    expect(new Set(actionIds).size).toBe(actionIds?.length);
+    expect(actionIds).toEqual([
+      'gantry_userq_select_0',
+      'gantry_userq_select_1',
+      'gantry_userq_other',
+    ]);
+
+    const actionHandler = slackActionHandler('gantry_userq_select_1');
     expect(actionHandler).toBeTypeOf('function');
     const ack = vi.fn().mockResolvedValue(undefined);
     await actionHandler?.({
@@ -3202,9 +3227,7 @@ describe('Slack channel', () => {
     });
     await flushSlackPromptRegistration();
 
-    const actionHandler = appRef.current.actionHandlers.get(
-      'gantry_userq_select',
-    );
+    const actionHandler = slackActionHandler('gantry_userq_select_1');
     expect(actionHandler).toBeTypeOf('function');
 
     await actionHandler?.({
@@ -3276,9 +3299,7 @@ describe('Slack channel', () => {
     });
     await flushSlackPromptRegistration();
 
-    const selectHandler = appRef.current.actionHandlers.get(
-      'gantry_userq_select',
-    );
+    const selectHandler = slackActionHandler('gantry_userq_select_0');
     const doneHandler = appRef.current.actionHandlers.get('gantry_userq_done');
     expect(selectHandler).toBeTypeOf('function');
     expect(doneHandler).toBeTypeOf('function');
