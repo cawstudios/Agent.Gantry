@@ -42,6 +42,7 @@ export interface GantryStructuredTaskResult {
   readonly output: Record<string, unknown>;
   readonly validationReport?: Record<string, unknown> | null;
   readonly warnings?: readonly string[];
+  readonly modelUsage?: GantryStructuredModelUsage | null;
 }
 
 export interface GantryStructuredTaskAuditRecord {
@@ -67,6 +68,12 @@ export interface GantryStructuredTaskRunner {
     input: GantryStructuredTaskInput,
   ): Promise<GantryStructuredTaskResult>;
   runAgentTask?(input: GantryAgentTaskInput): Promise<GantryAgentTaskResult>;
+  delegateAgentTask?(
+    input: GantryDelegatedAgentTaskInput,
+  ): Promise<GantryDelegatedAgentTaskHandle>;
+  getDelegatedAgentTask?(
+    input: GantryDelegatedAgentTaskLookup,
+  ): Promise<GantryDelegatedAgentTaskResult>;
 }
 
 export interface GantryAgentToolContext {
@@ -474,7 +481,58 @@ export interface StructuredJsonModelProvider {
     readonly outputSchema?: Record<string, unknown>;
     readonly correlationId?: string | null;
     readonly attachments?: readonly GantryAgentTaskAttachment[];
-  }): Promise<Record<string, unknown> | string>;
+  }): Promise<StructuredJsonModelProviderResult>;
+}
+
+export interface GantryStructuredModelUsage {
+  readonly provider?: string | null;
+  readonly model?: string | null;
+  readonly taskType?: string | null;
+  readonly correlationId?: string | null;
+  readonly promptCharCount?: number | null;
+  readonly inputTokens?: number | null;
+  readonly outputTokens?: number | null;
+  readonly totalTokens?: number | null;
+  readonly cachedTokens?: number | null;
+  readonly durationMs?: number | null;
+  readonly usageSource?: 'provider' | 'estimated' | string;
+}
+
+export type StructuredJsonModelProviderResult =
+  | Record<string, unknown>
+  | string
+  | {
+      readonly output: Record<string, unknown> | string;
+      readonly modelUsage?: GantryStructuredModelUsage | null;
+    };
+
+export interface GantryDelegatedAgentTaskInput {
+  readonly objective: string;
+  readonly context?: string | null;
+  readonly expectedOutput?: string | null;
+  readonly timeoutMs?: number | null;
+  readonly correlationId?: string | null;
+}
+
+export interface GantryDelegatedAgentTaskHandle {
+  readonly taskId: string;
+  readonly status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+  readonly summary?: string | null;
+}
+
+export interface GantryDelegatedAgentTaskLookup {
+  readonly taskId: string;
+  readonly wait?: boolean;
+  readonly timeoutMs?: number | null;
+}
+
+export interface GantryDelegatedAgentTaskResult {
+  readonly taskId: string;
+  readonly status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+  readonly output?: Record<string, unknown> | null;
+  readonly outputText?: string | null;
+  readonly error?: string | null;
+  readonly summary?: string | null;
 }
 
 export type AnthropicStructuredModelEffort =

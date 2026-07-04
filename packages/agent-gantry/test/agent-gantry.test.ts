@@ -87,6 +87,34 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
+  it('accepts markdown-fenced JSON with surrounding text from structured model task final output', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () =>
+          [
+            'Here is the final JSON:',
+            '```json',
+            JSON.stringify({ action: 'final', output: { status: 'ok' } }),
+            '```',
+            'Done.',
+          ].join('\n'),
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.noisy-fenced-json',
+      instructions: 'Return raw JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'ok' },
+    });
+  });
+
   it('still rejects non-JSON prose from structured model task final output', async () => {
     const runner = createStructuredModelTaskRunner({
       model: {
@@ -430,6 +458,11 @@ describe('@cawstudios/agent-gantry', () => {
         return new Response(
           JSON.stringify({
             content: [{ type: 'text', text: '{"status":"completed"}' }],
+            usage: {
+              input_tokens: 12,
+              output_tokens: 3,
+              cache_read_input_tokens: 2,
+            },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -443,7 +476,20 @@ describe('@cawstudios/agent-gantry', () => {
         input: { value: 1 },
         correlationId: 'corr-1',
       }),
-    ).resolves.toEqual({ status: 'completed' });
+    ).resolves.toMatchObject({
+      output: { status: 'completed' },
+      modelUsage: {
+        provider: 'anthropic',
+        model: 'claude-task',
+        taskType: 'task.test',
+        correlationId: 'corr-1',
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        cachedTokens: 2,
+        usageSource: 'provider',
+      },
+    });
     expect(requestBody).toMatchObject({
       model: 'claude-task',
       max_tokens: 4096,
@@ -453,6 +499,37 @@ describe('@cawstudios/agent-gantry', () => {
     expect(requestBody).not.toHaveProperty('thinking');
     expect(requestBody).not.toHaveProperty('output_config');
     expect(JSON.stringify(requestBody)).not.toContain('test-key');
+  });
+
+  it('estimates generic Anthropic token usage when provider usage is missing', async () => {
+    const model = createAnthropicStructuredModelProvider({
+      provider: 'anthropic',
+      apiKey: 'test-key',
+      defaultModel: 'claude-test',
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '{"status":"completed"}' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    });
+
+    await expect(
+      model.generateJson({
+        taskType: 'task.estimated',
+        instructions: 'Return JSON.',
+        input: { value: 1 },
+      }),
+    ).resolves.toMatchObject({
+      output: { status: 'completed' },
+      modelUsage: {
+        provider: 'anthropic',
+        model: 'claude-test',
+        taskType: 'task.estimated',
+        usageSource: 'estimated',
+      },
+    });
   });
 
   it('applies Anthropic task policies to model, effort, and max tokens', async () => {
@@ -474,6 +551,11 @@ describe('@cawstudios/agent-gantry', () => {
         return new Response(
           JSON.stringify({
             content: [{ type: 'text', text: '{"status":"completed"}' }],
+            usage: {
+              input_tokens: 12,
+              output_tokens: 3,
+              cache_read_input_tokens: 2,
+            },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -486,7 +568,7 @@ describe('@cawstudios/agent-gantry', () => {
         instructions: 'Return JSON.',
         input: { value: 1 },
       }),
-    ).resolves.toEqual({ status: 'completed' });
+    ).resolves.toMatchObject({ output: { status: 'completed' } });
 
     expect(requestBody).toMatchObject({
       model: 'claude-sonnet-task',
@@ -514,6 +596,11 @@ describe('@cawstudios/agent-gantry', () => {
         return new Response(
           JSON.stringify({
             content: [{ type: 'text', text: '{"status":"completed"}' }],
+            usage: {
+              input_tokens: 12,
+              output_tokens: 3,
+              cache_read_input_tokens: 2,
+            },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -526,7 +613,7 @@ describe('@cawstudios/agent-gantry', () => {
         instructions: 'Return JSON.',
         input: { value: 1 },
       }),
-    ).resolves.toEqual({ status: 'completed' });
+    ).resolves.toMatchObject({ output: { status: 'completed' } });
 
     expect(requestBody).toMatchObject({
       model: 'claude-haiku-task',
@@ -567,7 +654,7 @@ describe('@cawstudios/agent-gantry', () => {
           },
         ],
       }),
-    ).resolves.toEqual({ status: 'completed' });
+    ).resolves.toMatchObject({ output: { status: 'completed' } });
     const messages = requestBody?.messages;
     expect(Array.isArray(messages)).toBe(true);
     const firstMessage = (messages as Array<{ content?: unknown }>)[0];
@@ -1280,6 +1367,43 @@ describe('@cawstudios/agent-gantry', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('rejects Teams card sends when Bot Framework returns no provider message id', async () => {
+    const adapter: BotFrameworkAdapterLike = {
+      processActivity: async () => undefined,
+      continueConversation: async (_reference, logic) => {
+        await logic({
+          sendActivity: async () => undefined,
+        } as never);
+      },
+    };
+    const transport = createBotFrameworkTeamsTransport({
+      botAppId: 'bot',
+      botAppPassword: 'secret',
+      storage: {
+        getTeamsConversationReference: () => ({
+          exists: true,
+          conversationId: 'conversation',
+          conversationJid: 'teams:conversation',
+          serviceUrl: 'https://smba.trafficmanager.net/emea/',
+          rawReferenceJson: JSON.stringify({
+            serviceUrl: 'https://smba.trafficmanager.net/emea/',
+            conversation: { id: 'conversation' },
+          }),
+        }),
+      },
+      adapter,
+    });
+
+    await expect(
+      transport.sendCard({
+        conversationId: 'conversation',
+        card: { type: 'AdaptiveCard' },
+      }),
+    ).rejects.toThrow(
+      'Teams delivery did not return a provider message id for conversation conversation.',
+    );
+  });
+
   it('sends Teams cards to the base channel when the stored reference is message-scoped', async () => {
     const sent: unknown[] = [];
     const references: unknown[] = [];
@@ -1410,6 +1534,43 @@ describe('@cawstudios/agent-gantry', () => {
     ]);
   });
 
+  it('rejects Teams thread replies when Bot Framework returns no provider message id', async () => {
+    const transport = createBotFrameworkTeamsTransport({
+      botAppId: 'bot',
+      botAppPassword: 'secret',
+      storage: {
+        getTeamsConversationReference: (conversationId: string) => ({
+          exists: true,
+          conversationId,
+          conversationJid: `teams:${conversationId}`,
+          serviceUrl: 'https://smba.trafficmanager.net/emea/',
+          rawReferenceJson: JSON.stringify({
+            serviceUrl: 'https://smba.trafficmanager.net/emea/',
+            conversation: { id: conversationId },
+          }),
+        }),
+      },
+      adapter: {
+        processActivity: async () => undefined,
+        continueConversation: async (_reference, logic) => {
+          await logic({
+            sendActivity: async () => undefined,
+          } as never);
+        },
+      },
+    });
+
+    await expect(
+      transport.sendThreadReply({
+        conversationId: '19:channel',
+        replyToId: 'parent-message',
+        text: 'hello',
+      }),
+    ).rejects.toThrow(
+      'Teams delivery did not return a provider message id for conversation 19:channel;messageid=parent-message.',
+    );
+  });
+
   it('returns a stable missing-reference result for Teams DMs', async () => {
     const transport = createBotFrameworkTeamsTransport({
       botAppId: 'bot',
@@ -1492,6 +1653,55 @@ describe('@cawstudios/agent-gantry', () => {
     ).resolves.toMatchObject({ accepted: true, statusCode: 202 });
     expect(createdConversation).toBe(true);
     expect(sent).toEqual(['hello']);
+  });
+
+  it('rejects Teams DMs when Bot Framework returns no provider message id', async () => {
+    const transport = createBotFrameworkTeamsTransport({
+      botAppId: 'bot',
+      botAppPassword: 'secret',
+      storage: {
+        getTeamsPersonalConversationReference: () => ({
+          exists: true,
+          conversationId: '19:channel-thread',
+          conversationJid: 'teams:19:channel-thread',
+          serviceUrl: 'https://smba.test/',
+          tenantId: 'tenant-1',
+          teamsUserId: 'user-1',
+          rawReferenceJson: JSON.stringify({
+            serviceUrl: 'https://smba.test/',
+            user: { id: '29:user', aadObjectId: 'user-1' },
+            bot: { id: '28:bot' },
+            conversation: {
+              id: '19:channel-thread',
+              conversationType: 'channel',
+              isGroup: true,
+              tenantId: 'tenant-1',
+            },
+          }),
+        }),
+      },
+      adapter: {
+        processActivity: async () => undefined,
+        continueConversation: async () => {
+          throw new Error('should create a personal conversation first');
+        },
+        createConversation: async (_reference, _parameters, logic) => {
+          await logic({
+            sendActivity: async () => undefined,
+          } as never);
+        },
+      },
+    });
+
+    await expect(
+      transport.sendDm({
+        teamsUserId: 'user-1',
+        teamsTenantId: 'tenant-1',
+        text: 'hello',
+      }),
+    ).rejects.toThrow(
+      'Teams delivery did not return a provider message id for conversation 19:channel-thread.',
+    );
   });
 
   it('creates pg-backed runtime storage using the Gantry schema', async () => {

@@ -3,8 +3,10 @@ import type {
   AnthropicStructuredModelConfig,
   AnthropicStructuredModelTaskPolicy,
   GantryAgentTaskAttachment,
+  GantryStructuredModelUsage,
   GantryStructuredModelConfig,
   StructuredJsonModelProvider,
+  StructuredJsonModelProviderResult,
 } from '../shared/types.js';
 import {
   asNonEmptyString,
@@ -46,6 +48,7 @@ export function createAnthropicStructuredModelProvider(
       let lastError: unknown = null;
       for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
         try {
+          const startedAt = Date.now();
           const body = buildAnthropicRequestBody({
             input,
             model,
@@ -71,7 +74,19 @@ export function createAnthropicStructuredModelProvider(
           if (!response.ok) {
             throw buildAnthropicError(response.status, payload);
           }
-          return parseAnthropicJsonPayload(payload);
+          const output = parseAnthropicJsonPayload(payload);
+          return {
+            output,
+            modelUsage: readAnthropicModelUsage({
+              payload,
+              body,
+              output,
+              model,
+              taskType: input.taskType,
+              correlationId: input.correlationId ?? null,
+              durationMs: Date.now() - startedAt,
+            }),
+          };
         } catch (error) {
           lastError = error;
           if (attempt === maxRetries) break;
@@ -280,6 +295,93 @@ function parseAnthropicJsonPayload(
     throw new Error('Anthropic response did not include text content.');
   }
   return parseJsonRecord(stripJsonFence(text));
+}
+
+function readAnthropicModelUsage(input: {
+  readonly payload: Record<string, unknown>;
+  readonly body: Record<string, unknown>;
+  readonly output: Record<string, unknown>;
+  readonly model: string;
+  readonly taskType: string;
+  readonly correlationId: string | null;
+  readonly durationMs: number;
+}): GantryStructuredModelUsage {
+  const usage = asRecord(input.payload.usage);
+  const inputTokens = readOptionalNumber(usage?.input_tokens);
+  const outputTokens = readOptionalNumber(usage?.output_tokens);
+  const cachedTokens = readOptionalNumber(usage?.cache_read_input_tokens) ??
+    readOptionalNumber(usage?.cache_creation_input_tokens);
+  const promptCharCount = JSON.stringify(input.body).length;
+  if (inputTokens !== null || outputTokens !== null) {
+    return {
+      provider: 'anthropic',
+      model: input.model,
+      taskType: input.taskType,
+      correlationId: input.correlationId,
+      promptCharCount,
+      inputTokens,
+      outputTokens,
+      totalTokens: addOptionalNumbers(inputTokens, outputTokens),
+      cachedTokens,
+      durationMs: input.durationMs,
+      usageSource: 'provider',
+    };
+  }
+  const outputCharCount = JSON.stringify(input.output).length;
+  const estimatedInputTokens = estimateTokensFromChars(promptCharCount);
+  const estimatedOutputTokens = estimateTokensFromChars(outputCharCount);
+  return {
+    provider: 'anthropic',
+    model: input.model,
+    taskType: input.taskType,
+    correlationId: input.correlationId,
+    promptCharCount,
+    inputTokens: estimatedInputTokens,
+    outputTokens: estimatedOutputTokens,
+    totalTokens: estimatedInputTokens + estimatedOutputTokens,
+    cachedTokens: null,
+    durationMs: input.durationMs,
+    usageSource: 'estimated',
+  };
+}
+
+function readOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+function addOptionalNumbers(left: number | null, right: number | null): number | null {
+  if (left === null && right === null) return null;
+  return (left ?? 0) + (right ?? 0);
+}
+
+function estimateTokensFromChars(charCount: number): number {
+  return Math.max(1, Math.ceil(charCount / 4));
+}
+
+export function unwrapStructuredJsonModelProviderResult(
+  result: StructuredJsonModelProviderResult,
+): { readonly output: Record<string, unknown> | string; readonly modelUsage: GantryStructuredModelUsage | null } {
+  if (isStructuredModelProviderEnvelope(result)) {
+    return {
+      output: result.output,
+      modelUsage: result.modelUsage ?? null,
+    };
+  }
+  return { output: result, modelUsage: null };
+}
+
+function isStructuredModelProviderEnvelope(
+  value: StructuredJsonModelProviderResult,
+): value is { readonly output: Record<string, unknown> | string; readonly modelUsage?: GantryStructuredModelUsage | null } {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      'output' in value &&
+      'modelUsage' in value,
+  );
 }
 
 function stripJsonFence(text: string): string {

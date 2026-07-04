@@ -13,7 +13,7 @@ import {
   readString,
 } from '../shared/helpers.js';
 import { runGenericAgentTask } from './agent-task-runner.js';
-import { resolveStructuredModelProvider } from './model-provider.js';
+import { resolveStructuredModelProvider, unwrapStructuredJsonModelProviderResult } from './model-provider.js';
 
 export function createStructuredModelTaskRunner(
   config: StructuredModelTaskRunnerConfig,
@@ -31,18 +31,18 @@ export function createStructuredModelTaskRunner(
           input,
         );
         toolContext = await collectStructuredToolContext(tools, input);
-        const generated = await model.generateJson({
+        const generated = unwrapStructuredJsonModelProviderResult(await model.generateJson({
           ...input,
           input: {
             ...input.input,
             ...(browserContext ? { browserContext } : {}),
             ...(toolContext ? { toolContext } : {}),
           },
-        });
+        }));
         const modelOutput =
-          typeof generated === 'string'
-            ? parseJsonRecord(generated)
-            : generated;
+          typeof generated.output === 'string'
+            ? parseJsonRecord(generated.output)
+            : generated.output;
         const output: Record<string, unknown> = {
           ...modelOutput,
           ...(browserContext ? { browserContext } : {}),
@@ -61,6 +61,7 @@ export function createStructuredModelTaskRunner(
                 (value): value is string => typeof value === 'string',
               )
             : [],
+          modelUsage: generated.modelUsage,
         };
         await config.storage?.recordStructuredTaskRun?.({
           taskRunId,

@@ -29,6 +29,7 @@ import {
   runWithOptionalTimeout,
   summarizeAgentObservation,
 } from './agent-task-runner-helpers.js';
+import { unwrapStructuredJsonModelProviderResult } from './model-provider.js';
 
 export async function runGenericAgentTask(
   config: Omit<StructuredModelTaskRunnerConfig, 'model'> & {
@@ -290,7 +291,7 @@ export async function runGenericAgentTask(
       });
       let generated: unknown;
       try {
-        generated = await runWithOptionalTimeout(
+        generated = unwrapStructuredJsonModelProviderResult(await runWithOptionalTimeout(
           config.model.generateJson({
             taskType: input.taskType,
             instructions,
@@ -303,7 +304,7 @@ export async function runGenericAgentTask(
           }),
           input.modelStepTimeoutMs ?? input.stepTimeoutMs ?? remainingMs,
           'agent_model_step_timeout',
-        );
+        )).output;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message !== 'agent_model_step_timeout' || !input.projectStepStateForModel) {
@@ -338,7 +339,7 @@ export async function runGenericAgentTask(
         });
         modelInput = retryModelInput;
         promptMetrics = retryPromptMetrics;
-        generated = await runWithOptionalTimeout(
+        generated = unwrapStructuredJsonModelProviderResult(await runWithOptionalTimeout(
           config.model.generateJson({
             taskType: input.taskType,
             instructions,
@@ -351,7 +352,7 @@ export async function runGenericAgentTask(
           }),
           input.modelStepTimeoutMs ?? input.stepTimeoutMs ?? remainingMs,
           'agent_model_step_timeout',
-        );
+        )).output;
       }
       action =
         typeof generated === 'string'
