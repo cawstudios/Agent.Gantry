@@ -44,6 +44,7 @@ export async function runGenericAgentTask(
   const startedAt = Date.now();
   const steps: GantryAgentTaskStep[] = [];
   const warnings: string[] = [];
+  const modelUsages: GantryStructuredModelUsage[] = [];
   const repeatedFailures = new Map<string, number>();
   const traceDir = resolveAgentModelTraceDir(input);
   const state: Record<string, unknown> = {
@@ -177,6 +178,12 @@ export async function runGenericAgentTask(
     validationReport?: Record<string, unknown> | null,
     error?: string | null,
   ): Promise<GantryAgentTaskResult> => {
+    const modelUsage = aggregateModelUsage({
+      usages: modelUsages,
+      taskType: input.taskType,
+      correlationId: input.correlationId ?? null,
+      durationMs: Date.now() - startedAt,
+    });
     const outputWithTrace = {
       ...output,
       agentTaskTrace: { steps, warnings },
@@ -189,6 +196,7 @@ export async function runGenericAgentTask(
         readValidationReport(outputWithTrace, status, steps),
       steps,
       warnings,
+      modelUsage,
     };
     await config.storage?.recordStructuredTaskRun?.({
       taskRunId,
@@ -310,6 +318,7 @@ export async function runGenericAgentTask(
           'agent_model_step_timeout',
         ));
         generated = generatedResult.output;
+        recordModelUsage(modelUsages, generatedResult.modelUsage);
         promptMetrics = attachModelUsagePromptMetrics(promptMetrics, generatedResult.modelUsage);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -363,6 +372,7 @@ export async function runGenericAgentTask(
           'agent_model_step_timeout',
         ));
         generated = generatedResult.output;
+        recordModelUsage(modelUsages, generatedResult.modelUsage);
         promptMetrics = attachModelUsagePromptMetrics(promptMetrics, generatedResult.modelUsage);
       }
       action =
@@ -980,6 +990,7 @@ export async function runGenericAgentTask(
               'agent_model_step_timeout',
             ));
             const generated = generatedResult.output;
+            recordModelUsage(modelUsages, generatedResult.modelUsage);
             recoveryPromptMetricsWithCache = attachModelUsagePromptMetrics(
               recoveryPromptMetricsWithCache,
               generatedResult.modelUsage,
@@ -1216,6 +1227,75 @@ function attachModelUsagePromptMetrics(
       promptCachePrefixHash: modelUsage.promptCachePrefixHash ?? promptCache.prefixHash ?? null,
     },
   };
+}
+
+function recordModelUsage(
+  usages: GantryStructuredModelUsage[],
+  modelUsage: GantryStructuredModelUsage | null,
+): void {
+  if (modelUsage) {
+    usages.push(modelUsage);
+  }
+}
+
+function aggregateModelUsage(input: {
+  readonly usages: readonly GantryStructuredModelUsage[];
+  readonly taskType: string;
+  readonly correlationId: string | null;
+  readonly durationMs: number;
+}): GantryStructuredModelUsage | null {
+  if (input.usages.length === 0) return null;
+  const providers = uniqueDefined(input.usages.map((usage) => usage.provider));
+  const models = uniqueDefined(input.usages.map((usage) => usage.model));
+  const usageSources = uniqueDefined(input.usages.map((usage) => usage.usageSource));
+  const promptCacheTtls = uniquePromptCacheTtls(input.usages.map((usage) => usage.promptCacheTtl));
+  const promptCachePrefixHashes = uniqueDefined(input.usages.map((usage) => usage.promptCachePrefixHash));
+  const inputTokens = sumOptionalNumbers(input.usages.map((usage) => usage.inputTokens));
+  const outputTokens = sumOptionalNumbers(input.usages.map((usage) => usage.outputTokens));
+  const totalTokens = sumOptionalNumbers(input.usages.map((usage) => usage.totalTokens))
+    ?? addOptionalNumbers(inputTokens, outputTokens);
+  const durationMs = sumOptionalNumbers(input.usages.map((usage) => usage.durationMs)) ?? input.durationMs;
+  return {
+    provider: providers.length === 1 ? providers[0] : providers.length > 1 ? 'mixed' : null,
+    model: models.length === 1 ? models[0] : models.length > 1 ? 'mixed' : null,
+    taskType: input.taskType,
+    correlationId: input.correlationId,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cachedTokens: sumOptionalNumbers(input.usages.map((usage) => usage.cachedTokens)),
+    cacheCreationInputTokens: sumOptionalNumbers(input.usages.map((usage) => usage.cacheCreationInputTokens)),
+    cacheReadInputTokens: sumOptionalNumbers(input.usages.map((usage) => usage.cacheReadInputTokens)),
+    promptCacheTtl: promptCacheTtls.length === 1 ? promptCacheTtls[0] : null,
+    promptCachePrefixHash: promptCachePrefixHashes.length === 1 ? promptCachePrefixHashes[0] : null,
+    durationMs,
+    usageSource: usageSources.length === 1 ? usageSources[0] : 'mixed',
+  };
+}
+
+function uniqueDefined(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function uniquePromptCacheTtls(values: readonly (string | null | undefined)[]): Array<'5m' | '1h'> {
+  return [...new Set(values.filter((value): value is '5m' | '1h' => value === '5m' || value === '1h'))];
+}
+
+function sumOptionalNumbers(values: readonly (number | null | undefined)[]): number | null {
+  let total = 0;
+  let seen = false;
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      total += value;
+      seen = true;
+    }
+  }
+  return seen ? total : null;
+}
+
+function addOptionalNumbers(left: number | null, right: number | null): number | null {
+  if (left === null && right === null) return null;
+  return (left ?? 0) + (right ?? 0);
 }
 
 async function writeAgentModelTrace(

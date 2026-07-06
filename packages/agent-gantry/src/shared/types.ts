@@ -329,6 +329,7 @@ export interface GantryAgentTaskResult {
   readonly validationReport?: Record<string, unknown> | null;
   readonly steps: readonly GantryAgentTaskStep[];
   readonly warnings?: readonly string[];
+  readonly modelUsage?: GantryStructuredModelUsage | null;
 }
 
 export type GantryBrowserGatewayToolName =

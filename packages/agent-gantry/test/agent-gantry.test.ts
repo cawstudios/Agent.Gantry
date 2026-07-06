@@ -87,6 +87,108 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
+  it('returns aggregate model usage from multi-step generic agent tasks', async () => {
+    let callCount = 0;
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () => {
+          callCount += 1;
+          return {
+            output: callCount === 1
+              ? { action: 'call_tool', toolName: 'lookup', input: { q: 'x' } }
+              : { action: 'final', output: { status: 'ok' } },
+            modelUsage: {
+              provider: 'anthropic',
+              model: 'claude-test',
+              taskType: 'task.agent.usage',
+              inputTokens: callCount === 1 ? 10 : 20,
+              outputTokens: callCount === 1 ? 2 : 3,
+              totalTokens: callCount === 1 ? 12 : 23,
+              cacheReadInputTokens: callCount === 1 ? 1 : 4,
+              durationMs: callCount === 1 ? 100 : 200,
+              usageSource: 'provider',
+            },
+          };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.agent.usage',
+      instructions: 'Use the tool, then finish.',
+      input: {},
+      tools: [{
+        name: 'lookup',
+        execute: async () => ({ status: 'ok' }),
+      }],
+      maxSteps: 2,
+      correlationId: 'agent-usage-1',
+    });
+
+    expect(result?.status).toBe('completed');
+    expect(result?.modelUsage).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-test',
+      taskType: 'task.agent.usage',
+      correlationId: 'agent-usage-1',
+      inputTokens: 30,
+      outputTokens: 5,
+      totalTokens: 35,
+      cacheReadInputTokens: 5,
+      durationMs: 300,
+      usageSource: 'provider',
+    });
+  });
+
+  it('includes tool timeout recovery model usage in generic agent task usage', async () => {
+    let callCount = 0;
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () => {
+          callCount += 1;
+          return {
+            output: callCount === 1
+              ? { action: 'call_tool', toolName: 'slow', input: {} }
+              : { action: 'final', output: { status: 'recovered' } },
+            modelUsage: {
+              provider: 'anthropic',
+              model: 'claude-test',
+              inputTokens: callCount === 1 ? 7 : 11,
+              outputTokens: callCount === 1 ? 1 : 2,
+              totalTokens: callCount === 1 ? 8 : 13,
+              usageSource: 'provider',
+            },
+          };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.agent.recovery-usage',
+      instructions: 'Recover from tool timeout.',
+      input: {},
+      tools: [{
+        name: 'slow',
+        execute: async () => {
+          throw new Error('agent_tool_timeout:slow');
+        },
+      }],
+      recoverFromToolError: async () => ({ attempt: 'tool_error_recovery' }),
+      maxSteps: 1,
+      correlationId: 'agent-recovery-usage-1',
+    });
+
+    expect(result?.status).toBe('completed');
+    expect(result?.modelUsage).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-test',
+      inputTokens: 18,
+      outputTokens: 3,
+      totalTokens: 21,
+      usageSource: 'provider',
+    });
+  });
+
   it('accepts markdown-fenced JSON with surrounding text from structured model task final output', async () => {
     const runner = createStructuredModelTaskRunner({
       model: {
