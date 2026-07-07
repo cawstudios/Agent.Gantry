@@ -329,6 +329,108 @@ describe('runner browser MCP gateway tools', () => {
     expect(result).toBe(compactResult);
   });
 
+  it('can append post-action snapshot and screenshot evidence', async () => {
+    requestBrowserAction
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { content: [{ type: 'text', text: 'Clicked element.' }] },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { content: [{ type: 'text', text: 'Title: Dashboard' }] },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          content: [{ type: 'text', text: 'Saved to /tmp/shot.png' }],
+          file: {
+            path: '/tmp/shot.png',
+            mimeType: 'image/png',
+            sizeBytes: 10,
+          },
+        },
+      });
+    const server = new TestMcpServer();
+    registerBrowserTools(server as never);
+
+    const result = await server.tools.get('browser_act')?.({
+      action: 'click',
+      payload: { target: 'button[name=save]' },
+      evidence: {
+        snapshot: true,
+        screenshot: true,
+        snapshot_filename: 'after-save.txt',
+        screenshot_filename: 'after-save.png',
+      },
+    });
+
+    expect(requestBrowserAction).toHaveBeenNthCalledWith(
+      1,
+      'click',
+      { target: 'button[name=save]' },
+      { timeoutMs: 120_000, publicToolName: 'browser_act' },
+    );
+    expect(requestBrowserAction).toHaveBeenNthCalledWith(
+      2,
+      'snapshot',
+      { filename: 'after-save.txt' },
+      { timeoutMs: 120_000, publicToolName: 'browser_act' },
+    );
+    expect(requestBrowserAction).toHaveBeenNthCalledWith(
+      3,
+      'screenshot',
+      { filename: 'after-save.png' },
+      { timeoutMs: 120_000, publicToolName: 'browser_act' },
+    );
+    expect(result).toEqual({
+      content: [
+        { type: 'text', text: 'Clicked element.' },
+        { type: 'text', text: 'Title: Dashboard' },
+        { type: 'text', text: 'Saved to /tmp/shot.png' },
+      ],
+      file: {
+        path: '/tmp/shot.png',
+        mimeType: 'image/png',
+        sizeBytes: 10,
+      },
+    });
+  });
+
+  it('keeps a successful browser action successful when post-action evidence fails', async () => {
+    requestBrowserAction
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { content: [{ type: 'text', text: 'Typed text.' }] },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'screenshot timeout',
+      });
+    const server = new TestMcpServer();
+    registerBrowserTools(server as never);
+
+    const result = await server.tools.get('browser_act')?.({
+      action: 'type',
+      payload: { target: 'e1', text: 'hello' },
+      evidence: { screenshot: true },
+    });
+
+    expect(result).toEqual({
+      content: [
+        { type: 'text', text: 'Typed text.' },
+        {
+          type: 'text',
+          text: [
+            'Post-action screenshot evidence failed.',
+            'Browser action failed.',
+            'cause: screenshot: screenshot timeout',
+            'recover: run gantry status and retry after the browser is ready.',
+          ].join('\n'),
+        },
+      ],
+    });
+  });
+
   it('keeps public browser gateway schemas parseable', () => {
     const server = new TestMcpServer();
     registerBrowserTools(server as never);
@@ -368,6 +470,18 @@ describe('runner browser MCP gateway tools', () => {
         payload: {
           target: 'file-input',
           source: { type: 'bytes', name: 'a.txt', content: 'hello' },
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      actSchema.safeParse({
+        action: 'click',
+        payload: { target: 'e1' },
+        evidence: {
+          snapshot: true,
+          screenshot: true,
+          snapshot_filename: 'after-click.txt',
+          screenshot_filename: 'after-click.png',
         },
       }).success,
     ).toBe(true);

@@ -204,6 +204,27 @@ const actAction = z.enum([
   'handle_dialog',
   'resize',
 ]);
+const actEvidence = z
+  .object({
+    snapshot: z
+      .boolean()
+      .optional()
+      .describe('Capture a compact post-action page snapshot.'),
+    screenshot: z
+      .boolean()
+      .optional()
+      .describe('Capture a post-action screenshot artifact.'),
+    snapshot_filename: fileName.describe(
+      'Optional relative artifact filename for the post-action snapshot.',
+    ),
+    screenshot_filename: fileName.describe(
+      'Optional relative artifact filename for the post-action screenshot.',
+    ),
+  })
+  .optional()
+  .describe(
+    'Optional post-action evidence. Use when the user needs to see what changed.',
+  );
 
 export function registerBrowserTools(server: McpServer): void {
   register(
@@ -290,6 +311,7 @@ export function registerBrowserTools(server: McpServer): void {
       action: actAction,
       profile,
       payload,
+      evidence: actEvidence,
       reason,
     },
     async (args) => {
@@ -306,10 +328,16 @@ export function registerBrowserTools(server: McpServer): void {
         args.payload && typeof args.payload === 'object'
           ? (args.payload as Record<string, unknown>)
           : {};
-      return callBrowserBackend(
+      const result = await callBrowserBackend(
         'browser_act',
         actBackendAction(action),
         actBackendPayload(action, actionPayload),
+        browserTimeoutMs(args),
+      );
+      if (isBrowserErrorResult(result)) return result;
+      return withPostActionEvidence(
+        result,
+        args.evidence,
         browserTimeoutMs(args),
       );
     },
@@ -331,6 +359,108 @@ function isBrowserErrorResult(value: unknown): value is { isError: true } {
     typeof value === 'object' &&
     (value as { isError?: unknown }).isError === true,
   );
+}
+
+async function withPostActionEvidence(
+  actionResult: BrowserMcpToolResult,
+  evidence: unknown,
+  timeoutMs: number,
+): Promise<BrowserMcpToolResult> {
+  if (!evidence || typeof evidence !== 'object') return actionResult;
+  const request = evidence as Record<string, unknown>;
+  const includeSnapshot = request.snapshot === true;
+  const includeScreenshot = request.screenshot === true;
+  if (!includeSnapshot && !includeScreenshot) return actionResult;
+
+  const evidenceResults: BrowserMcpToolResult[] = [];
+  if (includeSnapshot) {
+    evidenceResults.push(
+      await captureBrowserEvidence(
+        'snapshot',
+        evidencePayload(request.snapshot_filename),
+        timeoutMs,
+      ),
+    );
+  }
+  if (includeScreenshot) {
+    evidenceResults.push(
+      await captureBrowserEvidence(
+        'screenshot',
+        evidencePayload(request.screenshot_filename),
+        timeoutMs,
+      ),
+    );
+  }
+  return mergeBrowserResults(actionResult, evidenceResults);
+}
+
+async function captureBrowserEvidence(
+  action: BrowserBackendAction,
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<BrowserMcpToolResult> {
+  try {
+    const result = await callBrowserBackend(
+      'browser_act',
+      action,
+      payload,
+      timeoutMs,
+    );
+    if (isBrowserErrorResult(result)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Post-action ${action} evidence failed.\n${browserResultText(result)}`,
+          },
+        ],
+      };
+    }
+    return result;
+  } catch (err) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Post-action ${action} evidence failed: ${errorMessage(err)}`,
+        },
+      ],
+    };
+  }
+}
+
+function evidencePayload(filename: unknown): Record<string, unknown> {
+  return typeof filename === 'string' && filename.trim()
+    ? { filename: filename.trim() }
+    : {};
+}
+
+function mergeBrowserResults(
+  actionResult: BrowserMcpToolResult,
+  evidenceResults: BrowserMcpToolResult[],
+): BrowserMcpToolResult {
+  const content: BrowserMcpToolResult['content'] = [
+    ...actionResult.content,
+    ...evidenceResults.flatMap((result) => result.content),
+  ];
+  const merged: BrowserMcpToolResult = { ...actionResult, content };
+  const files = [actionResult, ...evidenceResults]
+    .map((result) => result.file)
+    .filter(Boolean);
+  if (files.length === 1) merged.file = files[0];
+  if (files.length > 1) merged.files = files;
+  return merged;
+}
+
+function browserResultText(result: BrowserMcpToolResult): string {
+  return result.content
+    .map((item) => item.text)
+    .filter(Boolean)
+    .join('\n');
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function inspectBackendAction(mode: BrowserInspectMode): BrowserBackendAction {

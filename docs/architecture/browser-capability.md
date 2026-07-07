@@ -17,6 +17,14 @@ state and defaults to compact basic output; full output requires a reason.
 `browser_act` handles page interactions after inspection. Long-running tools may
 pass `timeout_ms`; Gantry clamps it and applies the resulting budget to signed
 IPC and host-owned browser dispatch.
+When a run needs visible proof after an action, `browser_act` may include
+`evidence: { snapshot: true, screenshot: true }`. Gantry then performs the
+action first and captures compact post-action evidence through the same browser
+gateway. Snapshot output follows the usual inline-or-file compaction rules, and
+screenshots are persisted as file references under the run browser artifact
+root. Evidence capture is best-effort: if the action succeeds but a screenshot
+or snapshot fails, Gantry returns the action result with an evidence failure note
+instead of converting the browser action into a failed run.
 The host caches browser connections by profile and endpoint, de-dupes
 concurrent connection attempts, and reconnects once when browser handles are
 stale.
