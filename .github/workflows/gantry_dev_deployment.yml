@@ -65,4 +65,5 @@ jobs:
             service: ${{ env.ECS_SERVICE }}
             cluster: ${{ env.ECS_CLUSTER }}
             wait-for-service-stability: true
+            wait-max-delay-seconds: 15
             wait-for-minutes: 15
