@@ -83,7 +83,7 @@ async function preflightAliasProviders(input: {
     ({ alias }) => alias && isModelFamilyAlias(alias),
   );
   const configuredProviders = hasFamilyAlias
-    ? await fetchConfiguredProviders(input.runtimeHome)
+    ? await configuredProviderIdsForCli(input.runtimeHome)
     : undefined;
   const familyOrder = familyOrderFromSettings(input.settings);
   for (const { alias, workload } of input.aliases) {
@@ -118,6 +118,22 @@ async function preflightAliasProviders(input: {
   return true;
 }
 
+// Configured model providers for CLI family resolution. Storage is the
+// source of truth and works with the service stopped; the control API is
+// the fallback when storage is unreachable from this process.
+async function configuredProviderIdsForCli(
+  runtimeHome: string,
+): Promise<ReadonlySet<string> | undefined> {
+  try {
+    const { listReadyModelCredentialProviders } = await import(
+      './credentials.js'
+    );
+    return await listReadyModelCredentialProviders(runtimeHome);
+  } catch {
+    return fetchConfiguredProviders(runtimeHome);
+  }
+}
+
 async function memoryResetProviderFromSettings(
   runtimeHome: string,
   settings: ModelCommandSettings,
@@ -125,7 +141,7 @@ async function memoryResetProviderFromSettings(
   const fallback = providerFromSettings(settings);
   const alias = chatAlias(settings);
   if (!isModelFamilyAlias(alias)) return fallback;
-  const configuredProviders = await fetchConfiguredProviders(runtimeHome);
+  const configuredProviders = await configuredProviderIdsForCli(runtimeHome);
   if (!configuredProviders) return fallback;
   const concreteAlias = resolveModelFamilyAlias(alias, {
     isProviderConfigured: (providerId) => configuredProviders.has(providerId),

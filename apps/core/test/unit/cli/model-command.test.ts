@@ -4,6 +4,16 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const listReadyProvidersMock = vi.hoisted(() =>
+  vi.fn<() => Promise<ReadonlySet<string>>>(async () => {
+    throw new Error('storage unavailable in tests');
+  }),
+);
+
+vi.mock('@core/cli/credentials.js', () => ({
+  listReadyModelCredentialProviders: listReadyProvidersMock,
+}));
+
 import { runModelCommand } from '@core/cli/model.js';
 import { resolveModelSelectionForWorkload } from '@core/shared/model-catalog.js';
 import {
@@ -131,6 +141,39 @@ describe('model CLI command', () => {
       expect.any(Object),
       'gpt',
     );
+  });
+
+  it('preflights the storage-configured family member with the service stopped', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    listReadyProvidersMock.mockResolvedValueOnce(new Set(['cerebras']));
+    const preflightProvider = vi.fn(async () => ({
+      ok: true,
+      status: 'pass' as const,
+      message: 'ok',
+    }));
+
+    await expect(
+      runModelCommand(runtimeHome, ['set', 'chat', 'gpt-oss'], {
+        preflightProvider,
+      }),
+    ).resolves.toBe(0);
+
+    // Storage says only cerebras is configured, so the runtime would select
+    // the cerebras member — preflight must check that provider, not groq.
+    expect(preflightProvider).toHaveBeenCalledWith(
+      runtimeHome,
+      'cerebras',
+      expect.any(Object),
+      expect.any(String),
+    );
+    expect(preflightProvider).not.toHaveBeenCalledWith(
+      runtimeHome,
+      'groq',
+      expect.anything(),
+      expect.anything(),
+    );
+    logSpy.mockRestore();
   });
 
   it('accepts a model family alias for set chat and stores it verbatim', async () => {
