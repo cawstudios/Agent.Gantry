@@ -426,7 +426,14 @@ export async function runModelCommand(
         resolved.alias,
         resolved.entry.modelRoute.id,
       );
-      if (oldMemoryProvider !== resolved.entry.modelRoute.id) {
+      // Compare against the provider `reset memory` would actually target —
+      // for a family alias that is the credential-selected member, not the
+      // first member borrowed by the resolver's entry.
+      const newMemoryProvider = await memoryResetProviderFromSettings(
+        runtimeHome,
+        settings,
+      );
+      if (oldMemoryProvider !== newMemoryProvider) {
         console.warn(
           `Memory models still on ${oldMemoryProvider} — run \`gantry model reset memory\` to re-derive.`,
         );
