@@ -50,6 +50,7 @@ export interface SetupDraft {
   agentName: string;
   selectedModel: string;
   agentHarness: AgentHarness;
+  credentialLiveSkipProviderIds: string[];
   telegramBotToken: string;
   telegramChatJid: string;
   telegramDisplayName: string;
@@ -133,6 +134,9 @@ export function updateStateData(
     agentName: draft.agentName,
     selectedModel: draft.selectedModel || undefined,
     agentHarness: draft.agentHarness,
+    credentialLiveSkipProviderIds: draft.credentialLiveSkipProviderIds?.length
+      ? draft.credentialLiveSkipProviderIds
+      : undefined,
     workspaceKey: draft.workspaceKey || undefined,
     conversationLabel: draft.conversationLabel || undefined,
     memoryEnabled: draft.memoryEnabled,
@@ -176,6 +180,9 @@ export function updateDraftFromState(
   draft.agentHarness = isAgentHarness(state.data.agentHarness)
     ? state.data.agentHarness
     : draft.agentHarness;
+  draft.credentialLiveSkipProviderIds =
+    state.data.credentialLiveSkipProviderIds ??
+    draft.credentialLiveSkipProviderIds;
   draft.workspaceKey = state.data.workspaceKey || draft.workspaceKey;
   draft.conversationLabel =
     state.data.conversationLabel || draft.conversationLabel;
@@ -253,6 +260,8 @@ export function restoreDraft(
     agentHarness: isAgentHarness(state?.data.agentHarness)
       ? state.data.agentHarness
       : settings.agent.agentHarness || AUTO_AGENT_HARNESS,
+    credentialLiveSkipProviderIds:
+      state?.data.credentialLiveSkipProviderIds ?? [],
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
     telegramChatJid:
       primaryProvider === 'telegram' ? readySummary.conversationJid : '',

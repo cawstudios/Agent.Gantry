@@ -24,6 +24,7 @@ export interface CredentialSetupDraft {
   postgresDatabaseUrl?: string;
   postgresSchema?: string;
   selectedModel?: string;
+  credentialLiveSkipProviderIds?: string[];
   memoryEnabled?: boolean;
   embeddingsEnabled?: boolean;
   dreamingEnabled?: boolean;
@@ -39,6 +40,7 @@ export type CredentialStepAction =
 export async function verifyModelAccess(
   runtimeHome?: string,
   settings?: Parameters<typeof inspectModelCredentialReadiness>[1],
+  options: { skipLiveProviderIds?: readonly string[] } = {},
 ): Promise<{ ok: boolean; message: string; nextAction?: string }> {
   if (!runtimeHome || !settings) {
     return {
@@ -49,7 +51,10 @@ export async function verifyModelAccess(
   }
 
   try {
-    const check = await inspectModelCredentialReadiness(runtimeHome, settings);
+    const check = await inspectModelCredentialReadiness(runtimeHome, settings, {
+      live: true,
+      skipLiveProviderIds: options.skipLiveProviderIds,
+    });
     return {
       ok: check.status !== 'fail',
       message: check.message,
@@ -196,15 +201,21 @@ export async function runCredentialsStep(
       authMode: credentialInput.authMode,
       payload: credentialInput.payload,
     });
+    const skippedProviderIds = new Set(
+      draft.credentialLiveSkipProviderIds ?? [],
+    );
     if (verification.type === 'skip') {
+      skippedProviderIds.add(provider.id);
       p.log.warn(
         `${provider.label} credential stored without live verification: ${verification.reason}`,
       );
     } else {
+      skippedProviderIds.delete(provider.id);
       p.log.success(
         `${provider.label} credential stored. Model Access is ready to validate during runtime preflight.`,
       );
     }
+    draft.credentialLiveSkipProviderIds = [...skippedProviderIds];
   }
   return { type: 'next' };
 }

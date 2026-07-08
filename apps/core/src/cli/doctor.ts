@@ -70,6 +70,7 @@ export type DoctorNetworkOptions = {
   validateTelegramToken?: boolean;
   validateSlackToken?: boolean;
   validateModelCredentials?: boolean;
+  modelCredentialLiveSkipProviderIds?: readonly string[];
   telegramTimeoutMs?: number;
   slackTimeoutMs?: number;
 };
@@ -652,6 +653,7 @@ export async function runDoctorWithNetwork(
       report,
       await inspectModelCredentialReadiness(runtimeHome, settings, {
         live: options.validateModelCredentials !== false,
+        skipLiveProviderIds: options.modelCredentialLiveSkipProviderIds,
       }),
     );
   }

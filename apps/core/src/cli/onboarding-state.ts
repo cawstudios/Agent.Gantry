@@ -41,6 +41,7 @@ export interface OnboardingData {
   agentName?: string;
   selectedModel?: string;
   agentHarness?: AgentHarness;
+  credentialLiveSkipProviderIds?: string[];
   workspaceKey?: string;
   conversationLabel?: string;
   maintenanceMode?: boolean;

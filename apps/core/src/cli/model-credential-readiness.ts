@@ -42,7 +42,7 @@ type ModelCredentialReadinessStorage = {
 export async function inspectModelCredentialReadiness(
   runtimeHome: string,
   settings: ModelCredentialReadinessSettings,
-  options: { live?: boolean } = {},
+  options: { live?: boolean; skipLiveProviderIds?: readonly string[] } = {},
 ): Promise<DoctorCheck> {
   if (settings.credentialBroker.mode !== 'gantry') {
     return {
@@ -103,30 +103,33 @@ export async function inspectModelCredentialReadiness(
       };
     }
     if (options.live) {
+      const skipLiveProviderIds = new Set(options.skipLiveProviderIds ?? []);
       const liveResults = await Promise.all(
-        requiredProviders.map(async (providerId) => {
-          const credential = await service.getActiveCredential({
-            appId: 'default' as AppId,
-            providerId: providerId as ModelCredentialProvider,
-          });
-          if (!credential) {
+        requiredProviders
+          .filter((providerId) => !skipLiveProviderIds.has(providerId))
+          .map(async (providerId) => {
+            const credential = await service.getActiveCredential({
+              appId: 'default' as AppId,
+              providerId: providerId as ModelCredentialProvider,
+            });
+            if (!credential) {
+              return {
+                providerId,
+                result: {
+                  ok: false,
+                  message: `No active ${providerId} model credential was found.`,
+                },
+              };
+            }
             return {
               providerId,
-              result: {
-                ok: false,
-                message: `No active ${providerId} model credential was found.`,
-              },
+              result: await verifyModelProviderCredentialLive({
+                providerId,
+                authMode: credential.authMode,
+                payload: credential.payload,
+              }),
             };
-          }
-          return {
-            providerId,
-            result: await verifyModelProviderCredentialLive({
-              providerId,
-              authMode: credential.authMode,
-              payload: credential.payload,
-            }),
-          };
-        }),
+          }),
       );
       const failed = liveResults.find(
         (item) => 'ok' in item.result && !item.result.ok,

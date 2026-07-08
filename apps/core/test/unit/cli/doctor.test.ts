@@ -477,6 +477,53 @@ describe('doctor model credential readiness', () => {
     );
   });
 
+  it('skips live model probes only for setup skip-listed providers', async () => {
+    const now = new Date().toISOString();
+    mockListModelCredentials.mockResolvedValue([
+      {
+        id: 'model-credential:default:anthropic',
+        appId: 'default',
+        providerId: 'anthropic',
+        authMode: 'api_key',
+        status: 'active',
+        schemaVersion: 1,
+        fingerprint: 'sha256:anthropic',
+        fieldFingerprints: [{ field: 'apiKey', fingerprint: 'sha256:field' }],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'model-credential:default:openai',
+        appId: 'default',
+        providerId: 'openai',
+        authMode: 'api_key',
+        status: 'active',
+        schemaVersion: 1,
+        fingerprint: 'sha256:openai',
+        fieldFingerprints: [{ field: 'apiKey', fingerprint: 'sha256:field' }],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const runtimeHome = makeRuntimeHome({ embeddingsEnabled: true });
+    const { ensureRuntimeSettings } =
+      await import('@core/config/settings/runtime-settings.js');
+    const { inspectModelCredentialReadiness } =
+      await import('@core/cli/model-credential-readiness.js');
+
+    const check = await inspectModelCredentialReadiness(
+      runtimeHome,
+      ensureRuntimeSettings(runtimeHome),
+      { live: true, skipLiveProviderIds: ['anthropic'] },
+    );
+
+    expect(check.status).toBe('pass');
+    expect(mockVerifyModelProviderCredentialLive).toHaveBeenCalledTimes(1);
+    expect(mockVerifyModelProviderCredentialLive).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: 'openai' }),
+    );
+  });
+
   it('validates Slack bot and app tokens in network doctor', async () => {
     const now = new Date().toISOString();
     mockListModelCredentials.mockResolvedValue([

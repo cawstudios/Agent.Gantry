@@ -84,6 +84,7 @@ function scopeProviderDoctorReport(report: DoctorReport): DoctorReport {
       'telegram-token',
       'telegram-token-api',
       'slack-tokens',
+      'slack-token-api',
       'discord-credentials',
       'teams-credentials',
     ].includes(check.id),

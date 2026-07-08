@@ -197,7 +197,11 @@ export async function runVerifyStep(
   importMetaUrl: string,
   draft: SetupDraft,
 ): Promise<FlowAction> {
-  const report = await runDoctorWithNetwork(importMetaUrl, draft.runtimeHome);
+  const credentialLiveSkipProviderIds =
+    draft.credentialLiveSkipProviderIds ?? [];
+  const report = await runDoctorWithNetwork(importMetaUrl, draft.runtimeHome, {
+    modelCredentialLiveSkipProviderIds: credentialLiveSkipProviderIds,
+  });
   const runtimeConfigured = hasRuntimeConfig(draft.runtimeHome);
   const hasProcessableGroup = await hasProcessableGroupForConfiguredChannel(
     draft.runtimeHome,
@@ -260,6 +264,7 @@ export async function runVerifyStep(
   const modelAccess = await verifyModelAccess(
     draft.runtimeHome,
     loadRuntimeSettings(draft.runtimeHome),
+    { skipLiveProviderIds: credentialLiveSkipProviderIds },
   );
   if (!modelAccess.ok) {
     p.log.warn(

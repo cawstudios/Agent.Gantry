@@ -293,9 +293,11 @@ describe('setup credentials step', () => {
         ],
       });
     const draft = {
+      runtimeHome: '/tmp/gantry-credentials-test',
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
       selectedModel: 'opus',
+      credentialLiveSkipProviderIds: [] as string[],
       memoryEnabled: false,
       embeddingsEnabled: false,
       dreamingEnabled: false,
@@ -308,6 +310,13 @@ describe('setup credentials step', () => {
 
     expect(action).toEqual({ type: 'next' });
     expect(upsertModelCredential).toHaveBeenCalledTimes(1);
+    expect(draft.credentialLiveSkipProviderIds).toEqual(['anthropic']);
+    const { createInitialState } =
+      await import('@core/cli/onboarding-state.js');
+    const { updateStateData } = await import('@core/cli/setup-flow-state.js');
+    const state = createInitialState('/tmp/gantry-credentials-test');
+    updateStateData(state, draft as never);
+    expect(state.data.credentialLiveSkipProviderIds).toEqual(['anthropic']);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('stored without live verification'),
     );

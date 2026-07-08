@@ -434,8 +434,8 @@ describe('config save copy', () => {
 async function loadVerifyStep(input: {
   runtimeConfigured: boolean;
   hasProcessableGroup?: boolean;
-  report?: unknown;
-  modelAccess?: unknown;
+  report?: unknown | ((options: unknown) => unknown);
+  modelAccess?: unknown | ((options: unknown) => unknown);
 }) {
   const warn = vi.fn();
   const note = vi.fn();
@@ -444,9 +444,14 @@ async function loadVerifyStep(input: {
     note,
     log: { error: vi.fn(), info: vi.fn(), warn, success: vi.fn() },
   }));
-  const report = input.report ?? { ok: true, sections: [], checks: [] };
+  const defaultReport = { ok: true, sections: [], checks: [] };
+  const runDoctorWithNetwork = vi.fn(async (...args: unknown[]) =>
+    typeof input.report === 'function'
+      ? input.report(args[2])
+      : (input.report ?? defaultReport),
+  );
   vi.doMock('@core/cli/doctor.js', () => ({
-    runDoctorWithNetwork: vi.fn(async () => report),
+    runDoctorWithNetwork,
     formatDoctorReport: vi.fn(() => 'doctor'),
     hasRuntimeConfig: vi.fn(() => input.runtimeConfigured),
     hasProcessableGroupForConfiguredChannel: vi.fn(
@@ -459,17 +464,29 @@ async function loadVerifyStep(input: {
     >()),
     listConnectableChannelProviders: vi.fn(() => [{ id: 'telegram' }]),
   }));
+  const verifyModelAccess = vi.fn(async (...args: unknown[]) =>
+    typeof input.modelAccess === 'function'
+      ? input.modelAccess(args[2])
+      : (input.modelAccess ?? { ok: true, message: 'ok' }),
+  );
   vi.doMock('@core/cli/setup-credentials.js', () => ({
     requiredModelCredentialProviderReasonsForSetupDraft: vi.fn(() => [
       { providerId: 'anthropic', reasons: ['main model opus'] },
     ]),
     requiredModelCredentialProvidersForSetupDraft: vi.fn(() => ['anthropic']),
-    verifyModelAccess: vi.fn(
-      async () => input.modelAccess ?? { ok: true, message: 'ok' },
-    ),
+    verifyModelAccess,
   }));
+  vi.doMock(
+    '@core/config/settings/runtime-settings.js',
+    async (importOriginal) => ({
+      ...(await importOriginal<
+        typeof import('@core/config/settings/runtime-settings.js')
+      >()),
+      loadRuntimeSettings: vi.fn(() => ({})),
+    }),
+  );
   const { runVerifyStep } = await import('@core/cli/setup-flow-final-steps.js');
-  return { runVerifyStep, warn };
+  return { runVerifyStep, warn, runDoctorWithNetwork, verifyModelAccess };
 }
 
 describe('blocked copy', () => {
@@ -544,6 +561,58 @@ describe('blocked copy', () => {
         'Setup blocked: Missing active model credentials for selected defaults: anthropic.',
         'Next action: Run `gantry credentials model set anthropic`.',
       ].join('\n'),
+    );
+  });
+
+  it('does not bounce setup when a skip-listed credential only fails live verification', async () => {
+    const { runVerifyStep, runDoctorWithNetwork, verifyModelAccess } =
+      await loadVerifyStep({
+        runtimeConfigured: true,
+        report: (options) =>
+          (
+            options as {
+              modelCredentialLiveSkipProviderIds?: readonly string[];
+            }
+          ).modelCredentialLiveSkipProviderIds?.includes('anthropic')
+            ? { ok: true, sections: [], checks: [] }
+            : {
+                ok: false,
+                blockingFailures: 1,
+                warnings: 0,
+                checks: [
+                  {
+                    id: 'model-access-credentials',
+                    title: 'Model Access Credentials',
+                    status: 'fail',
+                    message: 'anthropic live credential check failed: 401',
+                    nextAction: 'gantry credentials model set anthropic',
+                  },
+                ],
+              },
+        modelAccess: (options) =>
+          (
+            options as {
+              skipLiveProviderIds?: readonly string[];
+            }
+          ).skipLiveProviderIds?.includes('anthropic')
+            ? { ok: true, message: 'ok' }
+            : { ok: false, message: 'anthropic live credential check failed' },
+      });
+
+    const action = await runVerifyStep('file:///x', {
+      runtimeHome: '/tmp/x',
+      primaryProvider: 'telegram',
+      credentialLiveSkipProviderIds: ['anthropic'],
+    } as never);
+
+    expect(action).toEqual({ type: 'next' });
+    expect(runDoctorWithNetwork).toHaveBeenCalledWith('file:///x', '/tmp/x', {
+      modelCredentialLiveSkipProviderIds: ['anthropic'],
+    });
+    expect(verifyModelAccess).toHaveBeenCalledWith(
+      '/tmp/x',
+      expect.anything(),
+      { skipLiveProviderIds: ['anthropic'] },
     );
   });
 });
