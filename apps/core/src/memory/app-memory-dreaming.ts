@@ -25,46 +25,18 @@ import {
   parseJsonObject,
 } from './app-memory-dreaming-evidence.js';
 import { nowIso as currentIso } from '../shared/time/datetime.js';
+import {
+  recordDreamDecision,
+  routeMemoryProposalToReview,
+  setCandidateStatus,
+  type CreatePendingReview,
+} from './app-memory-dreaming-review-routing.js';
 type Db = NodePgDatabase<typeof pgSchema>;
 type MemoryItemRow = typeof pgSchema.memoryItemsPostgres.$inferSelect;
-// prettier-ignore
-type CreatePendingReview = (p: MemoryLifecycleProposal, db?: Db) => Promise<string>;
 // prettier-ignore
 type DreamEmbeddingResult = { status: 'stored' | 'disabled' | 'retryable'; reason?: string };
 function nowIso(): string {
   return currentIso();
-}
-async function setCandidateStatus(db: Db, id: string, status: string) {
-  await db
-    .update(pgSchema.memoryCandidatesPostgres)
-    .set({ status, updatedAt: nowIso() })
-    .where(eq(pgSchema.memoryCandidatesPostgres.id, id));
-}
-async function recordDreamDecision(input: {
-  db: Db;
-  runId: string;
-  subject: NormalizedMemorySubject;
-  action: DreamDecisionAction;
-  rationale: string;
-  itemId?: string;
-  candidateId?: string;
-  evidenceIds?: string[];
-  applied: boolean;
-}): Promise<void> {
-  await input.db.insert(pgSchema.memoryDreamDecisionsPostgres).values({
-    id: `mdd_${randomUUID().replace(/-/g, '')}`,
-    runId: input.runId,
-    appId: input.subject.appId,
-    agentId: input.subject.agentId,
-    threadId: null,
-    itemId: input.itemId ?? null,
-    candidateId: input.candidateId ?? null,
-    action: input.action,
-    rationale: input.rationale,
-    evidenceIdsJson: JSON.stringify(input.evidenceIds || []),
-    applied: input.applied,
-    createdAt: nowIso(),
-  });
 }
 async function candidateCitesUnsafeEvidence(db: Db, evidenceIds: string[]) {
   if (evidenceIds.length === 0) return false;
@@ -77,71 +49,6 @@ async function candidateCitesUnsafeEvidence(db: Db, evidenceIds: string[]) {
 }
 // prettier-ignore
 function candidateMemoryKind(kind: string): MemoryKind | undefined { return ['preference', 'decision', 'fact', 'correction', 'constraint'].includes(kind) ? (kind as MemoryKind) : undefined; }
-async function routeMemoryProposalToReview(input: {
-  db: Db;
-  runId: string;
-  subject: NormalizedMemorySubject;
-  dryRun: boolean;
-  createPendingReview?: CreatePendingReview;
-  proposal: MemoryLifecycleProposal;
-  candidateId?: string;
-  itemId?: string;
-  evidenceIds?: string[];
-  reviewRationale: string;
-  blockRationale: string;
-}): Promise<DreamDecisionAction> {
-  if (input.dryRun) {
-    await recordDreamDecision({
-      db: input.db,
-      runId: input.runId,
-      subject: input.subject,
-      action: 'dry_run',
-      ...(input.itemId ? { itemId: input.itemId } : {}),
-      ...(input.candidateId ? { candidateId: input.candidateId } : {}),
-      rationale: input.reviewRationale,
-      ...(input.evidenceIds ? { evidenceIds: input.evidenceIds } : {}),
-      applied: false,
-    });
-    return 'dry_run';
-  }
-  let reviewId = '';
-  const createReview = (db = input.db) =>
-    input.createPendingReview?.(input.proposal, db) || '';
-  try {
-    if (input.candidateId) {
-      reviewId = await input.db.transaction(async (tx) => {
-        await setCandidateStatus(tx, input.candidateId!, 'needs_review');
-        const id = await createReview(tx);
-        if (!id) {
-          throw new Error('pending memory review creation returned empty id');
-        }
-        return id;
-      });
-    } else {
-      reviewId = await createReview();
-    }
-  } catch {
-    reviewId = '';
-  }
-  const action = reviewId ? 'needs_review' : 'blocked';
-  if (input.candidateId && !reviewId) {
-    await setCandidateStatus(input.db, input.candidateId, action);
-  }
-  await recordDreamDecision({
-    db: input.db,
-    runId: input.runId,
-    subject: input.subject,
-    action,
-    ...(input.itemId ? { itemId: input.itemId } : {}),
-    ...(input.candidateId ? { candidateId: input.candidateId } : {}),
-    rationale: reviewId
-      ? `${input.reviewRationale}: ${reviewId}.`
-      : input.blockRationale,
-    ...(input.evidenceIds ? { evidenceIds: input.evidenceIds } : {}),
-    applied: false,
-  });
-  return action;
-}
 async function blockCandidate(input: {
   db: Db;
   runId: string;

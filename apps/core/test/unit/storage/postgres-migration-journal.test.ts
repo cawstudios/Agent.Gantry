@@ -1155,7 +1155,7 @@ describe('Postgres migration journal', () => {
     ) as {
       entries: Array<{ idx: number; tag: string; when: number }>;
     };
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find((entry) => entry.idx === 94)).toMatchObject({
       idx: 94,
       when: 1777324200000,
       tag: '0094_brain_dreaming',
@@ -1177,6 +1177,39 @@ describe('Postgres migration journal', () => {
     expect(migration).not.toContain('DROP TABLE');
     expect(migration).not.toContain('RENAME TO');
     expect(migration).not.toContain('ALTER TABLE');
+  });
+
+  it('registers the memory review content fingerprint after brain dreaming', () => {
+    const journal = JSON.parse(
+      fs.readFileSync(
+        path.resolve(
+          'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+        ),
+        'utf8',
+      ),
+    ) as {
+      entries: Array<{ idx: number; tag: string; when: number }>;
+    };
+    expect(journal.entries.at(-1)).toMatchObject({
+      idx: 95,
+      when: 1777327800000,
+      tag: '0095_memory_review_content_fingerprint',
+    });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0095_memory_review_content_fingerprint.sql',
+      ),
+      'utf8',
+    );
+
+    expect(migration).toContain(
+      'ADD COLUMN IF NOT EXISTS flagged_content_hash text',
+    );
+    expect(migration).toContain('idx_memory_review_requests_content_hash');
+    expect(migration).not.toContain('DROP TABLE');
+    expect(migration).not.toContain('DROP COLUMN');
+    expect(migration).not.toContain('RENAME TO');
   });
 
   it('keeps skill persistence indexes aligned with one binding per agent skill', () => {

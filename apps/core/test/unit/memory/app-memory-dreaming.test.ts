@@ -533,7 +533,10 @@ describe('runAppMemoryDreamPass guardrails', () => {
 
   it('routes REM correction-language items to review with source evidence', async () => {
     const { db, inserted } = createDb([]);
-    const createPendingReview = vi.fn(async () => 'mrv-correction');
+    const createPendingReview = vi.fn(async () => ({
+      status: 'created' as const,
+      reviewId: 'mrv-correction',
+    }));
     const sourceRefJson = JSON.stringify({
       source: 'dreaming',
       subject,
@@ -581,16 +584,93 @@ describe('runAppMemoryDreamPass guardrails', () => {
     ]);
   });
 
+  it('skips re-flagging correction language a human already adjudicated', async () => {
+    const { db, inserted } = createDb([]);
+    const createPendingReview = vi.fn(async () => ({
+      status: 'adjudicated' as const,
+      reviewId: 'mrv-already-decided',
+    }));
+    const sourceRefJson = JSON.stringify({
+      source: 'dreaming',
+      subject,
+      version: 1,
+      evidenceIds: ['mev-1'],
+    });
+
+    const decisions = await runAppMemoryDreamPass({
+      db: db as never,
+      runId: 'mdr-rem-correction-adjudicated',
+      subject,
+      phase: 'rem',
+      dryRun: false,
+      listItems: vi.fn(async () => [
+        {
+          row: activeItemRow({
+            value: 'Actually use lead finder instead of Mode A.',
+            sourceRefJson,
+          }),
+        },
+      ]),
+      save: vi.fn(),
+      retire: vi.fn(async () => ({ deleted: true })),
+      createPendingReview,
+    });
+
+    expect(decisions).toEqual([{ action: 'skip' }]);
+    expect(decisionValues(inserted)).toMatchObject([
+      {
+        action: 'skip',
+        itemId: 'mem-1',
+        rationale: expect.stringContaining(
+          'identical content was already reviewed (mrv-already-decided)',
+        ),
+      },
+    ]);
+  });
+
+  it('does not mark candidates needs_review when their content was adjudicated', async () => {
+    const save = vi.fn();
+    const { db, inserted, updated } = createDb([
+      [],
+      [candidateRow({ value: 'new value' })],
+    ]);
+    const createPendingReview = vi.fn(async () => ({
+      status: 'adjudicated' as const,
+      reviewId: 'mrv-decided-earlier',
+    }));
+
+    const decisions = await runAppMemoryDreamPass({
+      db: db as never,
+      runId: 'mdr-deep-update-adjudicated',
+      subject,
+      phase: 'deep',
+      dryRun: false,
+      listItems: vi.fn(async () => [
+        { row: activeItemRow({ value: 'old value' }) },
+      ]),
+      save,
+      retire: vi.fn(async () => ({ deleted: true })),
+      createPendingReview,
+    });
+
+    expect(decisions).toEqual([{ action: 'skip' }]);
+    expect(save).not.toHaveBeenCalled();
+    expect(updated).toEqual([]);
+    expect(decisionValues(inserted)).toMatchObject([
+      { action: 'skip', candidateId: 'mca-1', applied: false },
+    ]);
+  });
+
   it('routes same-key value changes to review instead of auto-updating active memory', async () => {
     const save = vi.fn();
     const { db, inserted, updated } = createDb([
       [],
       [candidateRow({ value: 'new value' })],
     ]);
-    const createPendingReview = vi.fn(async () => {
-      expect(updated).toMatchObject([{ status: 'needs_review' }]);
-      return 'mrv-update';
-    });
+    const createPendingReview = vi.fn(async () => ({
+      status: 'created' as const,
+      reviewId: 'mrv-update',
+    }));
 
     const decisions = await runAppMemoryDreamPass({
       db: db as never,
@@ -631,7 +711,10 @@ describe('runAppMemoryDreamPass guardrails', () => {
 
   it('blocks same-key updates when review creation returns empty', async () => {
     const save = vi.fn();
-    const createPendingReview = vi.fn(async () => '');
+    const createPendingReview = vi.fn(async () => ({
+      status: 'invalid' as const,
+      reviewId: '',
+    }));
     const { db, inserted, updated } = createDb([
       [],
       [candidateRow({ value: 'new value' })],
@@ -684,17 +767,8 @@ describe('runAppMemoryDreamPass guardrails', () => {
     ]);
     const createPendingReview = vi
       .fn()
-      .mockImplementationOnce(async () => {
-        expect(updated).toMatchObject([{ status: 'needs_review' }]);
-        return 'mrv-preference';
-      })
-      .mockImplementationOnce(async () => {
-        expect(updated).toMatchObject([
-          { status: 'needs_review' },
-          { status: 'needs_review' },
-        ]);
-        return 'mrv-risky';
-      });
+      .mockResolvedValueOnce({ status: 'created', reviewId: 'mrv-preference' })
+      .mockResolvedValueOnce({ status: 'created', reviewId: 'mrv-risky' });
 
     const decisions = await runAppMemoryDreamPass({
       db: db as never,
@@ -746,7 +820,7 @@ describe('runAppMemoryDreamPass guardrails', () => {
     const save = vi.fn();
     const createPendingReview = vi
       .fn()
-      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce({ status: 'invalid', reviewId: '' })
       .mockRejectedValueOnce(new Error('insert failed'));
     const { db, inserted, updated } = createDb([
       [],
@@ -805,10 +879,10 @@ describe('runAppMemoryDreamPass guardrails', () => {
       }),
     });
     const { db, inserted, updated } = createDb([[], [candidate]]);
-    const createPendingReview = vi.fn(async () => {
-      expect(updated).toMatchObject([{ status: 'needs_review' }]);
-      return 'mrv-retire';
-    });
+    const createPendingReview = vi.fn(async () => ({
+      status: 'created' as const,
+      reviewId: 'mrv-retire',
+    }));
 
     const decisions = await runAppMemoryDreamPass({
       db: db as never,
