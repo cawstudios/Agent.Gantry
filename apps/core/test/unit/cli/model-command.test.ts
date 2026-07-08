@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runModelCommand } from '@core/cli/model.js';
+import { resolveModelSelectionForWorkload } from '@core/shared/model-catalog.js';
 import {
   loadRuntimeSettings,
   saveRuntimeSettings,
@@ -147,6 +148,16 @@ describe('model CLI command', () => {
       }),
     ).resolves.toBe(0);
     expect(loadRuntimeSettings(runtimeHome).agent.defaultModel).toBe('gpt-oss');
+    // The family's selected member must be preflighted with a concrete
+    // catalog alias — the family name itself would fail the preflight
+    // resolver and block valid family selections.
+    const preflightCall = preflightProvider.mock.calls.at(0) as unknown[];
+    expect(preflightCall?.[1]).toBe('groq');
+    const preflightAlias = preflightCall?.[3] as string;
+    expect(preflightAlias).not.toBe('gpt-oss');
+    expect(resolveModelSelectionForWorkload(preflightAlias, 'chat').ok).toBe(
+      true,
+    );
 
     await expect(
       runModelCommand(runtimeHome, ['set', 'jobs', 'llama-70b'], {

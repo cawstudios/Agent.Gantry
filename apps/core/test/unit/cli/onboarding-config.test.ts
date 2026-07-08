@@ -12,6 +12,9 @@ const settingsWrites: Array<{
   slackBotRef?: string;
   slackAppRef?: string;
   agentHarness: string;
+  defaultModel: string;
+  oneTimeJobDefaultModel: string;
+  memoryExtractor: string;
 }> = [];
 const desiredSettings = createDefaultRuntimeSettings();
 
@@ -78,6 +81,9 @@ vi.mock('@core/config/settings/runtime-settings.js', async (importOriginal) => {
             input.settings.providerAccounts.slack_default?.runtimeSecretRefs
               .app_token,
           agentHarness: input.settings.agent.agentHarness,
+          defaultModel: input.settings.agent.defaultModel,
+          oneTimeJobDefaultModel: input.settings.agent.oneTimeJobDefaultModel,
+          memoryExtractor: input.settings.memory.llm.models.extractor,
         });
         return { reconciled: false };
       },
@@ -237,6 +243,54 @@ describe('persistOnboardingConfig', () => {
     expect(settingsWrites.at(-1)).toMatchObject({
       telegramEnabled: true,
       slackEnabled: true,
+    });
+  });
+
+  it('preserves job and memory customizations when the chat model is unchanged', async () => {
+    desiredSettings.agent.defaultModel = 'kimi';
+    desiredSettings.agent.oneTimeJobDefaultModel = 'haiku';
+    desiredSettings.memory.llm.models.extractor = 'haiku';
+    const { persistOnboardingConfig } =
+      await import('@core/cli/onboarding-config.js');
+
+    await persistOnboardingConfig({
+      runtimeHome: '/tmp/gantry',
+      primaryProvider: 'telegram',
+      modelAlias: 'kimi',
+      agentHarness: 'auto',
+      credentialMode: 'gantry',
+      memoryEnabled: true,
+      embeddingsEnabled: false,
+      dreamingEnabled: false,
+    });
+
+    expect(settingsWrites.at(-1)).toMatchObject({
+      defaultModel: 'kimi',
+      oneTimeJobDefaultModel: 'haiku',
+      memoryExtractor: 'haiku',
+    });
+  });
+
+  it('re-derives defaults when the chat model changes', async () => {
+    desiredSettings.agent.defaultModel = 'kimi';
+    desiredSettings.agent.oneTimeJobDefaultModel = 'haiku';
+    const { persistOnboardingConfig } =
+      await import('@core/cli/onboarding-config.js');
+
+    await persistOnboardingConfig({
+      runtimeHome: '/tmp/gantry',
+      primaryProvider: 'telegram',
+      modelAlias: 'sonnet',
+      agentHarness: 'auto',
+      credentialMode: 'gantry',
+      memoryEnabled: true,
+      embeddingsEnabled: false,
+      dreamingEnabled: false,
+    });
+
+    expect(settingsWrites.at(-1)).toMatchObject({
+      defaultModel: 'sonnet',
+      oneTimeJobDefaultModel: '',
     });
   });
 });

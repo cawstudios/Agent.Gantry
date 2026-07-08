@@ -141,7 +141,15 @@ export async function persistOnboardingConfig(
     restartRequired.push(...(result.restartRequired ?? []));
     previousSettingsForFinalWrite = structuredClone(settings);
   }
-  applyModelDefaults(settings, model.alias || DEFAULT_SETUP_MODEL_ALIAS);
+  // Re-derive job/memory defaults only when the chat model actually changes
+  // (or was never set) — maintenance runs that leave the model alone must not
+  // wipe explicit job defaults or custom memory models. An absent alias means
+  // "keep the configured model", never a reset to the setup default.
+  const nextChatAlias =
+    model.alias || settings.agent.defaultModel || DEFAULT_SETUP_MODEL_ALIAS;
+  if (settings.agent.defaultModel !== nextChatAlias) {
+    applyModelDefaults(settings, nextChatAlias);
+  }
   if (input.agentHarness) {
     settings.agent.agentHarness = input.agentHarness;
   }

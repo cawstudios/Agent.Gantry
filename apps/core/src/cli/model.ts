@@ -87,9 +87,14 @@ async function preflightAliasProviders(input: {
     );
     if (resolved.ok) {
       const providerId = resolved.entry.modelRoute.id;
+      // The preflight resolves chatAlias with the non-family resolver, so a
+      // family input must hand over its selected member's concrete alias.
+      const concreteAlias = isModelFamilyAlias(alias)
+        ? resolved.entry.recommendedAlias
+        : resolved.alias;
       providers.set(
         providerId,
-        workload === 'chat' ? resolved.alias : providers.get(providerId),
+        workload === 'chat' ? concreteAlias : providers.get(providerId),
       );
     }
   }
