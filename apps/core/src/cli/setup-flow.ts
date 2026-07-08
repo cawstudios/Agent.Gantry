@@ -1,7 +1,9 @@
+import { styleText } from 'node:util';
 import * as p from '@clack/prompts';
 import '../channels/register-builtins.js';
 
 import { resolveRuntimeHome } from '../config/settings/runtime-home.js';
+import { resolveModelSelectionForWorkload } from '../shared/model-catalog.js';
 import {
   clearOnboardingState,
   createInitialState,
@@ -11,6 +13,7 @@ import type { OnboardingStep } from './onboarding-state.js';
 import { runCredentialsStep } from './setup-credentials.js';
 import {
   runChannelStep,
+  runMemoryStep,
   runModelStep,
   runRuntimeHomeStep,
   runStorageStep,
@@ -74,6 +77,7 @@ export async function runSetupFlow(
       index += 1;
       continue;
     }
+    logStepHeader(step, draft);
     state.currentStep = step;
     state.status = 'in_progress';
     updateStateData(state, draft);
@@ -99,10 +103,12 @@ export async function runSetupFlow(
       action = await runStorageStep(draft);
     } else if (step === 'channel') {
       action = await runChannelStep(draft);
-    } else if (step === 'credentials') {
-      action = await runCredentialsStep(draft, runtimeHome);
     } else if (step === 'model') {
       action = await runModelStep(draft);
+    } else if (step === 'memory') {
+      action = await runMemoryStep(draft);
+    } else if (step === 'credentials') {
+      action = await runCredentialsStep(draft, runtimeHome);
     } else if (step === 'telegram') {
       action = await runTelegramStep(draft);
     } else if (step === 'slack') {
@@ -153,6 +159,7 @@ export async function runSetupFlow(
       continue;
     }
 
+    logStepRecap(step, draft, action);
     index += 1;
   }
   state.status = 'completed';
@@ -165,4 +172,130 @@ export async function runSetupFlow(
     runtimeHome,
     startAfterSetup: draft.startAfterSetup,
   };
+}
+
+const STEP_DETAILS: Record<OnboardingStep, { label: string; purpose: string }> =
+  {
+    welcome: {
+      label: 'Welcome',
+      purpose: 'start guided setup',
+    },
+    runtime_home: {
+      label: 'Runtime home',
+      purpose: 'choose where Gantry stores local runtime files',
+    },
+    storage: {
+      label: 'Storage',
+      purpose: 'connect Postgres for runtime state',
+    },
+    channel: {
+      label: 'Chat channel',
+      purpose: 'choose Telegram or Slack',
+    },
+    model: {
+      label: 'Model',
+      purpose: 'choose the main chat model',
+    },
+    memory: {
+      label: 'Memory',
+      purpose: 'choose memory and semantic search defaults',
+    },
+    credentials: {
+      label: 'Model credentials',
+      purpose: 'store required model access',
+    },
+    telegram: {
+      label: 'Telegram',
+      purpose: 'connect bot and chat',
+    },
+    slack: {
+      label: 'Slack',
+      purpose: 'connect app and conversation',
+    },
+    config: {
+      label: 'Review',
+      purpose: 'write runtime config',
+    },
+    group: {
+      label: 'Conversation',
+      purpose: 'create runtime conversation binding',
+    },
+    verify: {
+      label: 'Verify',
+      purpose: 'check runtime readiness',
+    },
+    ready: {
+      label: 'Ready',
+      purpose: 'finish setup',
+    },
+  };
+
+function visibleSteps(
+  draft: ReturnType<typeof restoreDraft>,
+): OnboardingStep[] {
+  return FULL_SEQUENCE.filter(
+    (candidate) =>
+      candidate !== 'welcome' &&
+      candidate !== 'ready' &&
+      !shouldSkipStep(candidate, draft),
+  );
+}
+
+function logStepHeader(
+  step: OnboardingStep,
+  draft: ReturnType<typeof restoreDraft>,
+): void {
+  const steps = visibleSteps(draft);
+  const position = steps.indexOf(step);
+  if (position < 0) return;
+  const details = STEP_DETAILS[step];
+  p.log.step(
+    `Step ${position + 1}/${steps.length} · ${details.label} — ${details.purpose}`,
+  );
+}
+
+function logStepRecap(
+  step: OnboardingStep,
+  draft: ReturnType<typeof restoreDraft>,
+  action: FlowAction,
+): void {
+  if (action.type !== 'next') return;
+  const recap = stepRecap(step, draft);
+  if (recap) {
+    p.log.message(styleText('dim', recap), {
+      symbol: styleText('dim', '✓'),
+      spacing: 0,
+    });
+  }
+}
+
+function stepRecap(
+  step: OnboardingStep,
+  draft: ReturnType<typeof restoreDraft>,
+): string | null {
+  const providerLabel =
+    draft.primaryProvider === 'slack' ? 'Slack' : 'Telegram';
+  const selectedModel = resolveModelSelectionForWorkload(
+    draft.selectedModel,
+    'chat',
+  );
+  const modelProvider = selectedModel.ok
+    ? selectedModel.entry.modelRoute.label
+    : 'unknown';
+  const recaps: Partial<Record<OnboardingStep, string>> = {
+    runtime_home: `Runtime home: ${draft.runtimeHome}`,
+    storage: `Storage: ${draft.postgresSetupKind} Postgres (${draft.postgresSchema})`,
+    channel: `Chat channel: ${providerLabel}`,
+    model: `Model: ${draft.selectedModel} (${modelProvider})`,
+    memory: draft.memoryEnabled
+      ? `Memory: on; semantic search ${draft.embeddingsEnabled ? 'on' : 'off'}`
+      : 'Memory: off',
+    credentials: 'Model credentials: checked',
+    telegram: `Telegram: ${draft.telegramDisplayName || draft.telegramChatJid}`,
+    slack: `Slack: ${draft.slackDisplayName || draft.slackChatJid}`,
+    config: 'Config: written',
+    group: `Conversation: ${draft.conversationLabel || draft.workspaceKey}`,
+    verify: 'Verify: passed',
+  };
+  return recaps[step] || null;
 }

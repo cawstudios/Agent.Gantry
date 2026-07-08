@@ -30,6 +30,7 @@ export const FULL_SEQUENCE: OnboardingStep[] = [
   'storage',
   'channel',
   'model',
+  'memory',
   'credentials',
   'telegram',
   'slack',
@@ -212,6 +213,7 @@ export function restoreDraft(
     settings.storage.postgres.urlEnv || 'GANTRY_DATABASE_URL';
   const postgresDatabaseUrl =
     env[postgresUrlEnv]?.trim() || process.env[postgresUrlEnv]?.trim() || '';
+  const readySummary = resolveReadySummary(settings, primaryProvider);
   const draft: SetupDraft = {
     runtimeHome,
     postgresSetupKind:
@@ -234,7 +236,8 @@ export function restoreDraft(
       ? state.data.agentHarness
       : settings.agent.agentHarness || AUTO_AGENT_HARNESS,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
-    telegramChatJid: '',
+    telegramChatJid:
+      primaryProvider === 'telegram' ? readySummary.conversationJid : '',
     telegramDisplayName: settings.agent.name || DEFAULT_AGENT_CLI_NAME,
     telegramAdminSenderId: '',
     telegramAdminSenderName: '',
@@ -242,7 +245,8 @@ export function restoreDraft(
     telegramBotUsername: '',
     slackBotToken: env.SLACK_BOT_TOKEN || '',
     slackAppToken: env.SLACK_APP_TOKEN || '',
-    slackChatJid: '',
+    slackChatJid:
+      primaryProvider === 'slack' ? readySummary.conversationJid : '',
     slackDisplayName: settings.agent.name || DEFAULT_AGENT_CLI_NAME,
     slackPermissionApproverIds: firstConversationApprovers(
       settings,
@@ -252,7 +256,8 @@ export function restoreDraft(
     embeddingsEnabled:
       state?.data.embeddingsEnabled ?? settings.memory.embeddings.enabled,
     dreamingEnabled: state?.data.dreamingEnabled ?? defaultDreamingEnabled,
-    ...resolveReadySummary(settings, primaryProvider),
+    workspaceKey: readySummary.workspaceKey,
+    conversationLabel: readySummary.conversationLabel,
     startAfterSetup: false,
   };
   if (state) updateDraftFromState(draft, state);
@@ -262,17 +267,20 @@ export function restoreDraft(
 function resolveReadySummary(
   settings: ReturnType<typeof loadExistingRuntimeSettings>,
   providerId: string,
-): Pick<SetupDraft, 'workspaceKey' | 'conversationLabel'> {
+): Pick<SetupDraft, 'workspaceKey' | 'conversationLabel'> & {
+  conversationJid: string;
+} {
   for (const [agentId, agent] of Object.entries(settings.agents)) {
     for (const binding of Object.values(agent.bindings)) {
       if (binding.provider !== providerId) continue;
       return {
         workspaceKey: agent.folder || agentId,
         conversationLabel: binding.name || binding.jid,
+        conversationJid: binding.jid,
       };
     }
   }
-  return { workspaceKey: '', conversationLabel: '' };
+  return { workspaceKey: '', conversationLabel: '', conversationJid: '' };
 }
 
 function firstConversationApprovers(

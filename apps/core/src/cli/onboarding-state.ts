@@ -11,6 +11,7 @@ export type OnboardingStep =
   | 'storage'
   | 'channel'
   | 'model'
+  | 'memory'
   | 'credentials'
   | 'telegram'
   | 'slack'

@@ -13,6 +13,7 @@ import {
   readOnboardingState,
   writeOnboardingState,
 } from './onboarding-state.js';
+import type { OnboardingStep } from './onboarding-state.js';
 import {
   resolveRuntimeHome,
   runtimeErrorLogPath,
@@ -290,28 +291,10 @@ async function runServiceCommand(
 
 async function runSetupCommand(
   runtimeHome: string,
-  initialStep?:
-    | 'welcome'
-    | 'runtime_home'
-    | 'storage'
-    | 'channel'
-    | 'credentials'
-    | 'model'
-    | 'telegram'
-    | 'slack'
-    | 'config'
-    | 'group'
-    | 'verify'
-    | 'ready',
+  initialStep?: OnboardingStep,
 ): Promise<number> {
   const state = readOnboardingState(runtimeHome);
   let startStep = initialStep;
-
-  if (state?.status === 'completed' && !initialStep) {
-    clearOnboardingState(runtimeHome);
-    writeOnboardingState(runtimeHome, createInitialState(runtimeHome));
-    startStep = 'welcome';
-  }
 
   if (state?.status === 'in_progress' && !initialStep) {
     const decision = await p.select({
@@ -343,6 +326,60 @@ async function runSetupCommand(
       writeOnboardingState(runtimeHome, createInitialState(runtimeHome));
       startStep = 'welcome';
     }
+  }
+
+  if (
+    !startStep &&
+    (state?.status === 'completed' ||
+      (!state && fs.existsSync(settingsFilePath(runtimeHome))))
+  ) {
+    const choice = await p.select({
+      message: 'What do you want to change?',
+      options: [
+        {
+          value: 'welcome',
+          label: 'Run full setup',
+          hint: 'Reset setup progress and review every step.',
+        },
+        {
+          value: 'channel',
+          label: 'Chat channel',
+        },
+        {
+          value: 'model',
+          label: 'Model provider',
+        },
+        {
+          value: 'memory',
+          label: 'Memory',
+        },
+        {
+          value: 'credentials',
+          label: 'Model credentials',
+        },
+        {
+          value: 'storage',
+          label: 'Storage',
+        },
+        {
+          value: 'verify',
+          label: 'Verify only',
+        },
+        {
+          value: 'cancel',
+          label: 'Cancel',
+        },
+      ],
+    });
+    if (p.isCancel(choice) || choice === 'cancel') {
+      p.outro('Setup cancelled.');
+      return 1;
+    }
+    startStep = choice as OnboardingStep;
+    const nextState = createInitialState(runtimeHome);
+    nextState.currentStep = startStep;
+    clearOnboardingState(runtimeHome);
+    writeOnboardingState(runtimeHome, nextState);
   }
 
   const { runSetupFlow } = await import('./setup-flow.js');

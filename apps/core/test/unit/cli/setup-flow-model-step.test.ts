@@ -50,13 +50,13 @@ describe('setup model step', () => {
     );
   });
 
-  it('asks for the main model/provider directly', async () => {
+  it('asks for the main chat model directly', async () => {
     const { runModelStep, select } = await loadModelStep(['sonnet']);
 
     await runModelStep(makeDraft());
 
     expect(select.mock.calls[0]?.[0]?.message).toBe(
-      'Choose main model/provider',
+      'Choose your main chat model',
     );
   });
 

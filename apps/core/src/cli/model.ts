@@ -1,4 +1,7 @@
-import { preflightModelProvider, type ModelProviderPreflightResult } from '../adapters/llm/model-provider-preflight.js';
+import {
+  preflightModelProvider,
+  type ModelProviderPreflightResult,
+} from '../adapters/llm/model-provider-preflight.js';
 import {
   DEFAULT_SETUP_MODEL_ALIAS,
   memoryModelDefaultsForProvider,
@@ -6,16 +9,22 @@ import {
   resolveModelSelectionForWorkload,
   type ModelWorkload,
 } from '../shared/model-catalog.js';
-import { resolveModelCacheSupport } from '../shared/model-cache-support.js';
 import {
   isModelFamilyAlias,
   resolveModelSelectionForWorkloadWithFamilies,
 } from '../shared/model-families.js';
 import { formatModelWhy } from '../shared/model-why-format.js';
 import {
+  chatAlias,
+  effectiveJobAlias,
   familyOrderFromSettings,
   fetchConfiguredProviders,
   formatModelList,
+  formatModelStatus,
+  memoryProviderFromSettings,
+  providerForAlias,
+  providerFromSettings,
+  resolveSlot,
 } from './model-list-format.js';
 import { providerLabel } from '../shared/model-catalog-availability.js';
 import {
@@ -50,21 +59,6 @@ function usage(): string {
   gantry model why <alias|family>
   gantry model why <alias> --agent <id>
   gantry model doctor`;
-}
-
-function providerFromSettings(settings: ModelCommandSettings): string {
-  const resolved = resolveModelSelectionForWorkload(
-    settings.agent.defaultModel || DEFAULT_SETUP_MODEL_ALIAS,
-    'chat',
-  );
-  return resolved.ok ? resolved.entry.modelRoute.id : 'anthropic';
-}
-
-function resolveSlot(alias: string, workload: ModelWorkload) {
-  const resolved = resolveModelSelectionForWorkload(alias, workload);
-  return resolved.ok
-    ? `${resolved.alias} (${resolved.entry.displayName}; cache: ${resolveModelCacheSupport(resolved.entry).statusLabel})`
-    : `invalid (${resolved.message})`;
 }
 
 async function preflightAliasProviders(input: {
@@ -117,40 +111,6 @@ async function noteUnconfiguredProvider(
   );
 }
 
-function chatAlias(settings: ModelCommandSettings): string {
-  return settings.agent.defaultModel || DEFAULT_SETUP_MODEL_ALIAS;
-}
-
-function effectiveJobAlias(
-  settings: ModelCommandSettings,
-  kind: 'oneTime' | 'recurring',
-) {
-  const explicit =
-    kind === 'oneTime'
-      ? settings.agent.oneTimeJobDefaultModel
-      : settings.agent.recurringJobDefaultModel;
-  return explicit || chatAlias(settings);
-}
-
-function providerForAlias(alias: string, workload: ModelWorkload): string | undefined {
-  const resolved = resolveModelSelectionForWorkload(alias, workload);
-  return resolved.ok ? resolved.entry.modelRoute.id : undefined;
-}
-
-function memoryProviderFromSettings(settings: ModelCommandSettings): string {
-  const providers = [
-    providerForAlias(settings.memory.llm.models.extractor, 'memory_extractor'),
-    providerForAlias(settings.memory.llm.models.dreaming, 'memory_dreaming'),
-    providerForAlias(
-      settings.memory.llm.models.consolidation,
-      'memory_consolidation',
-    ),
-  ].filter((provider): provider is string => Boolean(provider));
-  const unique = [...new Set(providers)];
-  if (unique.length === 1) return unique[0]!;
-  return unique.length === 0 ? providerFromSettings(settings) : 'mixed';
-}
-
 async function noteUnconfiguredMemoryProviders(
   runtimeHome: string,
   settings: ModelCommandSettings,
@@ -165,60 +125,6 @@ async function noteUnconfiguredMemoryProviders(
     if (providerId)
       await noteUnconfiguredProvider(runtimeHome, alias, providerId);
   }
-}
-
-function formatAgentOverrides(settings: RuntimeSettings): string[] {
-  const lines: string[] = [];
-  for (const [agentId, agent] of Object.entries(settings.agents)) {
-    const overrides = [
-      agent.model ? `chat=${agent.model}` : undefined,
-      agent.oneTimeJobDefaultModel
-        ? `one-time=${agent.oneTimeJobDefaultModel}`
-        : undefined,
-      agent.recurringJobDefaultModel
-        ? `recurring=${agent.recurringJobDefaultModel}`
-        : undefined,
-    ].filter(Boolean);
-    if (overrides.length)
-      lines.push(`agent ${agentId}: ${overrides.join(', ')}`);
-  }
-  for (const [bindingId, binding] of Object.entries(settings.bindings)) {
-    if (binding.model)
-      lines.push(`binding ${bindingId}: chat=${binding.model}`);
-  }
-  return lines;
-}
-
-function formatStatus(settings: ModelCommandSettings): string {
-  const providerId = providerFromSettings(settings);
-  const oneTimeInherited = !settings.agent.oneTimeJobDefaultModel;
-  const recurringInherited = !settings.agent.recurringJobDefaultModel;
-  const lines = [
-    'Model status',
-    `provider: ${providerId} (${providerLabel(providerId)})`,
-    `chat: ${resolveSlot(chatAlias(settings), 'chat')}`,
-    `one-time: ${
-      oneTimeInherited
-        ? `inherits chat (${resolveSlot(effectiveJobAlias(settings, 'oneTime'), 'one_time_job')})`
-        : resolveSlot(effectiveJobAlias(settings, 'oneTime'), 'one_time_job')
-    }`,
-    `recurring: ${
-      recurringInherited
-        ? `inherits chat (${resolveSlot(effectiveJobAlias(settings, 'recurring'), 'recurring_job')})`
-        : resolveSlot(effectiveJobAlias(settings, 'recurring'), 'recurring_job')
-    }`,
-    `memory: provider-managed (from ${memoryProviderFromSettings(settings)})`,
-    `memory extractor: ${resolveSlot(settings.memory.llm.models.extractor, 'memory_extractor')}`,
-    `memory dreaming: ${resolveSlot(settings.memory.llm.models.dreaming, 'memory_dreaming')}`,
-    `memory consolidation: ${resolveSlot(settings.memory.llm.models.consolidation, 'memory_consolidation')}`,
-  ];
-  const overrides = formatAgentOverrides(settings);
-  lines.push(
-    overrides.length
-      ? `overrides:\n${overrides.map((line) => `  ${line}`).join('\n')}`
-      : 'overrides: none configured',
-  );
-  return lines.join('\n');
 }
 
 function modelValidationFailures(settings: ModelCommandSettings): string[] {
@@ -406,7 +312,7 @@ export async function runModelCommand(
   };
 
   if (!action || action === 'status') {
-    console.log(formatStatus(settings));
+    console.log(formatModelStatus(settings));
     return 0;
   }
 
@@ -556,13 +462,25 @@ export async function runModelCommand(
         : target === 'jobs'
           ? [
               { alias: chatAlias(settings), workload: 'one_time_job' as const },
-              { alias: chatAlias(settings), workload: 'recurring_job' as const },
+              {
+                alias: chatAlias(settings),
+                workload: 'recurring_job' as const,
+              },
             ]
           : target === 'memory'
             ? [
-                { alias: memoryDefaults.extractor, workload: 'memory_extractor' as const },
-                { alias: memoryDefaults.dreaming, workload: 'memory_dreaming' as const },
-                { alias: memoryDefaults.consolidation, workload: 'memory_consolidation' as const },
+                {
+                  alias: memoryDefaults.extractor,
+                  workload: 'memory_extractor' as const,
+                },
+                {
+                  alias: memoryDefaults.dreaming,
+                  workload: 'memory_dreaming' as const,
+                },
+                {
+                  alias: memoryDefaults.consolidation,
+                  workload: 'memory_consolidation' as const,
+                },
               ]
             : undefined;
     if (!aliases) {
@@ -700,7 +618,7 @@ export async function runModelCommand(
     console.log(
       [
         'Model doctor',
-        formatStatus(settings),
+        formatModelStatus(settings),
         validationFailures.length === 0
           ? 'model aliases: pass'
           : `model aliases: fail - ${validationFailures.join('; ')}`,

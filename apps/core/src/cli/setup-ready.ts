@@ -38,7 +38,7 @@ export async function runReadyStep(
       ...formatRequiredProviderReasons(draft),
       '',
       'Next: Start chatting or run gantry status.',
-      'Optional setup: memory, background service, extra providers.',
+      'Optional setup: memory, background service, extra chat channels.',
     ].join('\n'),
     'Ready',
   );

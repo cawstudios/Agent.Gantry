@@ -227,7 +227,7 @@ export async function runStorageStep(draft: SetupDraft): Promise<FlowAction> {
 
 export async function runChannelStep(draft: SetupDraft): Promise<FlowAction> {
   const value = await p.select({
-    message: 'Choose your first provider',
+    message: 'Choose your chat channel',
     options: [
       {
         value: 'telegram',
@@ -299,7 +299,7 @@ export async function runModelStep(draft: SetupDraft): Promise<FlowAction> {
       ? draft.selectedModel
       : DEFAULT_SETUP_MODEL_ALIAS;
   const value = await p.select({
-    message: 'Choose main model/provider',
+    message: 'Choose your main chat model',
     options: [
       ...chatModelOptions,
       {
@@ -332,6 +332,33 @@ export async function runModelStep(draft: SetupDraft): Promise<FlowAction> {
   }
   draft.agentHarness = AUTO_AGENT_HARNESS;
   return { type: 'next' };
+}
+
+export async function runMemoryStep(draft: SetupDraft): Promise<FlowAction> {
+  const memoryEnabled = await p.confirm({
+    message: 'Enable memory?',
+    initialValue: draft.memoryEnabled ?? true,
+  });
+  if (p.isCancel(memoryEnabled)) return { type: 'resume' };
+
+  draft.memoryEnabled = Boolean(memoryEnabled);
+  if (draft.memoryEnabled) {
+    const embeddingsEnabled = await p.confirm({
+      message:
+        'Enable semantic search? Requires an OpenAI API key for embeddings',
+      initialValue: draft.embeddingsEnabled ?? false,
+    });
+    if (p.isCancel(embeddingsEnabled)) return { type: 'resume' };
+    draft.embeddingsEnabled = Boolean(embeddingsEnabled);
+  } else {
+    draft.embeddingsEnabled = false;
+  }
+
+  return chooseProgressAction({
+    message: 'Use these memory settings?',
+    continueLabel: 'Continue',
+    includeBack: true,
+  });
 }
 
 function formatMemoryDefaultAliases(defaults: MemoryModelDefaults): string {

@@ -19,6 +19,8 @@ afterEach(() => {
   vi.doUnmock('@core/config/settings/runtime-settings.js');
   vi.doUnmock('@core/adapters/storage/postgres/storage-service.js');
   vi.doUnmock('@core/cli/provider.js');
+  vi.doUnmock('@core/cli/onboarding-state.js');
+  vi.doUnmock('@core/cli/setup-flow.js');
   vi.doUnmock('@core/cli/local.js');
   vi.doUnmock('@core/app/index.js');
   vi.doUnmock('@core/postgres-migrate.js');
@@ -30,6 +32,56 @@ afterEach(() => {
 });
 
 describe('CLI local routing', () => {
+  it.each([
+    ['welcome', 'welcome'],
+    ['channel', 'channel'],
+    ['model', 'model'],
+    ['memory', 'memory'],
+    ['credentials', 'credentials'],
+    ['storage', 'storage'],
+    ['verify', 'verify'],
+  ] as const)(
+    'starts completed setup menu choice %s at %s',
+    async (choice, expectedStep) => {
+      const runtimeHome = makeRuntimeHome();
+      const onboarding = await import('@core/cli/onboarding-state.js');
+      const state = onboarding.createInitialState(runtimeHome);
+      state.status = 'completed';
+      state.currentStep = 'ready';
+      onboarding.writeOnboardingState(runtimeHome, state);
+      const select = vi.fn(async () => choice);
+      const runSetupFlow = vi.fn(async () => ({
+        status: 'completed',
+        runtimeHome,
+        startAfterSetup: false,
+      }));
+      vi.doMock('@clack/prompts', () => ({
+        isCancel: () => false,
+        outro: vi.fn(),
+        select,
+        log: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), success: vi.fn() },
+      }));
+      vi.doMock('@core/cli/setup-flow.js', () => ({
+        runSetupFlow,
+      }));
+
+      const { main } = await import('@core/cli/index.js');
+      const code = await main(['--runtime-home', runtimeHome, 'setup']);
+
+      expect(code).toBe(0);
+      expect(select).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'What do you want to change?' }),
+      );
+      expect(runSetupFlow).toHaveBeenCalledWith(
+        expect.objectContaining({ initialStep: expectedStep }),
+      );
+      expect(onboarding.readOnboardingState(runtimeHome)).toMatchObject({
+        status: 'in_progress',
+        currentStep: expectedStep,
+      });
+    },
+  );
+
   it('does not override CLI settings storage resolution when URL lives in runtime .env', async () => {
     const runtimeHome = makeRuntimeHome();
     const originalGantryHome = process.env.GANTRY_HOME;

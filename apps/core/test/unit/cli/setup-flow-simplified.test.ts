@@ -1,3 +1,7 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(() => {
@@ -11,6 +15,7 @@ afterEach(() => {
   vi.doUnmock('@core/cli/setup-flow-provider-steps.js');
   vi.doUnmock('@core/cli/setup-flow-state.js');
   vi.doUnmock('@core/cli/setup-ready.js');
+  vi.doUnmock('@core/config/settings/runtime-settings.js');
 });
 
 describe('simplified setup sequence', () => {
@@ -23,6 +28,7 @@ describe('simplified setup sequence', () => {
       'storage',
       'channel',
       'model',
+      'memory',
       'credentials',
       'telegram',
       'slack',
@@ -34,7 +40,6 @@ describe('simplified setup sequence', () => {
 
     for (const removed of [
       'prerequisites',
-      'memory',
       'embeddings',
       'dreaming',
       'service',
@@ -101,13 +106,69 @@ describe('simplified setup sequence', () => {
     expect(resumed.slackDisplayName).toBe('ops-room');
   });
 
-  it('can move back and forward across model and credentials steps', async () => {
+  it('prefills the chat jid from the existing ready binding', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-ready-binding-'),
+    );
+    fs.writeFileSync(path.join(runtimeHome, 'settings.yaml'), 'agent: {}\n');
+    vi.doMock('@core/config/settings/runtime-settings.js', async () => ({
+      createDefaultRuntimeSettings: vi.fn(),
+      loadRuntimeSettingsFromPath: vi.fn(() => ({
+        providers: {
+          telegram: { enabled: true },
+          slack: { enabled: false },
+        },
+        credentialBroker: { mode: 'gantry' },
+        storage: {
+          postgres: { schema: 'gantry', urlEnv: 'GANTRY_DATABASE_URL' },
+        },
+        memory: {
+          enabled: true,
+          embeddings: { enabled: false },
+          dreaming: { enabled: true },
+        },
+        agent: {
+          name: 'Gantry',
+          defaultModel: 'sonnet',
+          agentHarness: 'auto',
+        },
+        agents: {
+          main_agent: {
+            folder: 'main_agent',
+            bindings: {
+              main: {
+                provider: 'telegram',
+                jid: 'tg:-100123',
+                name: 'Ops Room',
+              },
+            },
+          },
+        },
+        conversations: {},
+        providerAccounts: {},
+      })),
+    }));
+    const { restoreDraft } = await import('@core/cli/setup-flow-state.js');
+
+    try {
+      const draft = restoreDraft(runtimeHome, null);
+
+      expect(draft.telegramChatJid).toBe('tg:-100123');
+      expect(draft.conversationLabel).toBe('Ops Room');
+      expect(draft.workspaceKey).toBe('main_agent');
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('can move back and forward across model, memory, and credentials steps', async () => {
     const sequence = [
       'welcome',
       'runtime_home',
       'storage',
       'channel',
       'model',
+      'memory',
       'credentials',
       'telegram',
       'slack',
@@ -129,6 +190,7 @@ describe('simplified setup sequence', () => {
     vi.doMock('@clack/prompts', () => ({
       intro: vi.fn(),
       outro: vi.fn(),
+      log: { message: vi.fn(), step: vi.fn() },
     }));
     vi.doMock('@core/cli/setup-flow-state.js', () => ({
       FULL_SEQUENCE: sequence,
@@ -149,7 +211,7 @@ describe('simplified setup sequence', () => {
       readOnboardingState: vi.fn(() => null),
     }));
     vi.doMock('@core/cli/setup-flow-core-steps.js', () => {
-      let modelCalls = 0;
+      let memoryCalls = 0;
       return {
         runWelcomeStep: step('welcome'),
         runRuntimeHomeStep: step('runtime_home', {
@@ -157,10 +219,11 @@ describe('simplified setup sequence', () => {
         }),
         runStorageStep: step('storage'),
         runChannelStep: step('channel'),
-        runModelStep: vi.fn(async () => {
-          calls.push('model');
-          modelCalls += 1;
-          return modelCalls === 1 ? { type: 'back' } : { type: 'next' };
+        runModelStep: step('model'),
+        runMemoryStep: vi.fn(async () => {
+          calls.push('memory');
+          memoryCalls += 1;
+          return memoryCalls === 1 ? { type: 'back' } : { type: 'next' };
         }),
       };
     });
@@ -205,10 +268,11 @@ describe('simplified setup sequence', () => {
       'storage',
       'channel',
       'model',
-      'channel',
+      'memory',
       'model',
+      'memory',
       'credentials',
-      'model',
+      'memory',
       'credentials',
       'telegram',
       'config',
@@ -264,7 +328,7 @@ describe('ready screen copy', () => {
         '  anthropic: main model sonnet; memory LLM consolidation sonnet; memory LLM dreaming sonnet; memory LLM extractor haiku; one-time jobs inherit main model; recurring jobs inherit main model',
         '',
         'Next: Start chatting or run gantry status.',
-        'Optional setup: memory, background service, extra providers.',
+        'Optional setup: memory, background service, extra chat channels.',
       ].join('\n'),
     );
     expect(note.mock.calls[0][1]).toBe('Ready');

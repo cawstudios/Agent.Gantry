@@ -67,23 +67,23 @@ Stage N+1 starts only after stage N's focused verification passes.
   anthropic defaults.
 - Job defaults: both presets already set `''` (inherit chat) — "apply
   defaults" resets both to `''`; no replacement structure.
-- `config/settings/runtime-settings-defaults.ts`: `applyModelPreset` →
+- `apps/core/src/config/settings/runtime-settings-defaults.ts`: `applyModelPreset` →
   `applyModelDefaults(settings, chatAlias)`;
   `getPresetManagedMemoryDefaults`/`applyPresetManagedMemoryDefaults` →
   provider-keyed equivalents. Update re-exports in `runtime-settings.ts`.
-- `config/settings/model-defaults.ts`: `presetFromSettings` →
+- `apps/core/src/config/settings/model-defaults.ts`: `presetFromSettings` →
   `providerFromSettings`; drop `'preset'` field from
   `updateRuntimeModelDefaults`; `'memory': 'reset'` re-derives from the chat
   provider; chat reset falls back to `DEFAULT_SETUP_MODEL_ALIAS` ('opus').
-- `cli/model.ts`: delete `gantry model use-preset`; `--preset` → `--provider`;
+- `apps/core/src/cli/model.ts`: delete `gantry model use-preset`; `--preset` → `--provider`;
   status "preset:" → "provider:", "preset-managed" → "provider-managed
   (from <provider>)"; preflight by provider id (drop the `isModelPresetId`
   gate). After `set chat` changes provider: warn "Memory models still on
   <old provider> — run `gantry model reset memory` to re-derive"; extend
   `noteUnconfiguredProvider` to also check memory model providers.
-- `adapters/llm/model-preset-preflight.ts`: `preflightModelPreset({preset})`
+- `apps/core/src/adapters/llm/model-provider-preflight.ts`: `preflightModelPreset({preset})`
   → `preflightModelProvider({providerId, chatAlias?})`.
-- Control API `control/server/routes/models.ts` + `openapi-schemas.ts`:
+- Control API `apps/core/src/control/server/routes/models.ts` + `openapi-schemas.ts`:
   PATCH drops `preset`; GET replaces `preset`+`mode:'preset-managed'` with
   `provider`+`mode:'provider-managed'`; `providersSelectedByPatch` uses
   `memoryModelDefaultsForProvider`.
@@ -109,7 +109,7 @@ Stage N+1 starts only after stage N's focused verification passes.
   memory?" (default yes); if yes, `p.confirm` "Enable semantic search?
   Requires an OpenAI API key for embeddings" (default no). Dreaming stays a
   silent default. Dispatch branch in setup-flow.ts.
-- Re-runnable setup: `cli/index.ts` `runSetupCommand` — replace the inline
+- Re-runnable setup: `apps/core/src/cli/index.ts` `runSetupCommand` — replace the inline
   step union (lists `credentials` before `model`; wrong order) with the
   `OnboardingStep` import. When state is `completed` OR settings.yaml exists
   with no state: `p.select` "What do you want to change?" → Run full setup /
@@ -133,11 +133,11 @@ Stage N+1 starts only after stage N's focused verification passes.
 
 ### Stage 4 — Live provider key verification
 
-- New `cli/model-credential-verify.ts`:
+- New `model-credential-verify.ts` (new file in `apps/core/src/cli`):
   `verifyModelProviderCredentialLive({providerId, authMode, payload,
   timeoutMs=10000})` → `{ok} | {ok:false, message} | {skipped, reason}`.
   Reuse `resolveGatewayUpstream` + `injectProviderAuth` from
-  `adapters/llm/anthropic-claude-agent/gantry-model-gateway-routing.ts`.
+  `apps/core/src/adapters/llm/anthropic-claude-agent/gantry-model-gateway-routing.ts`.
   Probes: default `GET {origin}{pathPrefix}/models` (openai + all
   OpenAI-compatible); anthropic api_key `GET /v1/models`; openrouter
   `GET /api/v1/key`. Skip-only v1: anthropic claude_code_oauth, bedrock,
@@ -172,16 +172,16 @@ Stage N+1 starts only after stage N's focused verification passes.
 
 ### Stage 6 — Surface restart-required changes + management hygiene
 
-- `config/settings/desired-settings-writer.ts`: return the
+- `apps/core/src/config/settings/desired-settings-writer.ts`: return the
   `classifySettingsChanges` classification (already computed in the import
   path — thread it out) as `{reconciled, restartRequired: string[]}`.
   A small shared helper prints, from every mutating CLI caller
   (memory.ts, model.ts reset memory, provider.ts, telegram-connect.ts,
   slack.ts, onboarding re-runs): "This change requires a restart to take
   effect — run `gantry restart`."
-- `cli/group.ts` `runName`: delete the contradictory "Restart Gantry" line
+- `apps/core/src/cli/group.ts` `runName`: delete the contradictory "Restart Gantry" line
   (`agent_defaults` is live-applied).
-- Help hygiene: `cli/index.ts` top-level help — `credentials capability` →
+- Help hygiene: `apps/core/src/cli/index.ts` top-level help — `credentials capability` →
   `credentials access`; surface the missing `agent`/`provider account`
   entries or point at the sub-help (pick the smaller diff).
 - `gantry start` outro states it runs in the foreground and how to use the

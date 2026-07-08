@@ -232,7 +232,7 @@ export async function runVerifyStep(
         'no processable conversation for the configured channel',
         providerAvailable
           ? `run ${connectCommand}.`
-          : 'choose Telegram or Slack in the Provider step.',
+          : 'choose Telegram or Slack in the Chat channel step.',
       ),
     );
     return {
