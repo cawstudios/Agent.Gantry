@@ -66,6 +66,19 @@ describe('model credential live verification', () => {
       }),
     ).resolves.toEqual({ ok: true });
 
+    await expect(
+      verifyModelProviderCredentialLive({
+        providerId: 'perplexity',
+        authMode: 'api_key',
+        payload: { apiKey: 'pplx-test' },
+      }),
+    ).resolves.toEqual({ ok: true });
+    // Perplexity's chat prefix is empty but its model list lives under /v1.
+    expect(fetchSpy).toHaveBeenLastCalledWith(
+      new URL('https://api.perplexity.ai/v1/models'),
+      expect.anything(),
+    );
+
     expect(fetchSpy).toHaveBeenCalledWith(
       new URL('https://api.groq.com/openai/v1/models'),
       expect.objectContaining({

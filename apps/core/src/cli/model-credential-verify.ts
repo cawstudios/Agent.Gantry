@@ -352,10 +352,9 @@ function credentialProbeUrl(
   if (providerId === 'anthropic') return new URL('/v1/models', upstream.origin);
   if (providerId === 'openrouter')
     return new URL('/api/v1/key', upstream.origin);
-  const prefix =
-    providerId === 'openai' && !upstream.pathPrefix
-      ? '/v1'
-      : upstream.pathPrefix;
+  // Providers with an empty chat prefix (openai, perplexity) still serve
+  // their model list under /v1 — verified against the live APIs.
+  const prefix = upstream.pathPrefix || '/v1';
   return new URL(`${normalizePrefix(prefix)}/models`, upstream.origin);
 }
 
