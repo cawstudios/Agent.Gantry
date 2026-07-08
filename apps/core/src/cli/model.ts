@@ -1,16 +1,9 @@
+import { preflightModelProvider, type ModelProviderPreflightResult } from '../adapters/llm/model-provider-preflight.js';
 import {
-  preflightModelPreset,
-  type ModelPresetPreflightResult,
-} from '../adapters/llm/model-preset-preflight.js';
-import {
-  DEFAULT_MODEL_PRESET_ID,
   DEFAULT_SETUP_MODEL_ALIAS,
-  getModelPreset,
-  isModelPresetId,
-  listModelPresets,
+  memoryModelDefaultsForProvider,
   resolveModelSelection,
   resolveModelSelectionForWorkload,
-  type ModelPresetId,
   type ModelWorkload,
 } from '../shared/model-catalog.js';
 import { resolveModelCacheSupport } from '../shared/model-cache-support.js';
@@ -26,8 +19,7 @@ import {
 } from './model-list-format.js';
 import { providerLabel } from '../shared/model-catalog-availability.js';
 import {
-  applyModelPreset,
-  applyPresetManagedMemoryDefaults,
+  applyProviderManagedMemoryDefaults,
   ensureRuntimeSettings,
   writeDesiredRuntimeSettings,
   type RuntimeSettings,
@@ -37,20 +29,18 @@ import type { ModelPreviewResponse } from './model-preview-types.js';
 import { formatPreviewWhy, parseAgentFlag } from './model-preview-format.js';
 type ModelCommandSettings = ReturnType<typeof ensureRuntimeSettings>;
 interface ModelCommandOptions {
-  preflightPreset?: (
+  preflightProvider?: (
     runtimeHome: string,
-    preset: ModelPresetId,
+    providerId: string,
     settings: ModelCommandSettings,
-  ) => Promise<ModelPresetPreflightResult>;
+    chatAlias?: string,
+  ) => Promise<ModelProviderPreflightResult>;
 }
 
 function usage(): string {
-  const presets = listModelPresets()
-    .map((p) => p.id)
-    .join('|');
   return `Usage:
   gantry model status
-  gantry model list [--preset ${presets}]
+  gantry model list [--provider <id>]
   gantry model chat|jobs|memory
   gantry model set chat <alias|family>
   gantry model set jobs inherit|<alias|family>
@@ -59,20 +49,15 @@ function usage(): string {
   gantry model why jobs|memory|job <id>
   gantry model why <alias|family>
   gantry model why <alias> --agent <id>
-  gantry model use-preset ${presets}
   gantry model doctor`;
 }
 
-function presetFromSettings(settings: ModelCommandSettings): ModelPresetId {
+function providerFromSettings(settings: ModelCommandSettings): string {
   const resolved = resolveModelSelectionForWorkload(
     settings.agent.defaultModel || DEFAULT_SETUP_MODEL_ALIAS,
     'chat',
   );
-  // modelRoute.id is the provider id, which is only a preset id for the
-  // anthropic/openrouter lanes. DeepAgents-lane providers (openai/groq/...) have
-  // no preset, so fall back to the default preset to avoid getModelPreset throws.
-  const providerId = resolved.ok ? resolved.entry.modelRoute.id : undefined;
-  return isModelPresetId(providerId) ? providerId : DEFAULT_MODEL_PRESET_ID;
+  return resolved.ok ? resolved.entry.modelRoute.id : 'anthropic';
 }
 
 function resolveSlot(alias: string, workload: ModelWorkload) {
@@ -82,47 +67,49 @@ function resolveSlot(alias: string, workload: ModelWorkload) {
     : `invalid (${resolved.message})`;
 }
 
-async function preflightAliasPresets(input: {
+async function preflightAliasProviders(input: {
   runtimeHome: string;
   settings: ModelCommandSettings;
   preflight: (
     runtimeHome: string,
-    preset: ModelPresetId,
+    providerId: string,
     settings: ModelCommandSettings,
-  ) => Promise<ModelPresetPreflightResult>;
+    chatAlias?: string,
+  ) => Promise<ModelProviderPreflightResult>;
   aliases: Array<{ alias: string | undefined; workload: ModelWorkload }>;
 }): Promise<boolean> {
-  const presets = new Set<ModelPresetId>();
+  const providers = new Map<string, string | undefined>();
   for (const { alias, workload } of input.aliases) {
     if (!alias) continue;
     const resolved = resolveModelSelectionForWorkload(alias, workload);
-    if (resolved.ok && isModelPresetId(resolved.entry.modelRoute.id)) {
-      presets.add(resolved.entry.modelRoute.id);
+    if (resolved.ok) {
+      const providerId = resolved.entry.modelRoute.id;
+      providers.set(
+        providerId,
+        workload === 'chat' ? resolved.alias : providers.get(providerId),
+      );
     }
   }
-  for (const preset of presets) {
+  for (const [providerId, chatAlias] of providers) {
     const result = await input.preflight(
       input.runtimeHome,
-      preset,
+      providerId,
       input.settings,
+      chatAlias,
     );
     if (result.ok) continue;
-    console.error(`Preset preflight failed: ${result.message}`);
+    console.error(`Provider preflight failed: ${result.message}`);
     return false;
   }
   return true;
 }
 
-// Best-effort note when a freshly selected concrete non-preset model has no
-// active credential, so `set` surfaces the missing key immediately instead of
-// only at run time. Skips silently when the control API is unreachable (the
-// global `gantry doctor` credential check still catches it).
 async function noteUnconfiguredProvider(
   runtimeHome: string,
   alias: string,
   providerId: string,
 ): Promise<void> {
-  if (isModelFamilyAlias(alias) || isModelPresetId(providerId)) return;
+  if (isModelFamilyAlias(alias)) return;
   const configured = await fetchConfiguredProviders(runtimeHome);
   if (!configured || configured.has(providerId)) return;
   console.warn(
@@ -143,6 +130,41 @@ function effectiveJobAlias(
       ? settings.agent.oneTimeJobDefaultModel
       : settings.agent.recurringJobDefaultModel;
   return explicit || chatAlias(settings);
+}
+
+function providerForAlias(alias: string, workload: ModelWorkload): string | undefined {
+  const resolved = resolveModelSelectionForWorkload(alias, workload);
+  return resolved.ok ? resolved.entry.modelRoute.id : undefined;
+}
+
+function memoryProviderFromSettings(settings: ModelCommandSettings): string {
+  const providers = [
+    providerForAlias(settings.memory.llm.models.extractor, 'memory_extractor'),
+    providerForAlias(settings.memory.llm.models.dreaming, 'memory_dreaming'),
+    providerForAlias(
+      settings.memory.llm.models.consolidation,
+      'memory_consolidation',
+    ),
+  ].filter((provider): provider is string => Boolean(provider));
+  const unique = [...new Set(providers)];
+  if (unique.length === 1) return unique[0]!;
+  return unique.length === 0 ? providerFromSettings(settings) : 'mixed';
+}
+
+async function noteUnconfiguredMemoryProviders(
+  runtimeHome: string,
+  settings: ModelCommandSettings,
+): Promise<void> {
+  const { extractor, dreaming, consolidation } = settings.memory.llm.models;
+  for (const [alias, workload] of [
+    [extractor, 'memory_extractor'],
+    [dreaming, 'memory_dreaming'],
+    [consolidation, 'memory_consolidation'],
+  ] as const) {
+    const providerId = providerForAlias(alias, workload);
+    if (providerId)
+      await noteUnconfiguredProvider(runtimeHome, alias, providerId);
+  }
 }
 
 function formatAgentOverrides(settings: RuntimeSettings): string[] {
@@ -168,12 +190,12 @@ function formatAgentOverrides(settings: RuntimeSettings): string[] {
 }
 
 function formatStatus(settings: ModelCommandSettings): string {
-  const preset = getModelPreset(presetFromSettings(settings));
+  const providerId = providerFromSettings(settings);
   const oneTimeInherited = !settings.agent.oneTimeJobDefaultModel;
   const recurringInherited = !settings.agent.recurringJobDefaultModel;
   const lines = [
     'Model status',
-    `preset: ${preset.id} (${preset.label})`,
+    `provider: ${providerId} (${providerLabel(providerId)})`,
     `chat: ${resolveSlot(chatAlias(settings), 'chat')}`,
     `one-time: ${
       oneTimeInherited
@@ -185,7 +207,7 @@ function formatStatus(settings: ModelCommandSettings): string {
         ? `inherits chat (${resolveSlot(effectiveJobAlias(settings, 'recurring'), 'recurring_job')})`
         : resolveSlot(effectiveJobAlias(settings, 'recurring'), 'recurring_job')
     }`,
-    'memory: preset-managed',
+    `memory: provider-managed (from ${memoryProviderFromSettings(settings)})`,
     `memory extractor: ${resolveSlot(settings.memory.llm.models.extractor, 'memory_extractor')}`,
     `memory dreaming: ${resolveSlot(settings.memory.llm.models.dreaming, 'memory_dreaming')}`,
     `memory consolidation: ${resolveSlot(settings.memory.llm.models.consolidation, 'memory_consolidation')}`,
@@ -238,8 +260,8 @@ function modelValidationFailures(settings: ModelCommandSettings): string[] {
   });
 }
 
-function selectedModelPresets(settings: ModelCommandSettings): ModelPresetId[] {
-  const selected = new Set<ModelPresetId>();
+function selectedModelProviders(settings: ModelCommandSettings): string[] {
+  const selected = new Set<string>();
   for (const { alias, workload } of [
     { alias: chatAlias(settings), workload: 'chat' as const },
     {
@@ -264,11 +286,7 @@ function selectedModelPresets(settings: ModelCommandSettings): ModelPresetId[] {
     },
   ]) {
     const resolved = resolveModelSelectionForWorkload(alias, workload);
-    // Only anthropic/openrouter provider ids are preset ids; DeepAgents-lane
-    // providers have no preset to preflight, so skip them here.
-    if (resolved.ok && isModelPresetId(resolved.entry.modelRoute.id)) {
-      selected.add(resolved.entry.modelRoute.id);
-    }
+    if (resolved.ok) selected.add(resolved.entry.modelRoute.id);
   }
   return [...selected].sort();
 }
@@ -305,7 +323,7 @@ function formatTarget(
   if (target === 'memory') {
     return [
       'Memory models',
-      'mode: preset-managed',
+      `mode: provider-managed (from ${memoryProviderFromSettings(settings)})`,
       `extractor: ${resolveSlot(settings.memory.llm.models.extractor, 'memory_extractor')}`,
       `dreaming: ${resolveSlot(settings.memory.llm.models.dreaming, 'memory_dreaming')}`,
       `consolidation: ${resolveSlot(settings.memory.llm.models.consolidation, 'memory_consolidation')}`,
@@ -341,7 +359,7 @@ function formatWhy(
   if (target === 'memory') {
     return [
       'Why memory uses these models',
-      'reason: memory is preset-managed and follows the selected preset',
+      `reason: memory is provider-managed from ${memoryProviderFromSettings(settings)}`,
       `extractor: ${resolveSlot(settings.memory.llm.models.extractor, 'memory_extractor')}`,
       `dreaming: ${resolveSlot(settings.memory.llm.models.dreaming, 'memory_dreaming')}`,
       `consolidation: ${resolveSlot(settings.memory.llm.models.consolidation, 'memory_consolidation')}`,
@@ -350,14 +368,13 @@ function formatWhy(
   return undefined;
 }
 
-function parsePresetFlag(args: string[]): ModelPresetId | undefined {
-  const value = args.find((arg) => arg.startsWith('--preset='));
-  const preset = value
-    ? value.slice('--preset='.length)
-    : args.includes('--preset')
-      ? args[args.indexOf('--preset') + 1]
+function parseProviderFlag(args: string[]): string | undefined {
+  const value = args.find((arg) => arg.startsWith('--provider='));
+  return value
+    ? value.slice('--provider='.length)
+    : args.includes('--provider')
+      ? args[args.indexOf('--provider') + 1]
       : undefined;
-  return isModelPresetId(preset) ? preset : undefined;
 }
 
 export async function runModelCommand(
@@ -368,9 +385,14 @@ export async function runModelCommand(
   const [action, target, alias] = args;
   const settings = ensureRuntimeSettings(runtimeHome);
   const preflight =
-    options.preflightPreset ??
-    ((runtimeHome, preset, settings) =>
-      preflightModelPreset({ runtimeHome, preset, settings }));
+    options.preflightProvider ??
+    ((runtimeHome, providerId, settings, chatAlias) =>
+      preflightModelProvider({
+        runtimeHome,
+        providerId,
+        chatAlias,
+        settings,
+      }));
 
   const persistSettings = async (
     previousSettings: RuntimeSettings,
@@ -391,7 +413,7 @@ export async function runModelCommand(
   if (action === 'list') {
     const configuredProviders = await fetchConfiguredProviders(runtimeHome);
     console.log(
-      formatModelList(settings, parsePresetFlag(args.slice(1)), {
+      formatModelList(settings, parseProviderFlag(args.slice(1)), {
         configuredProviders,
         familyOrder: familyOrderFromSettings(settings),
       }),
@@ -419,7 +441,7 @@ export async function runModelCommand(
         return 1;
       }
       if (
-        !(await preflightAliasPresets({
+        !(await preflightAliasProviders({
           runtimeHome,
           settings,
           preflight,
@@ -428,6 +450,7 @@ export async function runModelCommand(
       ) {
         return 1;
       }
+      const oldMemoryProvider = memoryProviderFromSettings(settings);
       const previousSettings = structuredClone(settings);
       settings.agent.defaultModel = resolved.alias;
       await persistSettings(previousSettings, settings);
@@ -437,12 +460,17 @@ export async function runModelCommand(
         resolved.alias,
         resolved.entry.modelRoute.id,
       );
+      if (oldMemoryProvider !== resolved.entry.modelRoute.id) {
+        console.warn(
+          `Memory models still on ${oldMemoryProvider} — run \`gantry model reset memory\` to re-derive.`,
+        );
+      }
       return 0;
     }
     if (target === 'jobs' && alias) {
       if (alias === 'inherit') {
         if (
-          !(await preflightAliasPresets({
+          !(await preflightAliasProviders({
             runtimeHome,
             settings,
             preflight,
@@ -481,7 +509,7 @@ export async function runModelCommand(
         return 1;
       }
       if (
-        !(await preflightAliasPresets({
+        !(await preflightAliasProviders({
           runtimeHome,
           settings,
           preflight,
@@ -506,6 +534,13 @@ export async function runModelCommand(
         oneTime.alias,
         oneTime.entry.modelRoute.id,
       );
+      if (recurring.entry.modelRoute.id !== oneTime.entry.modelRoute.id) {
+        await noteUnconfiguredProvider(
+          runtimeHome,
+          recurring.alias,
+          recurring.entry.modelRoute.id,
+        );
+      }
       return 0;
     }
     console.error(usage());
@@ -513,33 +548,21 @@ export async function runModelCommand(
   }
 
   if (action === 'reset') {
-    const presetId = presetFromSettings(settings);
-    const preset = getModelPreset(presetId);
+    const providerId = providerFromSettings(settings);
+    const memoryDefaults = memoryModelDefaultsForProvider(providerId);
     const aliases =
       target === 'chat'
-        ? [{ alias: preset.chatDefault, workload: 'chat' as const }]
+        ? [{ alias: DEFAULT_SETUP_MODEL_ALIAS, workload: 'chat' as const }]
         : target === 'jobs'
           ? [
               { alias: chatAlias(settings), workload: 'one_time_job' as const },
-              {
-                alias: chatAlias(settings),
-                workload: 'recurring_job' as const,
-              },
+              { alias: chatAlias(settings), workload: 'recurring_job' as const },
             ]
           : target === 'memory'
             ? [
-                {
-                  alias: preset.memoryDefaults.extractor,
-                  workload: 'memory_extractor' as const,
-                },
-                {
-                  alias: preset.memoryDefaults.dreaming,
-                  workload: 'memory_dreaming' as const,
-                },
-                {
-                  alias: preset.memoryDefaults.consolidation,
-                  workload: 'memory_consolidation' as const,
-                },
+                { alias: memoryDefaults.extractor, workload: 'memory_extractor' as const },
+                { alias: memoryDefaults.dreaming, workload: 'memory_dreaming' as const },
+                { alias: memoryDefaults.consolidation, workload: 'memory_consolidation' as const },
               ]
             : undefined;
     if (!aliases) {
@@ -547,7 +570,7 @@ export async function runModelCommand(
       return 1;
     }
     if (
-      !(await preflightAliasPresets({
+      !(await preflightAliasProviders({
         runtimeHome,
         settings,
         preflight,
@@ -558,15 +581,18 @@ export async function runModelCommand(
     }
     const previousSettings = structuredClone(settings);
     if (target === 'chat') {
-      settings.agent.defaultModel = preset.chatDefault;
+      settings.agent.defaultModel = DEFAULT_SETUP_MODEL_ALIAS;
     } else if (target === 'jobs') {
       settings.agent.oneTimeJobDefaultModel = '';
       settings.agent.recurringJobDefaultModel = '';
     } else if (target === 'memory') {
-      applyPresetManagedMemoryDefaults(settings, presetId);
+      applyProviderManagedMemoryDefaults(settings, providerId);
     }
     await persistSettings(previousSettings, settings);
     console.log(formatTarget(settings, target));
+    if (target === 'memory') {
+      await noteUnconfiguredMemoryProviders(runtimeHome, settings);
+    }
     return 0;
   }
 
@@ -631,11 +657,6 @@ export async function runModelCommand(
         return 1;
       }
     }
-    // `gantry model why <alias|family>`: family-aware resolution preview. A
-    // family shows members in effective order, the provider it would resolve to
-    // for the configured set, and the reason; a concrete alias shows whether its
-    // provider key is configured. Degrades to no configured/needs-key line when
-    // the control API is unreachable.
     if (
       target &&
       !alias &&
@@ -660,36 +681,14 @@ export async function runModelCommand(
     return 0;
   }
 
-  if (action === 'use-preset') {
-    if (!isModelPresetId(target)) {
-      console.error(usage());
-      return 1;
-    }
-    const result = await preflight(runtimeHome, target, settings);
-    if (!result.ok) {
-      console.error(`Preset preflight failed: ${result.message}`);
-      return 1;
-    }
-    const previousSettings = structuredClone(settings);
-    applyModelPreset(settings, target);
-    await persistSettings(previousSettings, settings);
-    console.log(`preset: ${target}`);
-    console.log(`chat: ${settings.agent.defaultModel}`);
-    console.log(`one-time: inherits chat (${settings.agent.defaultModel})`);
-    console.log(`recurring: inherits chat (${settings.agent.defaultModel})`);
-    console.log('memory: preset-managed');
-    return 0;
-  }
-
   if (action === 'doctor') {
-    const preset = presetFromSettings(settings);
     const validationFailures = modelValidationFailures(settings);
     const preflightResults =
       validationFailures.length === 0
         ? await Promise.all(
-            selectedModelPresets(settings).map(async (selectedPreset) => ({
-              preset: selectedPreset,
-              result: await preflight(runtimeHome, selectedPreset, settings),
+            selectedModelProviders(settings).map(async (providerId) => ({
+              providerId,
+              result: await preflight(runtimeHome, providerId, settings),
             })),
           )
         : [];
@@ -705,13 +704,13 @@ export async function runModelCommand(
         validationFailures.length === 0
           ? 'model aliases: pass'
           : `model aliases: fail - ${validationFailures.join('; ')}`,
-        `preset health: ${preset}`,
+        `provider health: ${providerFromSettings(settings)}`,
         ...(preflightResults.length > 0
-          ? preflightResults.map(({ preset, result }) => {
-              const label = getModelPreset(preset).label;
+          ? preflightResults.map(({ providerId, result }) => {
+              const label = providerLabel(providerId);
               return `${label} credentials: ${result.status} - ${result.message}`;
             })
-          : ['preset credentials: skipped - Model aliases are invalid.']),
+          : ['provider credentials: skipped - Model aliases are invalid.']),
         `Status: ${status}`,
       ].join('\n'),
     );

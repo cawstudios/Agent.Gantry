@@ -516,9 +516,6 @@ export const ListModelsResponseSchema = z.object({
 });
 export type ListModelsResponse = z.infer<typeof ListModelsResponseSchema>;
 
-export const ModelPresetSchema = z.string().min(1);
-export type ModelPreset = z.infer<typeof ModelPresetSchema>;
-
 export const ModelWorkloadSchema = z.enum([
   'chat',
   'one_time_job',
@@ -540,9 +537,9 @@ export const ModelDefaultSlotSchema = z.object({
 export type ModelDefaultSlot = z.infer<typeof ModelDefaultSlotSchema>;
 
 export const ModelDefaultsResponseSchema = z.object({
-  preset: z
+  provider: z
     .object({
-      id: ModelPresetSchema,
+      id: z.string().min(1),
       label: z.string(),
     })
     .nullable(),
@@ -552,7 +549,7 @@ export const ModelDefaultsResponseSchema = z.object({
     recurring: ModelDefaultSlotSchema,
   }),
   memory: z.object({
-    mode: z.literal('preset-managed'),
+    mode: z.literal('provider-managed'),
     extractor: ModelDefaultSlotSchema,
     dreaming: ModelDefaultSlotSchema,
     consolidation: ModelDefaultSlotSchema,
@@ -570,13 +567,12 @@ export type ModelDefaultsResponse = z.infer<typeof ModelDefaultsResponseSchema>;
 
 export const ModelDefaultsPatchRequestSchema = z
   .object({
-    preset: ModelPresetSchema.optional(),
     chat: z.string().nullable().optional(),
     jobs: z.union([z.string(), z.null()]).optional(),
     oneTime: z.union([z.string(), z.null()]).optional(),
     recurring: z.union([z.string(), z.null()]).optional(),
     memory: z
-      .union([z.literal('reset'), z.literal('preset-managed'), z.null()])
+      .union([z.literal('reset'), z.literal('provider-managed'), z.null()])
       .optional(),
   })
   .strict();

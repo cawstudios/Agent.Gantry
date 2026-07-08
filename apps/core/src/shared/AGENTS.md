@@ -28,7 +28,7 @@
   display/source metadata only unless explicitly registered as aliases.
 - Catalog response families are simple API-shape labels, currently `anthropic`
   and schema-only `openai`. OpenRouter belongs in `modelRoute` metadata and
-  preset UX, not in `responseFamily` or raw user-facing model selectors.
+  provider defaults, not in `responseFamily` or raw user-facing model selectors.
 - `model-families.ts` is a SEPARATE selector namespace, not part of the catalog
   `ALIAS_INDEX`. A family alias (e.g. `gpt-oss`, `llama-70b`) maps to ordered
   EXISTING concrete catalog member aliases; the load-time guard throws if a

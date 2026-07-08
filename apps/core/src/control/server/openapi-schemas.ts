@@ -1,5 +1,4 @@
 import type { JsonSchema } from './openapi-route-helpers.js';
-import { listModelPresets } from '../../shared/model-catalog.js';
 import { listModelRouteProviders } from '../../shared/model-provider-registry.js';
 import { modelCredentialSchemas } from './openapi-model-credential-schemas.js';
 import {
@@ -482,18 +481,15 @@ export const openApiSchemas: Record<string, JsonSchema> = {
   },
   ModelDefaultsResponse: {
     type: 'object',
-    required: ['preset', 'chat', 'jobs', 'memory', 'defaults'],
+    required: ['provider', 'chat', 'jobs', 'memory', 'defaults'],
     properties: {
-      preset: {
+      provider: {
         oneOf: [
           {
             type: 'object',
             required: ['id', 'label'],
             properties: {
-              id: {
-                type: 'string',
-                enum: listModelPresets().map((preset) => preset.id),
-              },
+              id: { type: 'string' },
               label: { type: 'string' },
             },
           },
@@ -513,7 +509,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
         type: 'object',
         required: ['mode', 'extractor', 'dreaming', 'consolidation'],
         properties: {
-          mode: { type: 'string', enum: ['preset-managed'] },
+          mode: { type: 'string', enum: ['provider-managed'] },
           extractor: { $ref: '#/components/schemas/ModelDefaultSlot' },
           dreaming: { $ref: '#/components/schemas/ModelDefaultSlot' },
           consolidation: { $ref: '#/components/schemas/ModelDefaultSlot' },
@@ -550,10 +546,6 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      preset: {
-        type: 'string',
-        enum: listModelPresets().map((preset) => preset.id),
-      },
       chat: { type: ['string', 'null'] },
       jobs: {
         oneOf: [{ type: 'string' }, { type: 'null' }],
@@ -563,10 +555,10 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       recurring: { type: ['string', 'null'] },
       memory: {
         oneOf: [
-          { type: 'string', enum: ['reset', 'preset-managed'] },
+          { type: 'string', enum: ['reset', 'provider-managed'] },
           { type: 'null' },
         ],
-        description: 'Use null, "reset", or "preset-managed".',
+        description: 'Use null, "reset", or "provider-managed".',
       },
     },
   },

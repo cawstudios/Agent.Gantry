@@ -2,7 +2,6 @@ import {
   DEFAULT_SETUP_MODEL_ALIAS,
   listModelCatalogEntries,
   type ModelCatalogEntry,
-  type ModelPresetId,
 } from '../shared/model-catalog.js';
 import { resolveModelCacheSupport } from '../shared/model-cache-support.js';
 import {
@@ -75,7 +74,7 @@ function aliasStatus(
 
 export function formatModelList(
   settings: ModelListSettings,
-  preset: ModelPresetId | undefined,
+  providerId: string | undefined,
   availability: {
     configuredProviders?: Set<string>;
     familyOrder?: FamilyOrderOverrides;
@@ -93,7 +92,7 @@ export function formatModelList(
     header.replace(/[^|]+/g, '---'),
   ];
   for (const entry of listModelCatalogEntries()) {
-    if (preset && entry.modelRoute.id !== preset) continue;
+    if (providerId && entry.modelRoute.id !== providerId) continue;
     const cacheSupport = resolveModelCacheSupport(entry);
     const badge = availabilityBadgeForProvider(
       entry.modelRoute.id,
@@ -114,7 +113,7 @@ export function formatModelList(
       rows.push(cells.join(' | '));
     }
   }
-  if (!preset) {
+  if (!providerId) {
     const familyHeader = hasAvailability
       ? 'Family | Model | Providers (preference order) | Availability'
       : 'Family | Model | Providers (preference order)';

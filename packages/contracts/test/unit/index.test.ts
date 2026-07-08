@@ -151,12 +151,11 @@ describe('contracts package', () => {
   it('validates provider-neutral model default contracts', () => {
     expect(
       ModelDefaultsPatchRequestSchema.parse({
-        preset: 'openrouter',
         chat: 'kimi',
         jobs: 'inherit',
         memory: null,
       }),
-    ).toMatchObject({ preset: 'openrouter', chat: 'kimi' });
+    ).toMatchObject({ chat: 'kimi' });
     expectInvalid(ModelDefaultsPatchRequestSchema, {
       providerPreset: 'custom-provider',
     });
@@ -166,7 +165,7 @@ describe('contracts package', () => {
     });
     expect(
       ModelDefaultsResponseSchema.safeParse({
-        preset: {
+        provider: {
           id: 'openrouter',
           label: 'OpenRouter',
         },
@@ -197,7 +196,7 @@ describe('contracts package', () => {
           },
         },
         memory: {
-          mode: 'preset-managed',
+          mode: 'provider-managed',
           extractor: {
             configuredAlias: 'kimi',
             effectiveAlias: 'kimi',

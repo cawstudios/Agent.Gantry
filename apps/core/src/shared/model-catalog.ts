@@ -19,7 +19,6 @@ import {
 
 export type ModelResponseFamily = string;
 export type ModelRouteId = ModelRouteProviderId;
-export type ModelPresetId = ModelRouteId;
 export type ModelExecutionProviderId =
   | 'anthropic:claude-agent-sdk'
   | 'deepagents:langchain'
@@ -175,17 +174,10 @@ export interface ModelDefaultAliases {
   memoryConsolidation?: string;
 }
 
-export interface ModelPreset {
-  id: ModelPresetId;
-  label: string;
-  chatDefault: string;
-  oneTimeJobDefault: string;
-  recurringJobDefault: string;
-  memoryDefaults: {
-    extractor: string;
-    dreaming: string;
-    consolidation: string;
-  };
+export interface MemoryModelDefaults {
+  extractor: string;
+  dreaming: string;
+  consolidation: string;
 }
 
 export interface NormalizedModelUsage {
@@ -225,11 +217,18 @@ export interface RuntimeContextUsageSnapshot {
 
 export const DEFAULT_SETUP_MODEL_ALIAS = 'opus';
 
-export const MEMORY_MODEL_DEFAULT_ALIASES = {
-  extractor: 'haiku',
-  dreaming: 'sonnet',
-  consolidation: 'sonnet',
-} as const;
+const CURATED_MEMORY_MODEL_DEFAULTS: Record<string, MemoryModelDefaults> = {
+  anthropic: {
+    extractor: 'haiku',
+    dreaming: 'sonnet',
+    consolidation: 'sonnet',
+  },
+  openrouter: {
+    extractor: 'kimi',
+    dreaming: 'kimi',
+    consolidation: 'kimi',
+  },
+};
 
 const CURRENT_RESPONSE_FAMILY_CAPABILITIES: ModelCapabilityDescriptor = {
   streaming: true,
@@ -243,54 +242,6 @@ const CURRENT_RESPONSE_FAMILY_CAPABILITIES: ModelCapabilityDescriptor = {
   cacheAccounting: true,
   structuredOutput: false,
 };
-
-export const MODEL_PRESETS: readonly ModelPreset[] = [
-  {
-    id: 'anthropic',
-    label: 'Anthropic',
-    chatDefault: DEFAULT_SETUP_MODEL_ALIAS,
-    oneTimeJobDefault: '',
-    recurringJobDefault: '',
-    memoryDefaults: {
-      extractor: MEMORY_MODEL_DEFAULT_ALIASES.extractor,
-      dreaming: MEMORY_MODEL_DEFAULT_ALIASES.dreaming,
-      consolidation: MEMORY_MODEL_DEFAULT_ALIASES.consolidation,
-    },
-  },
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    chatDefault: 'kimi',
-    oneTimeJobDefault: '',
-    recurringJobDefault: '',
-    memoryDefaults: {
-      extractor: 'kimi',
-      dreaming: 'kimi',
-      consolidation: 'kimi',
-    },
-  },
-] as const;
-
-export const DEFAULT_MODEL_PRESET_ID: ModelPresetId = MODEL_PRESETS[0].id;
-
-export function listModelPresets(): readonly ModelPreset[] {
-  return MODEL_PRESETS;
-}
-
-export function isModelPresetId(value: unknown): value is ModelPresetId {
-  return (
-    typeof value === 'string' &&
-    MODEL_PRESETS.some((preset) => preset.id === value)
-  );
-}
-
-export function getModelPreset(presetId: ModelPresetId): ModelPreset {
-  const preset = MODEL_PRESETS.find((entry) => entry.id === presetId);
-  if (!preset) {
-    throw new Error(`Unknown model preset: ${presetId}`);
-  }
-  return preset;
-}
 
 export function providerRoute(providerId: string, providerModelId: string) {
   const id = normalizeModelRouteProviderId(providerId);
@@ -674,6 +625,35 @@ export function withCustomModelCatalogEntries<T>(
 
 export function listModelCatalogEntries(): readonly ModelCatalogEntry[] {
   return activeModelCatalogEntries;
+}
+
+export function memoryModelDefaultsForProvider(
+  providerId: string,
+): MemoryModelDefaults {
+  const curated = CURATED_MEMORY_MODEL_DEFAULTS[providerId];
+  if (curated) return { ...curated };
+  const selected = activeModelCatalogEntries
+    .filter(
+      (entry) =>
+        entry.modelRoute.id === providerId &&
+        entry.supportedWorkloads.includes('memory_extractor') &&
+        entry.supportedWorkloads.includes('memory_dreaming') &&
+        entry.supportedWorkloads.includes('memory_consolidation'),
+    )
+    .sort(
+      (a, b) =>
+        (a.inputUsdPerMillionTokens ?? Number.POSITIVE_INFINITY) -
+          (b.inputUsdPerMillionTokens ?? Number.POSITIVE_INFINITY) ||
+        a.id.localeCompare(b.id),
+    )[0];
+  if (selected) {
+    return {
+      extractor: selected.recommendedAlias,
+      dreaming: selected.recommendedAlias,
+      consolidation: selected.recommendedAlias,
+    };
+  }
+  return { ...CURATED_MEMORY_MODEL_DEFAULTS.anthropic };
 }
 
 export function resolveModelSelection(value?: string | null): ModelResolution {

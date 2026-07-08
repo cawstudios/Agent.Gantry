@@ -98,7 +98,6 @@ describe('setup credentials step', () => {
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
-      modelPreset: 'anthropic' as const,
       selectedModel: 'opus',
       memoryEnabled: false,
       embeddingsEnabled: false,
@@ -141,7 +140,6 @@ describe('setup credentials step', () => {
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
-      modelPreset: 'anthropic' as const,
       selectedModel: 'gpt',
       memoryEnabled: true,
       embeddingsEnabled: true,
@@ -155,7 +153,7 @@ describe('setup credentials step', () => {
 
     expect(action).toEqual({ type: 'next' });
     expect(note).toHaveBeenCalledWith(
-      'Selected defaults require credentials for: anthropic, openai.',
+      'Selected defaults require credentials for: openai.',
       'Model Access required',
     );
     expect(upsertModelCredential).toHaveBeenCalledWith(
@@ -172,7 +170,6 @@ describe('setup credentials step', () => {
     expect(
       requiredModelCredentialProviderReasonsForSetupDraft({
         credentialMode: 'gantry',
-        modelPreset: 'anthropic',
         selectedModel: 'opus',
         memoryEnabled: true,
         embeddingsEnabled: true,
@@ -201,7 +198,6 @@ describe('setup credentials step', () => {
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
-      modelPreset: 'anthropic' as const,
       selectedModel: 'opus',
       memoryEnabled: false,
       embeddingsEnabled: false,
@@ -240,7 +236,6 @@ describe('setup credentials step', () => {
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
-      modelPreset: 'anthropic' as const,
       selectedModel: 'opus',
       memoryEnabled: false,
       embeddingsEnabled: false,
@@ -270,7 +265,6 @@ describe('setup credentials step', () => {
       const draft = {
         credentialMode: 'none' as const,
         postgresSetupKind: 'local' as const,
-        modelPreset: 'anthropic' as const,
         selectedModel: 'opus',
         memoryEnabled: false,
         embeddingsEnabled: false,
@@ -299,7 +293,6 @@ describe('setup credentials step', () => {
     const draft = {
       credentialMode: 'none' as const,
       postgresSetupKind: 'local' as const,
-      modelPreset: 'anthropic' as const,
       selectedModel: 'opus',
       memoryEnabled: false,
       embeddingsEnabled: false,

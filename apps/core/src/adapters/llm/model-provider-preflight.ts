@@ -7,20 +7,19 @@ import type { AppId } from '../../domain/app/app.js';
 import type { AgentRunId } from '../../domain/events/events.js';
 import type { AgentCredentialBroker } from '../../domain/ports/agent-credential-broker.js';
 import {
-  getModelPreset,
+  listModelCatalogEntries,
   resolveModelSelectionForWorkload,
-  type ModelPresetId,
 } from '../../shared/model-catalog.js';
 import { getModelProviderDefinition } from '../../shared/model-provider-registry.js';
 import { validateModelCredentialProjectionForEntry } from './anthropic-claude-agent/model-provider-credential-validation.js';
 
-export interface ModelPresetPreflightResult {
+export interface ModelProviderPreflightResult {
   ok: boolean;
   status: 'pass' | 'fail' | 'skipped';
   message: string;
 }
 
-export interface ModelPresetPreflightSettings {
+export interface ModelProviderPreflightSettings {
   credentialBroker: {
     mode: 'none' | 'gantry';
     gateway?: {
@@ -29,22 +28,48 @@ export interface ModelPresetPreflightSettings {
   };
 }
 
-export async function preflightModelPreset(input: {
+export async function preflightModelProvider(input: {
   runtimeHome: string;
-  preset: ModelPresetId;
-  settings: ModelPresetPreflightSettings;
+  providerId: string;
+  chatAlias?: string;
+  settings: ModelProviderPreflightSettings;
   appId?: AppId;
-}): Promise<ModelPresetPreflightResult> {
+}): Promise<ModelProviderPreflightResult> {
   void input.runtimeHome;
-  const { preset: presetId, settings } = input;
-  const preset = getModelPreset(presetId);
-  const model = resolveModelSelectionForWorkload(preset.chatDefault, 'chat');
+  const { providerId, settings } = input;
+  const provider = getModelProviderDefinition(providerId);
+  const model = input.chatAlias
+    ? resolveModelSelectionForWorkload(input.chatAlias, 'chat')
+    : {
+        ok: true as const,
+        entry: listModelCatalogEntries()
+          .filter(
+            (entry) =>
+              entry.modelRoute.id === providerId &&
+              entry.supportedWorkloads.includes('chat'),
+          )
+          .sort((a, b) => a.id.localeCompare(b.id))[0],
+      };
   if (!model.ok) return { ok: false, status: 'fail', message: model.message };
+  if (!model.entry) {
+    return {
+      ok: false,
+      status: 'fail',
+      message: `Model provider ${providerId} has no chat-capable catalog entry.`,
+    };
+  }
+  if (model.entry.modelRoute.id !== providerId) {
+    return {
+      ok: false,
+      status: 'fail',
+      message: `Model alias "${input.chatAlias}" belongs to ${model.entry.modelRoute.id}, not ${providerId}.`,
+    };
+  }
   if (settings.credentialBroker.mode !== 'gantry') {
     return {
       ok: false,
       status: 'fail',
-      message: `${preset.label} requires Gantry Model Gateway credentials.`,
+      message: `${provider?.label ?? providerId} requires Gantry Model Gateway credentials.`,
     };
   }
   const runId = `model-preflight:${randomUUID()}` as AgentRunId;
@@ -81,7 +106,7 @@ export async function preflightModelPreset(input: {
     return {
       ok: true,
       status: 'pass',
-      message: `${getModelProviderDefinition(model.entry.modelRoute.id)?.label ?? preset.label} Model Access credential is available.`,
+      message: `${provider?.label ?? model.entry.modelRoute.id} Model Access credential is available.`,
     };
   } catch (error) {
     return {

@@ -3,7 +3,6 @@ import fs from 'fs';
 import type { HostCredentialMode } from '../config/credentials/mode.js';
 import { onboardingStatePath } from '../config/settings/runtime-home.js';
 import type { AgentHarness } from '../shared/agent-engine.js';
-import type { ModelPresetId } from '../shared/model-catalog.js';
 import { nowIso } from '../shared/time/datetime.js';
 
 export type OnboardingStep =
@@ -39,7 +38,6 @@ export interface OnboardingData {
   dreamingEnabled?: boolean;
   credentialMode?: HostCredentialMode;
   agentName?: string;
-  modelPreset?: ModelPresetId;
   selectedModel?: string;
   agentHarness?: AgentHarness;
   workspaceKey?: string;

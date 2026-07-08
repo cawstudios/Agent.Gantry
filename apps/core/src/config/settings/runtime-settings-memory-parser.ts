@@ -13,7 +13,7 @@ import {
   DEFAULT_MEMORY_MAINTENANCE_MAX_PENDING,
   DEFAULT_OPENAI_DAILY_EMBED_LIMIT,
   getDefaultMemoryBackfillSettings,
-  getPresetManagedMemoryDefaults,
+  getProviderManagedMemoryDefaults,
 } from './runtime-settings-defaults.js';
 import {
   parseBooleanValue,
@@ -161,7 +161,7 @@ function parseMemoryLlmModels(
   raw: unknown,
   pathPrefix: string,
 ): RuntimeMemoryLlmModels {
-  const defaults = getPresetManagedMemoryDefaults();
+  const defaults = getProviderManagedMemoryDefaults();
   if (raw === undefined) return defaults;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error(`${pathPrefix} must be a mapping`);
@@ -217,7 +217,7 @@ export function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
         },
       },
       llm: {
-        models: getPresetManagedMemoryDefaults(),
+        models: getProviderManagedMemoryDefaults(),
         extractorMaxFacts: DEFAULT_MEMORY_EXTRACTOR_MAX_FACTS,
         extractorMinConfidence: DEFAULT_MEMORY_EXTRACTOR_MIN_CONFIDENCE,
       },

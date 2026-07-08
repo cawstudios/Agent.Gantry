@@ -6,7 +6,7 @@ import {
   executableModelEntry,
   findModelByRunnerModel,
   listModelCatalogEntries,
-  MEMORY_MODEL_DEFAULT_ALIASES,
+  memoryModelDefaultsForProvider,
   providerRoute,
   resolveModelSelection,
   resolveModelSelectionForWorkload,
@@ -219,9 +219,30 @@ describe('model catalog resolution', () => {
     });
   });
 
-  it('uses catalog aliases for setup and memory LLM defaults', () => {
+  it('uses catalog aliases for setup and curated memory LLM defaults', () => {
     expect(DEFAULT_SETUP_MODEL_ALIAS).toBe('opus');
-    expect(MEMORY_MODEL_DEFAULT_ALIASES).toEqual({
+    expect(memoryModelDefaultsForProvider('anthropic')).toEqual({
+      extractor: 'haiku',
+      dreaming: 'sonnet',
+      consolidation: 'sonnet',
+    });
+    expect(memoryModelDefaultsForProvider('openrouter')).toEqual({
+      extractor: 'kimi',
+      dreaming: 'kimi',
+      consolidation: 'kimi',
+    });
+  });
+
+  it('derives provider memory defaults from the cheapest eligible model', () => {
+    expect(memoryModelDefaultsForProvider('groq')).toEqual({
+      extractor: 'groq-fast',
+      dreaming: 'groq-fast',
+      consolidation: 'groq-fast',
+    });
+  });
+
+  it('falls back to anthropic memory defaults when the provider is not memory-capable', () => {
+    expect(memoryModelDefaultsForProvider('perplexity')).toEqual({
       extractor: 'haiku',
       dreaming: 'sonnet',
       consolidation: 'sonnet',

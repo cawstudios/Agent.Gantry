@@ -6,11 +6,10 @@ import {
 } from '../config/settings/runtime-home.js';
 import { validatePostgresConnectionUrl } from '../adapters/storage/postgres/url.js';
 import {
-  DEFAULT_MODEL_PRESET_ID,
-  getModelPreset,
-  isModelPresetId,
+  DEFAULT_SETUP_MODEL_ALIAS,
   listModelCatalogEntries,
-  listModelPresets,
+  memoryModelDefaultsForProvider,
+  type MemoryModelDefaults,
   resolveModelSelectionForWorkload,
 } from '../shared/model-catalog.js';
 import {
@@ -284,45 +283,12 @@ export async function runModelStep(draft: SetupDraft): Promise<FlowAction> {
   if (agentNameControl) return agentNameControl;
   draft.agentName = String(agentName).trim();
 
-  const preset = await p.select({
-    message: 'Choose chat and memory LLM defaults preset',
-    options: [
-      ...listModelPresets().map((preset) => ({
-        value: preset.id,
-        label: preset.label,
-        hint: `Chat default ${preset.chatDefault}; memory LLM defaults use ${formatMemoryDefaultAliases(preset.memoryDefaults)}.`,
-      })),
-      {
-        value: 'back',
-        label: 'Back',
-      },
-      {
-        value: 'resume',
-        label: 'Resume Later',
-      },
-      {
-        value: 'cancel',
-        label: 'Cancel Setup',
-      },
-    ],
-    initialValue: draft.modelPreset || DEFAULT_MODEL_PRESET_ID,
-  });
-
-  if (p.isCancel(preset)) return { type: 'resume' };
-  if (preset === 'back') return { type: 'back' };
-  if (preset === 'resume' || preset === 'cancel') return { type: preset };
-  if (!isModelPresetId(preset)) return { type: 'resume' };
-  draft.modelPreset = preset;
-  const selectedPreset = getModelPreset(draft.modelPreset);
-
-  // Offer every chat-capable model across all providers (not just the preset's),
-  // so a user can onboard directly onto a non-preset provider (openai/groq/...).
   const chatModelOptions = listModelCatalogEntries()
     .filter((entry) => entry.supportedWorkloads.includes('chat'))
     .map((entry) => ({
       value: entry.recommendedAlias,
       label:
-        entry.recommendedAlias === selectedPreset.chatDefault
+        entry.recommendedAlias === DEFAULT_SETUP_MODEL_ALIAS
           ? `${entry.displayName} (Recommended)`
           : entry.displayName,
       hint: `${entry.modelRoute.label} · Alias: ${entry.recommendedAlias} · Context: ${formatContextWindow(entry.contextWindowTokens)} · Cost: ${formatCostPerMillion(entry)} per 1M.`,
@@ -331,7 +297,7 @@ export async function runModelStep(draft: SetupDraft): Promise<FlowAction> {
     chatModelOptions.some((option) => option.value === draft.selectedModel) &&
     resolveModelSelectionForWorkload(draft.selectedModel, 'chat').ok
       ? draft.selectedModel
-      : selectedPreset.chatDefault;
+      : DEFAULT_SETUP_MODEL_ALIAS;
   const value = await p.select({
     message: 'Choose main model/provider',
     options: [
@@ -358,22 +324,17 @@ export async function runModelStep(draft: SetupDraft): Promise<FlowAction> {
   const resolvedModel = resolveModelSelectionForWorkload(String(value), 'chat');
   draft.selectedModel = resolvedModel.ok
     ? resolvedModel.alias
-    : selectedPreset.chatDefault;
+    : DEFAULT_SETUP_MODEL_ALIAS;
   if (resolvedModel.ok) {
-    const providerId = resolvedModel.entry.modelRoute.id;
-    if (providerId !== draft.modelPreset) {
-      p.note(
-        `${resolvedModel.entry.displayName} runs on the ${resolvedModel.entry.modelRoute.label} provider — configure its credential in the credentials step. Memory LLM defaults will use the ${selectedPreset.label} preset. Memory embeddings use OpenAI when enabled.`,
-      );
-    }
+    p.note(
+      `Memory LLM defaults derive from ${resolvedModel.entry.modelRoute.id}: ${formatMemoryDefaultAliases(memoryModelDefaultsForProvider(resolvedModel.entry.modelRoute.id))}. Memory embeddings use OpenAI when enabled.`,
+    );
   }
   draft.agentHarness = AUTO_AGENT_HARNESS;
   return { type: 'next' };
 }
 
-function formatMemoryDefaultAliases(
-  defaults: ReturnType<typeof getModelPreset>['memoryDefaults'],
-): string {
+function formatMemoryDefaultAliases(defaults: MemoryModelDefaults): string {
   return [defaults.extractor, defaults.dreaming, defaults.consolidation].join(
     ', ',
   );

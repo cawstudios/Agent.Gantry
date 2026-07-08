@@ -72,7 +72,7 @@ export const coreOpenApiRouteDocs: RouteDoc[] = [
     'patchModelDefaults',
     'Models',
     'Update model defaults',
-    'Applies preset, chat, jobs, and memory reset changes to settings.yaml.',
+    'Applies chat, jobs, and memory reset changes to settings.yaml.',
     ['agents:admin'],
     { body: 'json' },
   ),

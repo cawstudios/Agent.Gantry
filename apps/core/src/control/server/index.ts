@@ -34,7 +34,7 @@ import {
   getRuntimeRepositories,
   getRuntimeStorage,
 } from '../../adapters/storage/postgres/runtime-store.js';
-import { preflightModelPreset } from '../../adapters/llm/model-preset-preflight.js';
+import { preflightModelProvider } from '../../adapters/llm/model-provider-preflight.js';
 import type { AppId } from '../../domain/app/app.js';
 import { canAccessApp, makeAppGroup } from './app-identity.js';
 import {
@@ -333,10 +333,11 @@ export function startControlServer(input: {
     getDefaultModelConfig,
     getModelDefaults: getRuntimeModelDefaults,
     patchModelDefaults: patchRuntimeModelDefaults,
-    preflightModelPreset: (preset, appId) =>
-      preflightModelPreset({
+    preflightModelProvider: (providerId, appId, chatAlias) =>
+      preflightModelProvider({
         runtimeHome: GANTRY_HOME,
-        preset,
+        providerId,
+        chatAlias,
         settings: getRuntimeSettingsForConfig(),
         appId,
       }),

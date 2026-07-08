@@ -19,12 +19,12 @@ import {
 } from '@core/config/settings/runtime-settings.js';
 import { getControlEnvValue } from '@core/config/index.js';
 import { signExternalIngressRequest } from '@core/application/external-ingress/signature.js';
-import { preflightModelPreset } from '@core/adapters/llm/model-preset-preflight.js';
+import { preflightModelProvider } from '@core/adapters/llm/model-provider-preflight.js';
 import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
 import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
 
-vi.mock('@core/adapters/llm/model-preset-preflight.js', () => ({
-  preflightModelPreset: vi.fn(async () => ({
+vi.mock('@core/adapters/llm/model-provider-preflight.js', () => ({
+  preflightModelProvider: vi.fn(async () => ({
     ok: true,
     status: 'pass',
     message: 'OpenRouter Model Access credential is available.',
@@ -39,7 +39,7 @@ vi.mock('@core/cli/slack-chat-discovery.js', () => ({
   })),
 }));
 
-const mockedPreflightModelPreset = vi.mocked(preflightModelPreset);
+const mockedPreflightModelProvider = vi.mocked(preflightModelProvider);
 const mockedGetControlEnvValue = vi.mocked(getControlEnvValue);
 const mockedListSlackRecentChats = vi.mocked(listSlackRecentChats);
 
@@ -487,7 +487,7 @@ beforeEach(() => {
   mockedGetControlEnvValue.mockImplementation(
     (key: string) => process.env[key]?.trim() || '',
   );
-  mockedPreflightModelPreset.mockResolvedValue({
+  mockedPreflightModelProvider.mockResolvedValue({
     ok: true,
     status: 'pass',
     message: 'OpenRouter Model Access credential is available.',
@@ -1210,7 +1210,7 @@ describe('control server runtime hardening', () => {
         {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ preset: 'openrouter' }),
+          body: JSON.stringify({ chat: 'kimi', memory: 'provider-managed' }),
         },
       );
       expect(patchResponse.status).toBe(200);
@@ -1356,7 +1356,7 @@ describe('control server runtime hardening', () => {
         appId: 'app-one',
       },
     ]);
-    mockedPreflightModelPreset.mockResolvedValueOnce({
+    mockedPreflightModelProvider.mockResolvedValueOnce({
       ok: false,
       status: 'fail',
       message: 'OpenRouter Model Access credential is missing.',
@@ -1375,13 +1375,13 @@ describe('control server runtime hardening', () => {
         {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ preset: 'openrouter' }),
+          body: JSON.stringify({ chat: 'kimi', memory: 'provider-managed' }),
         },
       );
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          message: expect.stringContaining('Preset preflight failed'),
+          message: expect.stringContaining('Provider preflight failed'),
         },
       });
       expect(loadRuntimeSettings(runtimeHome).agent.defaultModel).not.toBe(
@@ -1410,7 +1410,7 @@ describe('control server runtime hardening', () => {
         appId: 'app-one',
       },
     ]);
-    mockedPreflightModelPreset.mockResolvedValueOnce({
+    mockedPreflightModelProvider.mockResolvedValueOnce({
       ok: false,
       status: 'fail',
       message: 'OpenRouter Model Access credential is missing.',
@@ -1435,7 +1435,7 @@ describe('control server runtime hardening', () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
         error: {
-          message: expect.stringContaining('Preset preflight failed'),
+          message: expect.stringContaining('Provider preflight failed'),
         },
       });
       const after = loadRuntimeSettings(runtimeHome);

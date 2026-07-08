@@ -10,12 +10,12 @@ import { isValidWorkspaceFolder } from '../../platform/workspace-folder-rules.js
 import type { AgentPersona } from '../../shared/agent-persona.js';
 import { ensureRuntimeLayout, settingsFilePath } from './runtime-home.js';
 import {
-  applyModelPreset,
-  applyPresetManagedMemoryDefaults,
+  applyModelDefaults,
+  applyProviderManagedMemoryDefaults,
   createDefaultRuntimeSettings,
   DEFAULT_EMBED_DIMENSIONS,
   DEFAULT_EMBED_MODEL,
-  getPresetManagedMemoryDefaults,
+  getProviderManagedMemoryDefaults,
 } from './runtime-settings-defaults.js';
 import { parseRuntimeSettings } from './runtime-settings-parser.js';
 import { renderRuntimeSettingsYaml } from './runtime-settings-renderer.js';
@@ -96,12 +96,12 @@ export type {
 } from './runtime-settings-types.js';
 
 export {
-  applyModelPreset,
-  applyPresetManagedMemoryDefaults,
+  applyModelDefaults,
+  applyProviderManagedMemoryDefaults,
   createDefaultRuntimeSettings,
   DEFAULT_EMBED_DIMENSIONS,
   DEFAULT_EMBED_MODEL,
-  getPresetManagedMemoryDefaults,
+  getProviderManagedMemoryDefaults,
   parseRuntimeSettings,
   readRuntimeMemorySettingsSnapshot,
   readRuntimeStorageSettingsSnapshot,

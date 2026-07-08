@@ -54,7 +54,7 @@ export async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
       `Postgres schema: ${draft.postgresSchema}`,
       `Channel: ${channelLabel}`,
       `Model access: ${draft.credentialMode === 'gantry' ? 'enabled' : 'disabled'}`,
-      `Model preset: ${draft.modelPreset}`,
+      `Model provider: ${resolvedModelProvider(draft.selectedModel)}`,
       `Main model: ${draft.selectedModel}`,
       `Agent harness: ${draft.agentHarness} (${resolvedHarnessLabel(draft.selectedModel)})`,
       `Required model providers: ${formatProviderIds(requiredModelCredentialProvidersForSetupDraft(draft))}`,
@@ -94,7 +94,6 @@ export async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
       postgresDatabaseUrl: draft.postgresDatabaseUrl || undefined,
       postgresSchema: draft.postgresSchema || undefined,
       primaryProvider: draft.primaryProvider,
-      modelPreset: draft.modelPreset,
       modelAlias: draft.selectedModel || undefined,
       telegramBotToken: draft.telegramBotToken,
       telegramPermissionApproverIds: draft.telegramPermissionApproverIds,
@@ -291,4 +290,9 @@ function resolvedHarnessLabel(alias: string): string {
   if (!resolved.ok) return 'unknown';
   const route = resolveExecutionRoute({ entry: resolved.entry });
   return route.ok ? agentEngineLabel(route.value.engine) : 'unknown';
+}
+
+function resolvedModelProvider(alias: string): string {
+  const resolved = resolveModelSelectionForWorkload(alias, 'chat');
+  return resolved.ok ? resolved.entry.modelRoute.id : 'unknown';
 }

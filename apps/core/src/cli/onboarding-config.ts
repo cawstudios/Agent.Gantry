@@ -9,17 +9,15 @@ import {
   ensureRuntimeLayout,
 } from '../config/settings/runtime-home.js';
 import {
-  applyModelPreset,
+  applyModelDefaults,
   ensureConfiguredAgent,
   loadDesiredRuntimeSettingsForWrite,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import {
-  DEFAULT_MODEL_PRESET_ID,
-  isModelPresetId,
+  DEFAULT_SETUP_MODEL_ALIAS,
   resolveModelSelectionForWorkload,
-  type ModelPresetId,
 } from '../shared/model-catalog.js';
 import { gantryRuntimeSecretRef } from '../domain/ports/runtime-secret-provider.js';
 import { runPostgresMigrations } from '../postgres-migrate.js';
@@ -36,7 +34,6 @@ export interface OnboardingConfigInput {
   slackBotToken?: string;
   slackAppToken?: string;
   slackPermissionApproverIds?: string;
-  modelPreset?: ModelPresetId;
   modelAlias?: string;
   agentHarness?: AgentHarness;
   credentialMode: HostCredentialMode;
@@ -83,21 +80,6 @@ export async function persistOnboardingConfig(
   }
 
   const model = resolveOnboardingModel(input.modelAlias);
-  // The preset governs chat plus memory LLM defaults. Embeddings are handled
-  // separately and use the registered OpenAI embedding provider when enabled.
-  // A non-preset (DeepAgents-lane) chat model legitimately pairs with any
-  // preset, so only fall back to the model's provider as the preset when it is
-  // itself a preset id.
-  const modelPresetId =
-    model.preset && isModelPresetId(model.preset) ? model.preset : undefined;
-  const preset = input.modelPreset ?? modelPresetId ?? DEFAULT_MODEL_PRESET_ID;
-  // Only a cross-PRESET mismatch is an error (e.g. an OpenRouter model selected
-  // under the Anthropic preset); non-preset chat models pair with any preset.
-  if (modelPresetId && modelPresetId !== preset) {
-    throw new Error(
-      `Selected model alias "${model.alias}" belongs to ${modelPresetId}, not ${preset}.`,
-    );
-  }
   const postgresSchema = input.postgresSchema?.trim() || 'gantry';
   if (input.postgresDatabaseUrl?.trim()) {
     await runPostgresMigrations({
@@ -132,10 +114,7 @@ export async function persistOnboardingConfig(
     });
     previousSettingsForFinalWrite = structuredClone(settings);
   }
-  applyModelPreset(settings, preset);
-  if (model.alias) {
-    settings.agent.defaultModel = model.alias;
-  }
+  applyModelDefaults(settings, model.alias || DEFAULT_SETUP_MODEL_ALIAS);
   if (input.agentHarness) {
     settings.agent.agentHarness = input.agentHarness;
   }
@@ -273,7 +252,6 @@ function isValidCredentialEncryptionKey(raw: string): boolean {
 
 function resolveOnboardingModel(value: string | undefined): {
   alias: string;
-  preset?: ModelPresetId;
 } {
   const trimmed = value?.trim();
   if (!trimmed) return { alias: '' };
@@ -281,5 +259,5 @@ function resolveOnboardingModel(value: string | undefined): {
   if (!resolved.ok) {
     throw new Error(resolved.message);
   }
-  return { alias: resolved.alias, preset: resolved.entry.modelRoute.id };
+  return { alias: resolved.alias };
 }

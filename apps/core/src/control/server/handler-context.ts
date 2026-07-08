@@ -11,7 +11,6 @@ import type { ControlPlaneStorageSettings } from '../../application/control-plan
 import type { AppId } from '../../domain/app/app.js';
 import type {
   ModelCatalogEntry,
-  ModelPresetId,
   ModelWorkload,
 } from '../../shared/model-catalog.js';
 import type { AgentHarness } from '../../shared/agent-engine.js';
@@ -56,7 +55,7 @@ export type ControlModelDefaultsPatchResult =
   | { ok: true }
   | { ok: false; message: string };
 
-export type ControlModelPresetPreflightResult = {
+export type ControlModelProviderPreflightResult = {
   ok: boolean;
   status: 'pass' | 'fail' | 'skipped';
   message: string;
@@ -103,10 +102,11 @@ export type ControlRouteContext = {
     appId?: AppId,
     createdBy?: string,
   ) => Promise<ControlModelDefaultsPatchResult>;
-  preflightModelPreset: (
-    preset: ModelPresetId,
+  preflightModelProvider: (
+    providerId: string,
     appId?: AppId,
-  ) => Promise<ControlModelPresetPreflightResult>;
+    chatAlias?: string,
+  ) => Promise<ControlModelProviderPreflightResult>;
   getActiveModelCredentialProviderIds: (appId: AppId) => Promise<string[]>;
   countPendingAccessRequests: (appId: AppId) => Promise<number>;
   listControlPlaneJobs: (appId: AppId) => Promise<

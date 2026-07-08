@@ -1,17 +1,12 @@
 import {
-  DEFAULT_MODEL_PRESET_ID,
-  isModelPresetId,
-  getModelPreset,
-  listModelPresets,
+  DEFAULT_SETUP_MODEL_ALIAS,
   resolveModelSelectionForWorkload,
   type ModelCatalogEntry,
-  type ModelPresetId,
   type ModelWorkload,
 } from '../../shared/model-catalog.js';
 import type { AppId } from '../../domain/app/app.js';
 import {
-  applyModelPreset,
-  applyPresetManagedMemoryDefaults,
+  applyProviderManagedMemoryDefaults,
   loadRuntimeSettings,
   type RuntimeSettings,
 } from './runtime-settings.js';
@@ -55,13 +50,17 @@ export type RuntimeModelDefaultsPatchResult =
   | { ok: true }
   | { ok: false; message: string };
 
-function presetFromSettings(settings: RuntimeSettings): ModelPresetId {
+function providerFromSettings(settings: RuntimeSettings): string {
   const resolved = resolveModelSelectionForWorkload(
-    settings.agent.defaultModel,
+    settings.agent.defaultModel || DEFAULT_SETUP_MODEL_ALIAS,
     'chat',
   );
-  const providerId = resolved.ok ? resolved.entry.modelRoute.id : undefined;
-  return isModelPresetId(providerId) ? providerId : DEFAULT_MODEL_PRESET_ID;
+  if (resolved.ok) return resolved.entry.modelRoute.id;
+  const fallback = resolveModelSelectionForWorkload(
+    DEFAULT_SETUP_MODEL_ALIAS,
+    'chat',
+  );
+  return fallback.ok ? fallback.entry.modelRoute.id : '';
 }
 
 function modelDefaultSlot(input: {
@@ -163,12 +162,6 @@ function applyAliasOverride(input: {
   return undefined;
 }
 
-function presetMessage(): string {
-  return `preset must be one of: ${listModelPresets()
-    .map((preset) => `"${preset.id}"`)
-    .join(', ')}.`;
-}
-
 function applyJobsPatch(input: {
   settings: RuntimeSettings;
   value: unknown;
@@ -195,9 +188,9 @@ function applyJobsPatch(input: {
 
 function resetMemoryDefaults(
   settings: RuntimeSettings,
-  preset: ModelPresetId,
+  providerId = providerFromSettings(settings),
 ): void {
-  applyPresetManagedMemoryDefaults(settings, preset);
+  applyProviderManagedMemoryDefaults(settings, providerId);
 }
 
 export async function updateRuntimeModelDefaults(input: {
@@ -207,7 +200,6 @@ export async function updateRuntimeModelDefaults(input: {
   createdBy?: string;
 }): Promise<RuntimeModelDefaultsPatchResult> {
   const supportedFields = new Set([
-    'preset',
     'chat',
     'jobs',
     'oneTime',
@@ -224,15 +216,6 @@ export async function updateRuntimeModelDefaults(input: {
   }
   const settings = loadRuntimeSettings(input.runtimeHome);
   const previousSettings = structuredClone(settings);
-  let preset = presetFromSettings(settings);
-  if ('preset' in input.body) {
-    const nextPreset = input.body.preset;
-    if (!isModelPresetId(nextPreset)) {
-      return { ok: false, message: presetMessage() };
-    }
-    preset = nextPreset;
-    applyModelPreset(settings, preset);
-  }
 
   if ('jobs' in input.body) {
     const message = applyJobsPatch({
@@ -240,17 +223,6 @@ export async function updateRuntimeModelDefaults(input: {
       value: input.body.jobs,
     });
     if (message) return { ok: false, message };
-  }
-
-  if ('memory' in input.body) {
-    const value = input.body.memory;
-    if (value !== null && value !== 'reset' && value !== 'preset-managed') {
-      return {
-        ok: false,
-        message: 'memory must be null, "reset", or "preset-managed".',
-      };
-    }
-    resetMemoryDefaults(settings, preset);
   }
 
   const overrides: Array<{
@@ -263,7 +235,7 @@ export async function updateRuntimeModelDefaults(input: {
       field: 'chat',
       workload: 'chat',
       reset: () => {
-        settings.agent.defaultModel = getModelPreset(preset).chatDefault;
+        settings.agent.defaultModel = DEFAULT_SETUP_MODEL_ALIAS;
       },
       set: (alias) => {
         settings.agent.defaultModel = alias;
@@ -297,6 +269,17 @@ export async function updateRuntimeModelDefaults(input: {
       ...override,
     });
     if (message) return { ok: false, message };
+  }
+
+  if ('memory' in input.body) {
+    const value = input.body.memory;
+    if (value !== null && value !== 'reset' && value !== 'provider-managed') {
+      return {
+        ok: false,
+        message: 'memory must be null, "reset", or "provider-managed".',
+      };
+    }
+    resetMemoryDefaults(settings);
   }
   await writeDesiredRuntimeSettings({
     runtimeHome: input.runtimeHome,

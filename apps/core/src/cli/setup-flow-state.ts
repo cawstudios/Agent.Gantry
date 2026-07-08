@@ -17,12 +17,8 @@ import {
   loadRuntimeSettingsFromPath,
 } from '../config/settings/runtime-settings.js';
 import {
-  DEFAULT_MODEL_PRESET_ID,
   DEFAULT_SETUP_MODEL_ALIAS,
-  isModelPresetId,
-  resolveModelSelectionForWorkload,
   resolveModelAlias,
-  type ModelPresetId,
 } from '../shared/model-catalog.js';
 import { writeOnboardingState } from './onboarding-state.js';
 import type { OnboardingState, OnboardingStep } from './onboarding-state.js';
@@ -51,7 +47,6 @@ export interface SetupDraft {
   primaryProvider: 'telegram' | 'slack';
   credentialMode: HostCredentialMode;
   agentName: string;
-  modelPreset: ModelPresetId;
   selectedModel: string;
   agentHarness: AgentHarness;
   telegramBotToken: string;
@@ -123,7 +118,6 @@ export function updateStateData(
     slackPermissionApproverIds: draft.slackPermissionApproverIds || undefined,
     credentialMode: draft.credentialMode,
     agentName: draft.agentName,
-    modelPreset: draft.modelPreset,
     selectedModel: draft.selectedModel || undefined,
     agentHarness: draft.agentHarness,
     workspaceKey: draft.workspaceKey || undefined,
@@ -163,9 +157,6 @@ export function updateDraftFromState(
     state.data.credentialMode || draft.credentialMode,
   );
   draft.agentName = state.data.agentName || draft.agentName;
-  draft.modelPreset = isModelPresetId(state.data.modelPreset)
-    ? state.data.modelPreset
-    : draft.modelPreset;
   draft.selectedModel =
     resolveModelAlias(state.data.selectedModel) || draft.selectedModel;
   draft.agentHarness = isAgentHarness(state.data.agentHarness)
@@ -217,14 +208,6 @@ export function restoreDraft(
   const defaultDreamingEnabled = hasConfiguredProvider
     ? settings.memory.dreaming.enabled
     : true;
-  const stateModelPreset = state?.data.modelPreset;
-  const resolvedSettingsModel = resolveModelSelectionForWorkload(
-    settings.agent.defaultModel,
-    'chat',
-  );
-  const settingsModelPreset = resolvedSettingsModel.ok
-    ? resolvedSettingsModel.entry.modelRoute.id
-    : DEFAULT_MODEL_PRESET_ID;
   const postgresUrlEnv =
     settings.storage.postgres.urlEnv || 'GANTRY_DATABASE_URL';
   const postgresDatabaseUrl =
@@ -243,9 +226,6 @@ export function restoreDraft(
     credentialMode,
     agentName:
       state?.data.agentName || settings.agent.name || DEFAULT_AGENT_CLI_NAME,
-    modelPreset: isModelPresetId(stateModelPreset)
-      ? stateModelPreset
-      : settingsModelPreset,
     selectedModel:
       resolveModelAlias(
         state?.data.selectedModel || settings.agent.defaultModel,

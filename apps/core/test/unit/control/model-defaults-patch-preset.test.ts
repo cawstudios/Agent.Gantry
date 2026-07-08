@@ -19,7 +19,7 @@ function slotFor(
   return {
     configuredAlias: alias,
     effectiveAlias: resolved.alias,
-    source: 'preset-managed',
+    source: 'provider-managed',
     workload,
     modelEntry: resolved.entry,
   };
@@ -46,18 +46,13 @@ function defaultsWith(
 }
 
 describe('providersSelectedByPatch', () => {
-  it('does not throw when the chat default is a DeepAgents model and the body omits preset', () => {
-    // groq resolves to the groq (DeepAgents-lane) provider, whose provider id is
-    // not a model preset; the patch preflight selection must guard rather than
-    // letting getModelPreset throw and turn the PATCH into a 500. groq memory
-    // slots keep every workload on the DeepAgents lane, so none have a preset.
+  it('selects a DeepAgents provider when the body omits provider-managed memory', () => {
     const defaults = defaultsWith('groq', 'groq');
     expect(() => providersSelectedByPatch({}, defaults)).not.toThrow();
-    // DeepAgents-lane providers have no preset to preflight, so none are selected.
-    expect(providersSelectedByPatch({}, defaults)).toEqual([]);
+    expect(providersSelectedByPatch({}, defaults)).toEqual(['groq']);
   });
 
-  it('still selects the anthropic preset for an anthropic chat default', () => {
+  it('selects the anthropic provider for an anthropic chat default', () => {
     const defaults = defaultsWith('sonnet', 'haiku');
     expect(providersSelectedByPatch({}, defaults)).toEqual(['anthropic']);
   });

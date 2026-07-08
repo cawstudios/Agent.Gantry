@@ -586,7 +586,7 @@ describe('control OpenAPI documentation', () => {
       spec.components.schemas.ModelDefaultsPatchRequest.properties.memory,
     ).toMatchObject({
       oneOf: [
-        { type: 'string', enum: ['reset', 'preset-managed'] },
+        { type: 'string', enum: ['reset', 'provider-managed'] },
         { type: 'null' },
       ],
     });

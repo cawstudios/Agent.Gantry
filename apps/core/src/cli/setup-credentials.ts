@@ -3,10 +3,9 @@ import * as p from '@clack/prompts';
 import { requiredModelCredentialProviders } from '../application/model-resolution/required-model-credential-providers.js';
 import type { HostCredentialMode } from '../config/credentials/mode.js';
 import {
-  DEFAULT_MODEL_PRESET_ID,
-  getModelPreset,
+  DEFAULT_SETUP_MODEL_ALIAS,
+  memoryModelDefaultsForProvider,
   resolveModelSelectionForWorkload,
-  type ModelPresetId,
   type ModelWorkload,
 } from '../shared/model-catalog.js';
 import { getModelProviderDefinition } from '../shared/model-provider-registry.js';
@@ -23,7 +22,6 @@ export interface CredentialSetupDraft {
   postgresSetupKind?: 'local' | 'hosted' | 'existing';
   postgresDatabaseUrl?: string;
   postgresSchema?: string;
-  modelPreset?: ModelPresetId;
   selectedModel?: string;
   memoryEnabled?: boolean;
   embeddingsEnabled?: boolean;
@@ -183,15 +181,15 @@ export async function runCredentialsStep(
 export function requiredModelCredentialProvidersForSetupDraft(
   draft: CredentialSetupDraft,
 ): string[] {
-  const preset = getModelPreset(draft.modelPreset ?? DEFAULT_MODEL_PRESET_ID);
-  const chatModel = draft.selectedModel || preset.chatDefault;
+  const chatModel = draft.selectedModel || DEFAULT_SETUP_MODEL_ALIAS;
+  const memoryModels = memoryDefaultsForChatModel(chatModel);
   const memoryEnabled = draft.memoryEnabled ?? true;
   const embeddingsEnabled = memoryEnabled && (draft.embeddingsEnabled ?? false);
   return requiredModelCredentialProviders({
     agent: {
       defaultModel: chatModel,
-      oneTimeJobDefaultModel: preset.oneTimeJobDefault,
-      recurringJobDefaultModel: preset.recurringJobDefault,
+      oneTimeJobDefaultModel: '',
+      recurringJobDefaultModel: '',
     },
     memory: {
       enabled: memoryEnabled,
@@ -207,7 +205,7 @@ export function requiredModelCredentialProvidersForSetupDraft(
         },
       },
       llm: {
-        models: preset.memoryDefaults,
+        models: memoryModels,
       },
     },
   });
@@ -221,8 +219,8 @@ export interface RequiredModelCredentialProviderReason {
 export function requiredModelCredentialProviderReasonsForSetupDraft(
   draft: CredentialSetupDraft,
 ): RequiredModelCredentialProviderReason[] {
-  const preset = getModelPreset(draft.modelPreset ?? DEFAULT_MODEL_PRESET_ID);
-  const chatModel = draft.selectedModel || preset.chatDefault;
+  const chatModel = draft.selectedModel || DEFAULT_SETUP_MODEL_ALIAS;
+  const memoryModels = memoryDefaultsForChatModel(chatModel);
   const memoryEnabled = draft.memoryEnabled ?? true;
   const embeddingsEnabled = memoryEnabled && (draft.embeddingsEnabled ?? false);
   const reasons = new Map<string, Set<string>>();
@@ -241,35 +239,27 @@ export function requiredModelCredentialProviderReasonsForSetupDraft(
   };
 
   addModelReason(chatModel, 'chat', `main model ${chatModel}`);
+  addModelReason(chatModel, 'one_time_job', 'one-time jobs inherit main model');
   addModelReason(
-    preset.oneTimeJobDefault || chatModel,
-    'one_time_job',
-    preset.oneTimeJobDefault
-      ? `one-time job model ${preset.oneTimeJobDefault}`
-      : 'one-time jobs inherit main model',
-  );
-  addModelReason(
-    preset.recurringJobDefault || chatModel,
+    chatModel,
     'recurring_job',
-    preset.recurringJobDefault
-      ? `recurring job model ${preset.recurringJobDefault}`
-      : 'recurring jobs inherit main model',
+    'recurring jobs inherit main model',
   );
   if (memoryEnabled) {
     addModelReason(
-      preset.memoryDefaults.extractor,
+      memoryModels.extractor,
       'memory_extractor',
-      `memory LLM extractor ${preset.memoryDefaults.extractor}`,
+      `memory LLM extractor ${memoryModels.extractor}`,
     );
     addModelReason(
-      preset.memoryDefaults.dreaming,
+      memoryModels.dreaming,
       'memory_dreaming',
-      `memory LLM dreaming ${preset.memoryDefaults.dreaming}`,
+      `memory LLM dreaming ${memoryModels.dreaming}`,
     );
     addModelReason(
-      preset.memoryDefaults.consolidation,
+      memoryModels.consolidation,
       'memory_consolidation',
-      `memory LLM consolidation ${preset.memoryDefaults.consolidation}`,
+      `memory LLM consolidation ${memoryModels.consolidation}`,
     );
     if (embeddingsEnabled) {
       addReason('openai', 'memory embeddings');
@@ -281,6 +271,13 @@ export function requiredModelCredentialProviderReasonsForSetupDraft(
       providerId,
       reasons: [...(reasons.get(providerId) ?? [])].sort(),
     }),
+  );
+}
+
+function memoryDefaultsForChatModel(chatModel: string) {
+  const resolved = resolveModelSelectionForWorkload(chatModel, 'chat');
+  return memoryModelDefaultsForProvider(
+    resolved.ok ? resolved.entry.modelRoute.id : 'anthropic',
   );
 }
 

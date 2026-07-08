@@ -89,7 +89,7 @@ function usage(): string {
     '  gantry agent list|info|add|remove|trigger|policy|access',
     '  gantry browser profiles|status',
     '  gantry jobs list|show|resume|trigger|set-route|events [--full|--json]',
-    '  gantry model status|list|set|reset|why|use-preset|doctor',
+    '  gantry model status|list|set|reset|why|doctor',
     '  gantry brain import|status',
     '  gantry credentials model|capability|browser ...',
     '  gantry settings validate|import|export|drift|revisions list',

@@ -14,7 +14,7 @@ import { envFilePath } from '../config/settings/runtime-home.js';
 import {
   DEFAULT_EMBED_DIMENSIONS,
   DEFAULT_EMBED_MODEL,
-  getPresetManagedMemoryDefaults,
+  getProviderManagedMemoryDefaults,
   loadRuntimeSettings,
   writeDesiredRuntimeSettings,
   type EmbeddingProviderName,
@@ -59,7 +59,7 @@ function formatMemoryStatus(runtimeHome: string): string {
   const env = readEnvFile(envFilePath(runtimeHome));
   const health = inspectMemoryHealth(runtimeHome, settings, env);
   const globalModel = settings.agent.defaultModel;
-  const hardDefaults = getPresetManagedMemoryDefaults();
+  const hardDefaults = getProviderManagedMemoryDefaults();
   const extractorModel = resolveEffectiveModel(
     settings.memory.llm.models.extractor,
     globalModel,
