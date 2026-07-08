@@ -30,6 +30,7 @@ type RuntimeSettingsForLiveCredentialCheck = {
     string,
     | {
         provider: string;
+        status?: string;
         runtimeSecretRefs: Record<string, string | undefined>;
       }
     | undefined
@@ -259,9 +260,17 @@ async function resolveProviderSecretForDoctor(input: {
   settings: RuntimeSettingsForLiveCredentialCheck;
   env: Record<string, string>;
 }): Promise<{ token: string; unresolvedStoredRef: boolean }> {
-  const accountEntry = Object.entries(
-    input.settings.providerAccounts ?? {},
-  ).find(([, account]) => account?.provider === input.providerId);
+  // Prefer an active account that actually carries the requested key —
+  // a stale disabled account (e.g. an old slack_default) must not shadow
+  // the live one in multi-account setups.
+  const accounts = Object.entries(input.settings.providerAccounts ?? {});
+  const accountEntry =
+    accounts.find(
+      ([, account]) =>
+        account?.provider === input.providerId &&
+        account.status !== 'disabled' &&
+        Boolean(account.runtimeSecretRefs[input.key]?.trim()),
+    ) ?? accounts.find(([, account]) => account?.provider === input.providerId);
   const providerAccountId = accountEntry?.[0];
   const ref = accountEntry?.[1]?.runtimeSecretRefs[input.key];
   if (!ref?.trim()) {
