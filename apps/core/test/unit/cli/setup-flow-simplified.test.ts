@@ -283,6 +283,93 @@ describe('ready screen copy', () => {
   });
 });
 
+async function loadConfigStep(error: Error) {
+  const logError = vi.fn();
+  const spinner = { start: vi.fn(), stop: vi.fn() };
+  vi.doMock('@clack/prompts', () => ({
+    isCancel: () => false,
+    note: vi.fn(),
+    spinner: vi.fn(() => spinner),
+    log: { error: logError, info: vi.fn(), warn: vi.fn(), success: vi.fn() },
+  }));
+  vi.doMock(
+    '@core/config/settings/runtime-home.js',
+    async (importOriginal) => ({
+      ...(await importOriginal<
+        typeof import('@core/config/settings/runtime-home.js')
+      >()),
+      ensureRuntimeWritable: vi.fn(),
+    }),
+  );
+  vi.doMock('@core/cli/onboarding-config.js', () => ({
+    persistOnboardingConfig: vi.fn(async () => {
+      throw error;
+    }),
+  }));
+  vi.doMock('@core/cli/setup-flow-prompts.js', () => ({
+    chooseProgressAction: vi.fn(async () => ({ type: 'next' })),
+  }));
+  vi.doMock('@core/cli/setup-credentials.js', () => ({
+    requiredModelCredentialProviderReasonsForSetupDraft: vi.fn(() => []),
+    requiredModelCredentialProvidersForSetupDraft: vi.fn(() => []),
+    verifyModelAccess: vi.fn(),
+  }));
+  const { runConfigStep } = await import('@core/cli/setup-flow-final-steps.js');
+  return { runConfigStep, logError };
+}
+
+describe('config save copy', () => {
+  const draft = {
+    runtimeHome: '/tmp/gantry-config-copy',
+    postgresDatabaseUrl: 'postgres://localhost/gantry',
+    postgresSchema: 'gantry',
+    primaryProvider: 'telegram',
+    credentialMode: 'gantry',
+    agentName: 'Gantry',
+    modelPreset: 'anthropic',
+    selectedModel: 'opus',
+    agentHarness: 'auto',
+    telegramBotToken: '',
+    telegramChatJid: 'tg:-100123',
+    telegramPermissionApproverIds: '123',
+    slackBotToken: '',
+    slackAppToken: '',
+    slackChatJid: '',
+    slackPermissionApproverIds: '',
+    memoryEnabled: true,
+    embeddingsEnabled: false,
+    dreamingEnabled: true,
+  };
+
+  it('tells the user how to recover from stale setup settings', async () => {
+    const { runConfigStep, logError } = await loadConfigStep(
+      new Error(
+        'Settings mutation is based on stale settings; reload latest desired state and retry.',
+      ),
+    );
+
+    await expect(runConfigStep(draft as never)).resolves.toEqual({
+      type: 'resume',
+    });
+    expect(logError.mock.calls[0][0]).toContain(
+      'Next action: another process changed settings during setup — re-run `gantry setup`; your answers are saved and pre-filled',
+    );
+  });
+
+  it('points generic config failures at doctor', async () => {
+    const { runConfigStep, logError } = await loadConfigStep(
+      new Error('connection refused'),
+    );
+
+    await expect(runConfigStep(draft as never)).resolves.toEqual({
+      type: 'resume',
+    });
+    expect(logError.mock.calls[0][0]).toContain(
+      'Next action: check Postgres connectivity (`gantry doctor`), then re-run `gantry setup`',
+    );
+  });
+});
+
 async function loadVerifyStep(input: {
   runtimeConfigured: boolean;
   hasProcessableGroup?: boolean;

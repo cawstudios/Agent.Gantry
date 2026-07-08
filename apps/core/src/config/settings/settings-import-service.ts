@@ -147,6 +147,13 @@ export async function importWorkstationSettings(
         appId,
       })
     ).settings;
+    const previousRevisionSettings = (
+      await normalizeConfiguredCapabilitiesInSettings({
+        settings: deps.previousSettings!,
+        repositories: deps.repositories,
+        appId,
+      })
+    ).settings;
     const latest =
       await deps.revisionMirror.settingsRevisions.getLatestSettingsRevision(
         appId,
@@ -165,7 +172,7 @@ export async function importWorkstationSettings(
     if (
       latest &&
       stableJson(latest.settingsDocument) !==
-        stableJson(settingsToRevisionDocument(deps.previousSettings!))
+        stableJson(settingsToRevisionDocument(previousRevisionSettings))
     ) {
       throw new Error(
         'Settings mutation is based on stale settings; reload latest desired state and retry.',

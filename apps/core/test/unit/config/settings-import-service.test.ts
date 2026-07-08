@@ -110,6 +110,22 @@ function baseDeps(repo: SettingsRevisionRepository) {
   };
 }
 
+function settingsWithDuplicateCapability(agentName: string) {
+  const settings = createDefaultRuntimeSettings();
+  settings.agents.main_agent = {
+    name: agentName,
+    folder: 'main_agent',
+    bindings: {},
+    sources: { skills: [], mcpServers: [], tools: [] },
+    capabilities: [
+      { id: 'browser.use', version: 'builtin' },
+      { id: 'browser.use', version: 'builtin' },
+    ],
+    accessPreset: 'full',
+  };
+  return settings;
+}
+
 describe('importFleetSettingsRevision', () => {
   it('workstation import can mirror the applied settings into settings revisions', async () => {
     capabilityErrors = [];
@@ -279,6 +295,61 @@ describe('importFleetSettingsRevision', () => {
 
     expect(repo.lastAppendExpectedRevision).toBe(1);
     expect(repo.rows).toHaveLength(2);
+  });
+
+  it('normalizes previous settings before stale revision comparison', async () => {
+    capabilityErrors = [];
+    applyRuntimeSettingsDesiredState.mockReset();
+    applyRuntimeSettingsDesiredState.mockImplementation(
+      async (input: { settings: unknown }) => {
+        return input.settings;
+      },
+    );
+    const repo = new FakeRevisionRepo();
+    const firstSettings = settingsWithDuplicateCapability('first');
+
+    await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+        previousSettings: createDefaultRuntimeSettings(),
+        revisionMirror: {
+          settingsRevisions: repo,
+          createdBy: 'test:fleet',
+        },
+        revisionMirrorRequired: true,
+      },
+      firstSettings,
+    );
+
+    const secondSettings = settingsWithDuplicateCapability('second');
+    await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+        previousSettings: structuredClone(firstSettings),
+        revisionMirror: {
+          settingsRevisions: repo,
+          createdBy: 'test:fleet',
+        },
+        revisionMirrorRequired: true,
+      },
+      secondSettings,
+    );
+
+    expect(repo.rows).toHaveLength(2);
+    const latestAgent = (
+      repo.rows[1]?.settingsDocument.agents as Record<
+        string,
+        { name?: string; access?: { selections?: unknown[] } }
+      >
+    ).main_agent;
+    expect(latestAgent.name).toBe('second');
+    expect(latestAgent.access?.selections).toHaveLength(1);
   });
 
   it('required workstation mirror rejects stale expected revisions', async () => {

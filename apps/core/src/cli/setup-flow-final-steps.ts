@@ -112,12 +112,12 @@ export async function runConfigStep(draft: SetupDraft): Promise<FlowAction> {
   } catch (err) {
     spinner.stop('Failed to write config');
     const message = err instanceof Error ? err.message : String(err);
-    p.log.error(
-      setupBlocked(
-        `could not save config (${message})`,
-        'run `gantry setup` after fixing the save error.',
-      ),
-    );
+    const nextAction = message.includes(
+      'Settings mutation is based on stale settings',
+    )
+      ? 'another process changed settings during setup — re-run `gantry setup`; your answers are saved and pre-filled'
+      : 'check Postgres connectivity (`gantry doctor`), then re-run `gantry setup`';
+    p.log.error(setupBlocked(`could not save config (${message})`, nextAction));
     return { type: 'resume' };
   }
 
