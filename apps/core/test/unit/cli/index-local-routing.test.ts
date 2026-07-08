@@ -311,6 +311,14 @@ describe('CLI local routing', () => {
     vi.doMock('@core/cli/provider-connect.js', () => ({
       runProviderConnectCommand,
     }));
+    vi.doMock('@core/cli/runtime-group-db.js', () => ({
+      openRuntimeGroupDb: vi.fn(async () => ({
+        getAllConversationRoutes: vi.fn(async () => ({
+          'slack:C123': { name: 'Research Bot', folder: 'research_bot' },
+        })),
+        close: vi.fn(async () => undefined),
+      })),
+    }));
 
     const { main } = await import('@core/cli/index.js');
     const code = await main(['--runtime-home', runtimeHome, 'setup']);
@@ -333,6 +341,75 @@ describe('CLI local routing', () => {
       'slack',
       'research_bot',
       'Research Bot',
+    );
+  });
+
+  it('does not persist an add-agent when the conversation kept its existing owner', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const onboarding = await import('@core/cli/onboarding-state.js');
+    const state = onboarding.createInitialState(runtimeHome);
+    state.status = 'completed';
+    state.currentStep = 'ready';
+    onboarding.writeOnboardingState(runtimeHome, state);
+    const select = vi.fn(async ({ message }: { message: string }) => {
+      if (message === 'What do you want to change?') return 'add_agent';
+      if (message === 'Choose this agent chat model') return 'gpt';
+      if (message === 'Choose a channel to connect this agent') return 'slack';
+      return 'cancel';
+    });
+    const text = vi.fn(async () => 'Research Bot');
+    const logError = vi.fn();
+    const settings = { agents: {} as Record<string, unknown> };
+    const writeDesiredRuntimeSettings = vi.fn(async () => ({
+      reconciled: true,
+    }));
+    vi.doMock('@clack/prompts', () => ({
+      isCancel: () => false,
+      outro: vi.fn(),
+      select,
+      text,
+      log: { error: logError, info: vi.fn(), warn: vi.fn(), success: vi.fn() },
+    }));
+    vi.doMock(
+      '@core/config/settings/runtime-settings.js',
+      async (importOriginal) => ({
+        ...(await importOriginal<
+          typeof import('@core/config/settings/runtime-settings.js')
+        >()),
+        configureDesiredSettingsStorageProvider: vi.fn(),
+        ensureRuntimeSettings: vi.fn(),
+        loadDesiredRuntimeSettingsForWrite: vi.fn(async () => settings),
+        writeDesiredRuntimeSettings,
+      }),
+    );
+    vi.doMock('@core/cli/setup-flow.js', () => ({
+      runSetupFlow: vi.fn(),
+    }));
+    vi.doMock('@core/cli/credentials.js', () => ({
+      listReadyModelCredentialProviders: vi.fn(async () => new Set(['openai'])),
+      promptModelCredentialPayload: vi.fn(),
+      verifyModelCredentialInputWithPrompt: vi.fn(),
+      storeModelCredentialInput: vi.fn(),
+    }));
+    vi.doMock('@core/cli/provider-connect.js', () => ({
+      runProviderConnectCommand: vi.fn(async () => 0),
+    }));
+    vi.doMock('@core/cli/runtime-group-db.js', () => ({
+      openRuntimeGroupDb: vi.fn(async () => ({
+        getAllConversationRoutes: vi.fn(async () => ({
+          'slack:C123': { name: 'Main Agent', folder: 'main_agent' },
+        })),
+        close: vi.fn(async () => undefined),
+      })),
+    }));
+
+    const { main } = await import('@core/cli/index.js');
+    const code = await main(['--runtime-home', runtimeHome, 'setup']);
+
+    expect(code).toBe(1);
+    expect(writeDesiredRuntimeSettings).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining('already connected to another agent'),
     );
   });
 

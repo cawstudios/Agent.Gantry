@@ -160,6 +160,29 @@ export async function runAddAgentSetupSlice(
   );
   if (connectCode !== 0) return connectCode;
 
+  // Connect preserves the owner of an already-registered conversation, so a
+  // successful exit does not guarantee the NEW agent got bound. Persist the
+  // agent only when a conversation route actually points at it.
+  const { openRuntimeGroupDb } = await import('./runtime-group-db.js');
+  const db = await openRuntimeGroupDb(runtimeHome);
+  try {
+    const routes = await db.getAllConversationRoutes();
+    const bound = Object.values(routes).some(
+      (route) => route.folder === agentId,
+    );
+    if (!bound) {
+      p.log.error(
+        [
+          'That conversation is already connected to another agent, which kept it.',
+          'No agent was created. Pick a conversation that is not yet connected, then run "Add another agent" again.',
+        ].join('\n'),
+      );
+      return 1;
+    }
+  } finally {
+    await db.close();
+  }
+
   // Persist the agent's name and model only after credential and channel
   // connection succeeded — a cancelled flow must not leave a dangling agent.
   const settings = await loadDesiredRuntimeSettingsForWrite({ runtimeHome });

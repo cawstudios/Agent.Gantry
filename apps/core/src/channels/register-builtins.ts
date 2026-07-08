@@ -86,7 +86,12 @@ async function runTeamsSetup(
 ): Promise<number> {
   const mod = await import('../cli/teams.js');
   return agentId
-    ? await mod.runTeamsConnectCommand(runtimeHome, undefined, agentId, agentName)
+    ? await mod.runTeamsConnectCommand(
+        runtimeHome,
+        undefined,
+        agentId,
+        agentName,
+      )
     : await mod.runTeamsConnectCommand(runtimeHome);
 }
 
