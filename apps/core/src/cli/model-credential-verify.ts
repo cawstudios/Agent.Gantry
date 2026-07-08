@@ -1,5 +1,8 @@
 import { defaultProvider as fromNodeProviderChain } from '@aws-sdk/credential-provider-node';
-import { GoogleAuth } from 'google-auth-library';
+import {
+  getVertexAdcBearerToken,
+  getVertexServiceAccountBearerToken,
+} from '../adapters/llm/anthropic-claude-agent/gantry-model-gateway-auth-vertex.js';
 
 import {
   injectProviderAuth,
@@ -45,11 +48,6 @@ const SLACK_CHANNEL_TOKEN_NEXT_ACTION =
   're-run `gantry provider connect slack`, then `gantry restart`';
 const TELEGRAM_CHANNEL_TOKEN_NEXT_ACTION =
   're-run `gantry provider connect telegram`, then `gantry restart`';
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
-
-type GoogleAuthClient = {
-  getAccessToken: () => Promise<string | { token?: string | null } | null>;
-};
 
 export async function verifyModelProviderCredentialLive(input: {
   providerId: string;
@@ -179,6 +177,7 @@ async function verifyVertexCredential(input: {
   if (input.authMode === 'service_account') {
     return verifyGoogleToken({
       serviceAccountJson: input.payload.serviceAccountJson,
+      projectId: input.payload.projectId,
       timeoutMs: input.timeoutMs,
     });
   }
@@ -195,27 +194,23 @@ async function verifyVertexCredential(input: {
 async function verifyGoogleToken(input: {
   timeoutMs: number;
   serviceAccountJson?: string;
+  projectId?: string;
   adc?: boolean;
 }): Promise<ModelProviderCredentialLiveCheck> {
   try {
-    const auth = new GoogleAuth({
-      ...(input.serviceAccountJson
-        ? { credentials: JSON.parse(input.serviceAccountJson) }
-        : {}),
-      scopes: [CLOUD_PLATFORM_SCOPE],
-    });
-    const client = (await withTimeout(
-      auth.getClient(),
-      input.timeoutMs,
-    )) as unknown as GoogleAuthClient;
-    const accessToken = await withTimeout(
-      client.getAccessToken(),
-      input.timeoutMs,
-    );
-    const token =
-      typeof accessToken === 'string' ? accessToken : accessToken?.token;
-    if (!token) {
-      throw new Error('Google credential did not return an access token.');
+    // Reuse the runtime gateway's hardened token path — it pins token_uri to
+    // the Google OAuth endpoint and copies only allowlisted credential fields,
+    // so verification cannot leak a signed assertion to a rogue token_uri.
+    if (input.serviceAccountJson) {
+      await getVertexServiceAccountBearerToken({
+        serviceAccountJson: input.serviceAccountJson,
+        expectedProjectId: input.projectId?.trim() || '',
+        tokenRequestTimeoutMs: input.timeoutMs,
+      });
+    } else {
+      await getVertexAdcBearerToken({
+        tokenRequestTimeoutMs: input.timeoutMs,
+      });
     }
     return { ok: true };
   } catch (error) {

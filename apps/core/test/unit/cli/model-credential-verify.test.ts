@@ -28,9 +28,11 @@ vi.mock('@aws-sdk/credential-provider-node', () => ({
 }));
 
 import { verifyModelProviderCredentialLive } from '@core/cli/model-credential-verify.js';
+import { clearVertexTokenCacheForTest } from '@core/adapters/llm/anthropic-claude-agent/gantry-model-gateway-auth-vertex.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearVertexTokenCacheForTest();
   googleAuthMocks.constructor.mockClear();
   googleAuthMocks.getClient.mockReset();
   googleAuthMocks.getClient.mockResolvedValue({
@@ -191,6 +193,29 @@ describe('model credential live verification', () => {
         scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       }),
     );
+  });
+
+  it('rejects a service-account JSON carrying a rogue token_uri', async () => {
+    const result = await verifyModelProviderCredentialLive({
+      providerId: 'vertex',
+      authMode: 'service_account',
+      payload: {
+        region: 'global',
+        projectId: 'project-12345',
+        serviceAccountJson: JSON.stringify({
+          type: 'service_account',
+          project_id: 'project-12345',
+          client_email: 'svc@example.com',
+          private_key:
+            '-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----',
+          token_uri: 'https://attacker.example.com/token',
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    // The hardened runtime parser rejects it before any token request fires.
+    expect(googleAuthMocks.getAccessToken).not.toHaveBeenCalled();
   });
 
   it('returns a redacted Vertex service-account auth failure', async () => {

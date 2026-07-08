@@ -124,10 +124,15 @@ export async function runAddAgentSetupSlice(
   }
 
   const name = String(agentName).trim();
-  const agentId = agentIdFromName(
-    name,
-    (await loadDesiredRuntimeSettingsForWrite({ runtimeHome })).agents,
-  );
+  const settingsBeforeConnect = await loadDesiredRuntimeSettingsForWrite({
+    runtimeHome,
+  });
+  const agentId = agentIdFromName(name, settingsBeforeConnect.agents);
+  const channelStateSnapshot = structuredClone({
+    agents: settingsBeforeConnect.agents,
+    providerAccounts: settingsBeforeConnect.providerAccounts,
+    providers: settingsBeforeConnect.providers,
+  });
 
   if (
     !(await ensureModelCredentialForProvider(
@@ -171,10 +176,28 @@ export async function runAddAgentSetupSlice(
       (route) => route.folder === agentId,
     );
     if (!bound) {
+      // Connect may have persisted agent/account/provider state under the
+      // new agent id even though no conversation got bound — restore the
+      // pre-connect channel state so nothing dangles. Stored channel secrets
+      // stay in the secret store, so reconnecting later is quick.
+      const current = await loadDesiredRuntimeSettingsForWrite({ runtimeHome });
+      const previous = structuredClone(current);
+      current.agents = structuredClone(channelStateSnapshot.agents);
+      current.providerAccounts = structuredClone(
+        channelStateSnapshot.providerAccounts,
+      );
+      current.providers = structuredClone(channelStateSnapshot.providers);
+      await writeDesiredRuntimeSettings({
+        runtimeHome,
+        settings: current,
+        previousSettings: previous,
+        createdBy: 'cli:setup-add-agent-rollback',
+      });
       p.log.error(
         [
-          'That conversation is already connected to another agent, which kept it.',
-          'No agent was created. Pick a conversation that is not yet connected, then run "Add another agent" again.',
+          'No conversation was bound to the new agent (an existing conversation keeps its current agent).',
+          'Channel and agent changes from this attempt were rolled back; stored tokens remain saved.',
+          'Pick a conversation that is not yet connected, then run "Add another agent" again.',
         ].join('\n'),
       );
       return 1;

@@ -407,9 +407,13 @@ describe('CLI local routing', () => {
     const code = await main(['--runtime-home', runtimeHome, 'setup']);
 
     expect(code).toBe(1);
-    expect(writeDesiredRuntimeSettings).not.toHaveBeenCalled();
+    // The only write is the rollback restoring pre-connect channel state.
+    expect(writeDesiredRuntimeSettings).toHaveBeenCalledTimes(1);
+    expect(writeDesiredRuntimeSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ createdBy: 'cli:setup-add-agent-rollback' }),
+    );
     expect(logError).toHaveBeenCalledWith(
-      expect.stringContaining('already connected to another agent'),
+      expect.stringContaining('No conversation was bound to the new agent'),
     );
   });
 
