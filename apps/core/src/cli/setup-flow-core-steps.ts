@@ -52,7 +52,10 @@ function agentIdFromName(
   let candidate = base;
   let suffix = 2;
   while (agents[candidate]) {
-    candidate = `${base}_${suffix}`;
+    // Reserve room for the suffix so collisions on 64-char names still
+    // produce ids within the workspace-folder limit.
+    const tail = `_${suffix}`;
+    candidate = `${base.slice(0, 64 - tail.length).replace(/[_-]+$/g, '')}${tail}`;
     suffix += 1;
   }
   return candidate;

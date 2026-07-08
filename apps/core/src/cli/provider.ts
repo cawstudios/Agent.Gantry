@@ -133,7 +133,11 @@ export async function runProviderCommand(
   if (command === 'doctor') {
     const { formatDoctorReport, runDoctorWithNetwork } =
       await import('./doctor.js');
-    const report = await runDoctorWithNetwork(importMetaUrl, runtimeHome);
+    // Provider doctor reports only channel checks — skip the live model
+    // credential probes whose results the scoped report would discard.
+    const report = await runDoctorWithNetwork(importMetaUrl, runtimeHome, {
+      validateModelCredentials: false,
+    });
     const scoped = scopeProviderDoctorReport(report);
     p.note(formatDoctorReport(scoped), 'Provider Doctor');
     return scoped.ok ? 0 : 1;
