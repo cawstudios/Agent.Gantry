@@ -2,6 +2,26 @@ import { doc, ids, query, type RouteDoc } from './openapi-route-helpers.js';
 
 export const extendedOpenApiRouteDocs: RouteDoc[] = [
   doc(
+    'post',
+    '/llm/v1/messages',
+    'invokeLlmMessages',
+    'LLM',
+    'Invoke Messages',
+    'Forwards a Messages-shaped request through the Gantry Model Gateway after resolving the Gantry model alias.',
+    ['llm:invoke'],
+    { body: 'json' },
+  ),
+  doc(
+    'post',
+    '/llm/v1/chat/completions',
+    'invokeLlmChatCompletions',
+    'LLM',
+    'Invoke Chat Completions',
+    'Forwards a Chat Completions-shaped request through the Gantry Model Gateway after resolving the Gantry model alias.',
+    ['llm:invoke'],
+    { body: 'json' },
+  ),
+  doc(
     'get',
     '/v1/jobs',
     'listJobs',

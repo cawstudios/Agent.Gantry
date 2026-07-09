@@ -56,6 +56,7 @@ import { handleProviderConversationRoutes } from './routes/provider-conversation
 import { handleExternalIngressRoutes } from './routes/external-ingress.js';
 import { handleGuidedActionRoutes } from './routes/guided-actions.js';
 import { handleJobRoutes } from './routes/jobs.js';
+import { handleLlmRoutes } from './routes/llm.js';
 import { handleMemoryRoutes } from './routes/memory.js';
 import { handleMcpServerRoutes } from './routes/mcp-servers.js';
 import { handleModelRoutes } from './routes/models.js';
@@ -166,6 +167,7 @@ function createControlRequestHandler(
       if (await handleBrainRoutes(req, res, ctx, url, pathname)) return;
       if (await handleCredentialRoutes(req, res, ctx, pathname)) return;
       if (await handleModelRoutes(req, res, ctx, pathname)) return;
+      if (await handleLlmRoutes(req, res, ctx, pathname)) return;
       if (await handleJobRoutes(req, res, ctx, url, pathname)) return;
       if (await handleExternalIngressRoutes(req, res, ctx, pathname)) return;
       if (await handleRunRoutes(req, res, ctx, url, pathname)) return;

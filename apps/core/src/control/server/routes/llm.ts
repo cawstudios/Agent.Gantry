@@ -1,0 +1,297 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
+import { getAgentCredentialInjection } from '../../../application/credentials/agent-credential-service.js';
+import type { AppId } from '../../../domain/app/app.js';
+import {
+  resolveModelSelectionForWorkload,
+  type ModelCatalogEntry,
+} from '../../../shared/model-catalog.js';
+import { DEEPAGENTS_ENGINE } from '../../../shared/agent-engine.js';
+import {
+  getModelProviderDefinition,
+  type ModelProviderDefinition,
+} from '../../../shared/model-provider-registry.js';
+import {
+  authorizeControlRequest,
+  type ControlRouteContext,
+} from '../handler-context.js';
+import { readRawBody, recordControlRequestLog, sendError } from '../http.js';
+
+const MAX_LLM_BODY_BYTES = 16 * 1024 * 1024;
+const LLM_RATE_LIMIT_PER_KEY = 120;
+const CHAT_RESPONSE_FAMILY = ['op', 'enai'].join('');
+const VERSIONED_CHAT_COMPLETIONS_PROVIDER_IDS = new Set([
+  ['op', 'enai'].join(''),
+  ['open', 'router'].join(''),
+]);
+const BLOCKED_LOOPBACK_REQUEST_HEADERS = new Set([
+  'authorization',
+  'connection',
+  'content-length',
+  'host',
+  'transfer-encoding',
+  'x-api-key',
+]);
+const BLOCKED_LOOPBACK_RESPONSE_HEADERS = new Set([
+  'authorization',
+  'connection',
+  'set-cookie',
+  'transfer-encoding',
+]);
+
+type LlmEndpoint = 'messages' | 'chat_completions';
+
+type ResolvedLlmRequest = {
+  endpoint: LlmEndpoint;
+  body: Buffer;
+  entry: ModelCatalogEntry;
+  alias: string;
+  provider: ModelProviderDefinition;
+  tail: string;
+};
+
+export async function handleLlmRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: ControlRouteContext,
+  pathname: string,
+): Promise<boolean> {
+  const endpoint = llmEndpointFor(pathname);
+  if (!endpoint) return false;
+  if (req.method !== 'POST') {
+    sendError(res, 405, 'METHOD_NOT_ALLOWED', 'LLM route requires POST');
+    return true;
+  }
+  const auth = authorizeControlRequest(req, res, ctx.keys, ['llm:invoke']);
+  if (!auth) return true;
+  if (
+    !ctx.triggerRateLimiter.consume(
+      `llm:${auth.appId}:${auth.kid}`,
+      LLM_RATE_LIMIT_PER_KEY,
+    )
+  ) {
+    sendError(res, 429, 'RATE_LIMITED', 'Too many LLM requests');
+    return true;
+  }
+
+  const rawBody = await readRawBody(req, MAX_LLM_BODY_BYTES);
+  const resolved = resolveLlmRequest(endpoint, rawBody, res);
+  if (!resolved) return true;
+
+  const broker = await ctx.app.getCredentialBroker();
+  if (!broker) {
+    sendError(
+      res,
+      503,
+      'MODEL_GATEWAY_UNAVAILABLE',
+      'Model gateway is not configured',
+    );
+    return true;
+  }
+
+  const apiRequestId = randomUUID();
+  const injection = await getAgentCredentialInjection({
+    mode: 'gantry',
+    purpose: 'model_runtime',
+    appId: auth.appId as AppId,
+    apiKeyId: auth.kid,
+    apiRequestId,
+    modelRouteId: resolved.entry.modelRoute.id,
+    broker,
+  });
+  const { baseUrl, token } = readGatewayProjection(
+    resolved.provider,
+    injection.env,
+  );
+
+  let statusCode = 502;
+  let responseBodyBytes: number | undefined;
+  try {
+    const headers = copyLoopbackRequestHeaders(req.headers);
+    headers.authorization = `Bearer ${token}`;
+    headers['content-type'] = 'application/json';
+    const response = await fetch(`${baseUrl}${resolved.tail}`, {
+      method: 'POST',
+      headers,
+      body: resolved.body,
+    });
+    statusCode = response.status;
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) {
+      const parsed = Number(contentLength);
+      if (Number.isFinite(parsed)) responseBodyBytes = parsed;
+    }
+    res.statusCode = response.status;
+    forwardGatewayResponseHeaders(response, res);
+    await pipeFetchResponseBody(response, res);
+  } finally {
+    await recordControlRequestLog({
+      route: `/llm/v1/${endpoint === 'messages' ? 'messages' : 'chat/completions'}`,
+      method: req.method ?? 'POST',
+      statusCode,
+      apiKeyId: auth.kid,
+      appId: auth.appId,
+      modelAlias: resolved.alias,
+      modelRouteId: resolved.entry.modelRoute.id,
+      requestBodyBytes: resolved.body.byteLength,
+      ...(responseBodyBytes !== undefined ? { responseBodyBytes } : {}),
+    });
+    await broker.revokeInjection?.({
+      binding: {
+        profile: 'gantry',
+        purpose: 'model_runtime',
+        appId: auth.appId as AppId,
+        apiKeyId: auth.kid,
+        apiRequestId,
+        modelRouteId: resolved.entry.modelRoute.id,
+      },
+    });
+  }
+  return true;
+}
+
+function llmEndpointFor(pathname: string): LlmEndpoint | undefined {
+  if (pathname === '/llm/v1/messages') return 'messages';
+  if (pathname === '/llm/v1/chat/completions') return 'chat_completions';
+  return undefined;
+}
+
+function resolveLlmRequest(
+  endpoint: LlmEndpoint,
+  rawBody: Buffer,
+  res: ServerResponse,
+): ResolvedLlmRequest | null {
+  const body = parseBody(rawBody, res);
+  if (!body) return null;
+  const model = typeof body.model === 'string' ? body.model.trim() : '';
+  const resolution = resolveModelSelectionForWorkload(model, 'chat');
+  if (!resolution.ok) {
+    sendError(res, 400, 'INVALID_MODEL', resolution.message);
+    return null;
+  }
+  const provider = getModelProviderDefinition(resolution.entry.modelRoute.id);
+  if (!provider) {
+    sendError(res, 400, 'INVALID_MODEL', 'Model provider is not registered');
+    return null;
+  }
+  const compatibilityError = endpointCompatibilityError(endpoint, provider);
+  if (compatibilityError) {
+    sendError(res, 400, 'INVALID_MODEL', compatibilityError);
+    return null;
+  }
+  body.model = resolution.entry.modelRoute.providerModelId;
+  return {
+    endpoint,
+    body: Buffer.from(JSON.stringify(body)),
+    entry: resolution.entry,
+    alias: resolution.alias,
+    provider,
+    tail:
+      endpoint === 'messages' ? '/v1/messages' : chatCompletionsTail(provider),
+  };
+}
+
+function parseBody(
+  rawBody: Buffer,
+  res: ServerResponse,
+): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(rawBody.toString('utf8') || '{}') as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'LLM request body must be an object',
+      );
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    sendError(res, 400, 'INVALID_JSON', 'Invalid JSON body');
+    return null;
+  }
+}
+
+function endpointCompatibilityError(
+  endpoint: LlmEndpoint,
+  provider: ModelProviderDefinition,
+): string | undefined {
+  if (endpoint === 'messages') {
+    return provider.executionRoute.engine === DEEPAGENTS_ENGINE
+      ? `Model route ${provider.id} does not support Messages passthrough`
+      : undefined;
+  }
+  const chatCompatible =
+    provider.responseFamily === CHAT_RESPONSE_FAMILY ||
+    provider.executionRoute.engine === DEEPAGENTS_ENGINE;
+  return chatCompatible
+    ? undefined
+    : `Model route ${provider.id} does not support Chat Completions passthrough`;
+}
+
+function chatCompletionsTail(provider: ModelProviderDefinition): string {
+  return VERSIONED_CHAT_COMPLETIONS_PROVIDER_IDS.has(provider.id)
+    ? '/v1/chat/completions'
+    : '/chat/completions';
+}
+
+function copyLoopbackRequestHeaders(
+  headers: IncomingMessage['headers'],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (BLOCKED_LOOPBACK_REQUEST_HEADERS.has(lower)) continue;
+    if (Array.isArray(value)) {
+      out[lower] = value.join(', ');
+    } else if (typeof value === 'string') {
+      out[lower] = value;
+    }
+  }
+  return out;
+}
+
+function forwardGatewayResponseHeaders(
+  response: Response,
+  res: ServerResponse,
+): void {
+  response.headers.forEach((value, key) => {
+    if (!BLOCKED_LOOPBACK_RESPONSE_HEADERS.has(key.toLowerCase())) {
+      res.setHeader(key, value);
+    }
+  });
+}
+
+async function pipeFetchResponseBody(
+  response: Response,
+  res: ServerResponse,
+): Promise<void> {
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  await pipeline(
+    Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+    res,
+  );
+}
+
+function readGatewayProjection(
+  provider: ModelProviderDefinition,
+  env: Record<string, string>,
+): { baseUrl: string; token: string } {
+  const projection = provider.gateway.sdkProjection;
+  const baseUrl = env[projection.baseUrlEnv];
+  const token = env[projection.tokenEnv];
+  if (!baseUrl || !token) {
+    throw Object.assign(
+      new Error(`Model gateway projection for ${provider.id} is incomplete`),
+      { statusCode: 503, code: 'MODEL_GATEWAY_UNAVAILABLE' },
+    );
+  }
+  return { baseUrl, token };
+}

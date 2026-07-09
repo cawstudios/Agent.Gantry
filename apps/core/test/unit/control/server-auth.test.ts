@@ -716,6 +716,22 @@ describe('control server auth key parsing', () => {
     ).toThrow('unsupported scope invalid:scope');
   });
 
+  it('accepts the direct LLM invoke scope', () => {
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-llm-scope',
+        appId: 'app-one',
+        scopes: ['llm:invoke'],
+      },
+    ]);
+
+    const keys = parseControlApiKeysFromEnv();
+
+    expect(keys).toHaveLength(1);
+    expect(keys[0]?.scopes.has('llm:invoke')).toBe(true);
+  });
+
   it('fails strict parsing when a configured key uses obsolete memory write scope', () => {
     process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
       {

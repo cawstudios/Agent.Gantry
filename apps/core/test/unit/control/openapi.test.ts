@@ -15,6 +15,7 @@ import { handleCredentialRoutes } from '@core/control/server/routes/credentials.
 import { handleExternalIngressRoutes } from '@core/control/server/routes/external-ingress.js';
 import { handleGuidedActionRoutes } from '@core/control/server/routes/guided-actions.js';
 import { handleJobRoutes } from '@core/control/server/routes/jobs.js';
+import { handleLlmRoutes } from '@core/control/server/routes/llm.js';
 import { handleMemoryRoutes } from '@core/control/server/routes/memory.js';
 import { handleMcpServerRoutes } from '@core/control/server/routes/mcp-servers.js';
 import { handleModelRoutes } from '@core/control/server/routes/models.js';
@@ -28,6 +29,8 @@ import { handleSystemRoutes } from '@core/control/server/routes/system.js';
 import { handleWebhookRoutes } from '@core/control/server/routes/webhooks.js';
 
 const expectedControlRoutes = [
+  'POST /llm/v1/chat/completions',
+  'POST /llm/v1/messages',
   'GET /v1/agents',
   'POST /v1/agents',
   'GET /v1/agents/{agentId}',
@@ -274,6 +277,7 @@ async function isRecognizedByRuntime(method: string, pathname: string) {
     () => handleBrainRoutes(req, res, ctx, url, pathname),
     () => handleModelRoutes(req, res, ctx, pathname),
     () => handleCredentialRoutes(req, res, ctx, pathname),
+    () => handleLlmRoutes(req, res, ctx, pathname),
     () => handleJobRoutes(req, res, ctx, url, pathname),
     () => handleExternalIngressRoutes(req, res, ctx, pathname),
     () => handleRunRoutes(req, res, ctx, url, pathname),
@@ -481,6 +485,10 @@ describe('control OpenAPI documentation', () => {
         'x-gantry-required-scopes': ['sessions:write'],
       },
     );
+    expect(spec.paths['/llm/v1/messages']?.post).toMatchObject({
+      operationId: 'invokeLlmMessages',
+      'x-gantry-required-scopes': ['llm:invoke'],
+    });
     expect(
       spec.paths['/v1/sessions/{sessionId}/messages']?.post.requestBody.content[
         'application/json'
