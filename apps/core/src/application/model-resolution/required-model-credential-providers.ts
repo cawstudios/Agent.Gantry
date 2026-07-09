@@ -3,6 +3,10 @@ import {
   resolveModelSelectionForWorkload,
   type ModelWorkload,
 } from '../../shared/model-catalog.js';
+import {
+  isModelFamilyAlias,
+  resolveModelFamilyAlias,
+} from '../../shared/model-families.js';
 
 export type RequiredModelCredentialProvidersSettings = {
   agent: {
@@ -22,6 +26,7 @@ export type RequiredModelCredentialProvidersSettings = {
     | undefined
   >;
   bindings?: Record<string, { model?: string } | undefined>;
+  modelFamilies?: Record<string, readonly string[]>;
   memory: {
     enabled: boolean;
     // Memory model/embedding detail is only present in the full runtime
@@ -49,6 +54,7 @@ export type RequiredModelCredentialProvidersSettings = {
  */
 export function requiredModelCredentialProviders(
   settings: RequiredModelCredentialProvidersSettings,
+  options: { configuredProviderIds?: ReadonlySet<string> } = {},
 ): string[] {
   const slots: Array<{ alias: string; workload: ModelWorkload }> = [];
   const providers = new Set<string>();
@@ -105,10 +111,18 @@ export function requiredModelCredentialProviders(
     }
   }
   for (const slot of slots) {
-    const resolved = resolveModelSelectionForWorkload(
-      slot.alias,
-      slot.workload,
-    );
+    // A family alias requires whichever member the runtime would select:
+    // the first configured member, or the first member as the runtime's own
+    // fallback — so an unconfigured family still surfaces a missing
+    // credential instead of silently requiring nothing.
+    const alias = isModelFamilyAlias(slot.alias)
+      ? (resolveModelFamilyAlias(slot.alias, {
+          isProviderConfigured: (providerId) =>
+            options.configuredProviderIds?.has(providerId) ?? false,
+          order: settings.modelFamilies,
+        })?.alias ?? slot.alias)
+      : slot.alias;
+    const resolved = resolveModelSelectionForWorkload(alias, slot.workload);
     if (resolved.ok) providers.add(resolved.entry.modelRoute.id);
   }
   return [...providers].sort();

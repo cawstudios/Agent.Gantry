@@ -83,7 +83,18 @@ export async function inspectModelCredentialReadiness(
     const healthByProvider = new Map<string, (typeof rows)[number]['health']>(
       rows.map((row) => [row.providerId, row.health]),
     );
-    const missing = requiredProviders.filter(
+    // Re-derive with the stored credential set so family aliases require the
+    // member the runtime would actually select.
+    const configuredProviderIds = new Set(
+      rows
+        .filter((row) => row.health === 'ready')
+        .map((row) => row.providerId),
+    );
+    const refinedRequiredProviders = requiredModelCredentialProviders(
+      settings,
+      { configuredProviderIds },
+    );
+    const missing = refinedRequiredProviders.filter(
       (providerId) => healthByProvider.get(providerId) !== 'ready',
     );
     if (missing.length > 0) {
@@ -105,7 +116,7 @@ export async function inspectModelCredentialReadiness(
     if (options.live) {
       const skipLiveProviderIds = new Set(options.skipLiveProviderIds ?? []);
       const liveResults = await Promise.all(
-        requiredProviders
+        refinedRequiredProviders
           .filter((providerId) => !skipLiveProviderIds.has(providerId))
           .map(async (providerId) => {
             const credential = await service.getActiveCredential({
@@ -153,7 +164,7 @@ export async function inspectModelCredentialReadiness(
       id: 'model-access-credentials',
       title: 'Model Access Credentials',
       status: 'pass',
-      message: `Active model credentials found for selected defaults: ${requiredProviders.join(', ')}.`,
+      message: `Active model credentials found for selected defaults: ${refinedRequiredProviders.join(', ')}.`,
     };
   } catch (err) {
     return {
