@@ -12,6 +12,7 @@ import {
   MEMORY_EMBED_MODEL,
   MEMORY_EMBED_PROVIDER,
   OPENAI_DAILY_EMBED_LIMIT,
+  RUNTIME_MEMORY_DREAMING_ALERTS_ENABLED,
   RUNTIME_MEMORY_DREAMING_ENABLED,
 } from '../config/index.js';
 import type { AppId } from '../domain/app/app.js';
@@ -194,6 +195,7 @@ export async function registerSystemJobs(
   const registrationSignature = JSON.stringify({
     dreamingEnabled: RUNTIME_MEMORY_DREAMING_ENABLED,
     dreamingCron: MEMORY_DREAMING_CRON,
+    dreamingAlerts: RUNTIME_MEMORY_DREAMING_ALERTS_ENABLED,
     dreamingTimeoutMs: MEMORY_DREAM_SYSTEM_JOB_TIMEOUT_MS,
     brainDreamingEnabled: RUNTIME_MEMORY_DREAMING_ENABLED,
     brainDreamingCron: MEMORY_DREAMING_CRON,
@@ -223,6 +225,13 @@ export async function registerSystemJobs(
       const jobId = systemDreamingJobId({ folder: group.folder, jid });
       const existing = await deps.opsRepository.getJobById(jobId);
       if (existing?.status === 'dead_lettered') {
+        // Dead-lettered jobs are not revived here, but silent must still track
+        // the current alerts setting so a later resume reactivates the job
+        // with the correct value (the resume path itself never re-stamps it).
+        const desiredSilent = !RUNTIME_MEMORY_DREAMING_ALERTS_ENABLED;
+        if (existing.silent !== desiredSilent) {
+          await deps.opsRepository.updateJob(jobId, { silent: desiredSilent });
+        }
         continue;
       }
       const computedNextRun = computeNextJobRun(
@@ -252,7 +261,7 @@ export async function registerSystemJobs(
         created_by: 'agent',
         status: desiredStatus,
         next_run: nextRun,
-        silent: false,
+        silent: !RUNTIME_MEMORY_DREAMING_ALERTS_ENABLED,
         timeout_ms: MEMORY_DREAM_SYSTEM_JOB_TIMEOUT_MS,
         max_retries: 1,
         retry_backoff_ms: 30_000,
