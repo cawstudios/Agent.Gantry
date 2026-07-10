@@ -202,9 +202,7 @@ function liveAdmissionIdempotencyKey(
   ].join(':');
 }
 
-export function externalRefForMessage(
-  msg: NewMessage,
-): Record<string, unknown> {
+export function externalRefForMessage(msg: NewMessage) {
   const retryTailPayload = sanitizeRetryTailProviderPayload(
     msg.delivery_retry_tail?.providerPayload,
   );
@@ -226,6 +224,7 @@ export function externalRefForMessage(
     external_message_id: msg.external_message_id,
     reply_to_message_id: msg.reply_to_message_id,
     reply_to_sender_name: msg.reply_to_sender_name,
+    response_schema: msg.responseSchema,
     delivery_retry_tail: retryTail,
   };
 }

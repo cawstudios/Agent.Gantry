@@ -661,8 +661,9 @@ describe('thread queue routing', () => {
     expect(enqueued).toEqual(['group@g.us']);
   });
 
-  it('queues response-schema admissions as a fresh structured run', async () => {
-    const msg = makePendingMessage(1);
+  it('drains a message-owned response schema from a schema-less wakeup', async () => {
+    const responseSchema = { type: 'object', required: ['answer'] };
+    const msg = { ...makePendingMessage(1), responseSchema };
     mockGetMessagesSince.mockReturnValueOnce([msg]);
     const enqueueMessageCheck = vi.fn(() => true);
     const closeStdin = vi.fn();
@@ -670,22 +671,14 @@ describe('thread queue routing', () => {
     const deps = makeDeps({
       queue: { enqueueMessageCheck, closeStdin, sendMessage },
     });
-    const responseSchema = { type: 'object', required: ['answer'] };
-
     await expect(
-      processLiveAdmissionWorkItem(
-        deps,
-        makeAdmissionItem({
-          triggerDecision: { responseSchema },
-        }),
-      ),
+      processLiveAdmissionWorkItem(deps, makeAdmissionItem()),
     ).resolves.toBe('completed');
 
     expect(closeStdin).toHaveBeenCalledWith('group@g.us');
-    expect(enqueueMessageCheck).toHaveBeenCalledWith('group@g.us', {
-      responseSchema,
-    });
+    expect(enqueueMessageCheck).toHaveBeenCalledWith('group@g.us');
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(deps.cursors).toEqual({});
   });
 
   it('loads a durable route before processing a claimed live admission item', async () => {

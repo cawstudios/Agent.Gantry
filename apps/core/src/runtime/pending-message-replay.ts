@@ -17,6 +17,7 @@ export interface PendingMessageReplay {
   messages: NewMessage[];
   hasMore: boolean;
   cursorAfter: string | null;
+  responseSchema?: Record<string, unknown>;
 }
 
 export async function collectPendingMessagesSince(input: {
@@ -44,11 +45,7 @@ export async function collectPendingMessagesSince(input: {
       input.options,
     );
     if (batch.length === 0) {
-      return {
-        messages,
-        hasMore: false,
-        cursorAfter: messagesCursor(messages),
-      };
+      return selectPendingMessageBatch(messages, false);
     }
 
     const remaining = maxMessages - messages.length;
@@ -56,11 +53,7 @@ export async function collectPendingMessagesSince(input: {
     messages.push(...acceptedBatch);
     const lastAcceptedMessage = acceptedBatch[acceptedBatch.length - 1];
     if (!lastAcceptedMessage) {
-      return {
-        messages,
-        hasMore: true,
-        cursorAfter: messagesCursor(messages),
-      };
+      return selectPendingMessageBatch(messages, true);
     }
     const nextCursor = encodeGroupMessageCursor(
       toGroupMessageCursor(lastAcceptedMessage),
@@ -71,13 +64,37 @@ export async function collectPendingMessagesSince(input: {
     cursor = nextCursor;
 
     if (acceptedBatch.length < batch.length) {
-      return { messages, hasMore: true, cursorAfter: cursor };
+      return selectPendingMessageBatch(messages, true);
     }
     if (batch.length < limit) {
-      return { messages, hasMore: false, cursorAfter: cursor };
+      return selectPendingMessageBatch(messages, false);
     }
   }
-  return { messages, hasMore: true, cursorAfter: cursor };
+  return selectPendingMessageBatch(messages, true);
+}
+
+function selectPendingMessageBatch(
+  messages: NewMessage[],
+  hasMore: boolean,
+): PendingMessageReplay {
+  const firstSchema = messages.findIndex(
+    (message) => message.responseSchema !== undefined,
+  );
+  if (firstSchema < 0) {
+    return { messages, hasMore, cursorAfter: messagesCursor(messages) };
+  }
+  const multipleSchemas = messages
+    .slice(firstSchema + 1)
+    .some((message) => message.responseSchema !== undefined);
+  const selected = multipleSchemas
+    ? messages.slice(0, firstSchema + 1)
+    : messages;
+  return {
+    messages: selected,
+    hasMore: hasMore || multipleSchemas,
+    cursorAfter: messagesCursor(selected),
+    responseSchema: messages[firstSchema]!.responseSchema,
+  };
 }
 
 export function buildPendingMessagesContinuationIdempotencyKey(input: {

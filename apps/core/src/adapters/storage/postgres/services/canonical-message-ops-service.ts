@@ -270,10 +270,14 @@ export class CanonicalMessageOpsService {
     const payload = parseJson<{ text?: string }>(row.payload_json, {});
     const attachments = mapAttachments(row.attachments_json);
     const chatJid = publicConversationJid(row, ref);
+    const externalRef = parseJson<Record<string, unknown>>(
+      row.external_ref_json,
+      {},
+    );
     const providerAccountId =
       ref.providerAccountId ??
-      (parseJson<Record<string, unknown>>(row.external_ref_json, {})
-        .provider_account_id as string | undefined);
+      (externalRef.provider_account_id as string | undefined);
+    const responseSchema = externalRef.response_schema;
     return {
       id: ref.id || row.id,
       chat_jid: chatJid,
@@ -289,6 +293,11 @@ export class CanonicalMessageOpsService {
       reply_to_sender_name: ref.reply_to_sender_name,
       external_message_id: ref.external_message_id,
       providerAccountId,
+      ...(responseSchema &&
+      typeof responseSchema === 'object' &&
+      !Array.isArray(responseSchema)
+        ? { responseSchema: responseSchema as Record<string, unknown> }
+        : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       delivery_status:
         ref.delivery_status ??

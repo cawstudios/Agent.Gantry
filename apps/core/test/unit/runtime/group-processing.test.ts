@@ -679,6 +679,82 @@ describe('createGroupProcessor', () => {
   // =======================================================================
 
   describe('successful agent run', () => {
+    it('derives the turn response schema from the drained message', async () => {
+      const responseSchema = { type: 'object', required: ['answer'] };
+      const { deps } = setupHappyPath({
+        messages: [makeMessage({ responseSchema })],
+      });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({ responseSchema });
+    });
+
+    it('runs multiple schema messages as separate turns', async () => {
+      const firstSchema = { type: 'object', title: 'first' };
+      const secondSchema = { type: 'object', title: 'second' };
+      const messages = [
+        makeMessage({ id: '1', timestamp: '1', content: 'plain first' }),
+        makeMessage({
+          id: '2',
+          timestamp: '2',
+          content: 'structured first',
+          responseSchema: firstSchema,
+        }),
+        makeMessage({ id: '3', timestamp: '3', content: 'plain second' }),
+        makeMessage({
+          id: '4',
+          timestamp: '4',
+          content: 'structured second',
+          responseSchema: secondSchema,
+        }),
+      ];
+      const { deps } = setupHappyPath({ messages });
+      let cursor = '0';
+      deps.getCursor = vi.fn(() => cursor);
+      deps.setCursor = vi.fn((_queueJid, nextCursor) => {
+        cursor = nextCursor;
+      });
+      mockGetMessagesSince.mockImplementation((_jid, cursor) => {
+        const afterTimestamp = decodeGroupMessageCursor(
+          String(cursor),
+        ).timestamp;
+        return messages.filter(
+          (message) => Number(message.timestamp) > Number(afterTimestamp),
+        );
+      });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+      await processGroupMessages('group1@g.us');
+
+      expect(
+        mockSpawnAgent.mock.calls.map((call) => call[1].responseSchema),
+      ).toEqual([firstSchema, secondSchema]);
+      expect(
+        mockFormatConversationContextMessages.mock.calls.map((call) =>
+          call[0].currentMessages.map((message: NewMessage) => message.id),
+        ),
+      ).toEqual([
+        ['1', '2'],
+        ['3', '4'],
+      ]);
+      expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledWith(
+        'group1@g.us',
+      );
+      expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps plain message turns schema-less', async () => {
+      const { deps } = setupHappyPath();
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(mockSpawnAgent.mock.calls[0][1].responseSchema).toBeUndefined();
+    });
+
     it('advances cursor to last message timestamp', async () => {
       const messages = [
         makeMessage({ timestamp: '1700000001' }),

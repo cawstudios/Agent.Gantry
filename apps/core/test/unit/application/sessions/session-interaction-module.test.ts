@@ -173,16 +173,16 @@ describe('SessionInteractionModule', () => {
         message: {
           chat_jid: 'app:app-one:conv-1',
           content: 'hello from sdk',
+          responseSchema: {
+            type: 'object',
+            required: ['answer'],
+          },
         },
         liveAdmission: {
           appId: 'default',
           triggerDecision: {
             source: 'sdk_session',
             responseMode: 'webhook',
-            responseSchema: {
-              type: 'object',
-              required: ['answer'],
-            },
           },
           now: '2026-04-30T00:00:00.000Z',
         },
@@ -249,10 +249,6 @@ describe('SessionInteractionModule', () => {
       threadId: 'thread-1',
       queueKey: 'app:app-one:conv-1::thread:thread-1',
       durableAdmissionCreated: true,
-      responseSchema: {
-        type: 'object',
-        required: ['answer'],
-      },
     });
   });
 
@@ -270,11 +266,15 @@ describe('SessionInteractionModule', () => {
       appId: 'app-one',
       sessionId: 'session-1',
       message: 'hello from sdk',
+      responseSchema: { type: 'object' },
     });
 
     expect(storeMessageWithLiveAdmission).not.toHaveBeenCalled();
     expect(ops.storeMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: 'hello from sdk' }),
+      expect.objectContaining({
+        content: 'hello from sdk',
+        responseSchema: { type: 'object' },
+      }),
     );
     expect(accepted.enqueue.durableAdmissionCreated).toBe(false);
   });

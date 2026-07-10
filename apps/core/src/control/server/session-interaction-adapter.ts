@@ -54,13 +54,7 @@ export async function acceptMessageForControl(
       ctx.liveTurnsEnabled === false ? null : DEFAULT_JOB_RUNTIME_APP_ID,
   }).acceptMessage(input);
   if (!accepted.enqueue.durableAdmissionCreated) {
-    if (accepted.enqueue.responseSchema) {
-      ctx.app.queue.enqueueMessageCheck(accepted.enqueue.queueKey, {
-        responseSchema: accepted.enqueue.responseSchema,
-      });
-    } else {
-      ctx.app.queue.enqueueMessageCheck(accepted.enqueue.queueKey);
-    }
+    ctx.app.queue.enqueueMessageCheck(accepted.enqueue.queueKey);
   }
   return accepted;
 }

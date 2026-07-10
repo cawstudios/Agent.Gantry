@@ -193,7 +193,6 @@ export function buildLiveAdmissionProcessor(input: {
       return app.processGroupMessages(queueJid, {
         queued: true,
         finalRetry: context?.finalRetry === true,
-        responseSchema: context?.responseSchema,
       });
     }
     const { chatJid, threadId, providerAccountId } =
@@ -305,7 +304,6 @@ export function buildLiveAdmissionProcessor(input: {
       const success = await app.processGroupMessages(queueJid, {
         queued: true,
         finalRetry: context?.finalRetry === true,
-        responseSchema: context?.responseSchema,
         existingRunId: liveRunId,
         ...(liveRunFence
           ? {

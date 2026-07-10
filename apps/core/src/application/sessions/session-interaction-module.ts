@@ -94,7 +94,6 @@ export type SessionQueueIntent = {
   threadId: string | null;
   queueKey: string;
   durableAdmissionCreated: boolean;
-  responseSchema?: Record<string, unknown>;
 };
 
 export class SessionInteractionModule {
@@ -258,6 +257,7 @@ export class SessionInteractionModule {
       is_bot_message: false,
       external_message_id: messageId,
       thread_id: threadId ?? undefined,
+      responseSchema: input.responseSchema,
     };
     await this.deps.ops.storeChatMetadata(
       session.conversationJid,
@@ -312,9 +312,6 @@ export class SessionInteractionModule {
           triggerDecision: {
             source: 'sdk_session',
             responseMode,
-            ...(input.responseSchema
-              ? { responseSchema: input.responseSchema }
-              : {}),
           },
           now,
         },
@@ -338,9 +335,6 @@ export class SessionInteractionModule {
         threadId,
         queueKey: makeSessionQueueKey(session.conversationJid, threadId),
         durableAdmissionCreated,
-        ...(input.responseSchema
-          ? { responseSchema: input.responseSchema }
-          : {}),
       },
     };
   }

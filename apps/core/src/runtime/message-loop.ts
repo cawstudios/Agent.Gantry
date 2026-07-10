@@ -20,7 +20,6 @@ import type {
   RuntimeMessageRepository,
 } from '../domain/repositories/ops-repo.js';
 import type { LiveAdmissionWorkItem } from '../domain/ports/live-turns.js';
-import type { GroupMessageEnqueueContext } from './group-queue-types.js';
 import { formatMessages } from '../messaging/router.js';
 import {
   isSenderControlAllowed,
@@ -76,7 +75,6 @@ export interface MessageLoopDeps {
     ) => boolean | Promise<boolean>;
     enqueueMessageCheck: (
       chatJid: string,
-      context?: GroupMessageEnqueueContext,
     ) => void | boolean | Promise<void | boolean>;
     closeStdin: (chatJid: string) => void | Promise<void>;
     stopGroup?: (chatJid: string) => boolean | Promise<boolean>;
@@ -284,9 +282,8 @@ async function hasTriggerOwnedThreadRoot(input: {
 async function enqueueMessageCheck(
   deps: MessageLoopDeps,
   queueJid: string,
-  context?: GroupMessageEnqueueContext,
 ): Promise<MessageAdmissionProcessingResult> {
-  const accepted = await deps.queue.enqueueMessageCheck(queueJid, context);
+  const accepted = await deps.queue.enqueueMessageCheck(queueJid);
   return accepted === false ? 'queued_capacity' : 'completed';
 }
 
@@ -298,8 +295,8 @@ async function processQueueMessages(
     messages: NewMessage[];
     hasMore: boolean;
     cursorAfter: string | null;
+    responseSchema?: Record<string, unknown>;
   },
-  responseSchema?: Record<string, unknown>,
 ): Promise<MessageAdmissionProcessingResult> {
   const opsRepository = resolveMessageRepository(deps);
   const { chatJid, threadId, agentId, providerAccountId } =
@@ -386,6 +383,10 @@ async function processQueueMessages(
   if (initialBatch.length === 0) {
     initialBatch = groupMessages;
   }
+  if (replay.responseSchema !== undefined) {
+    await deps.queue.closeStdin(queueJid);
+    return enqueueMessageCheck(deps, queueJid);
+  }
 
   const needsTrigger = group.requiresTrigger !== false;
   if (needsTrigger) {
@@ -431,11 +432,6 @@ async function processQueueMessages(
   const cursorAfter = encodeGroupMessageCursor(
     toGroupMessageCursor(initialBatch[initialBatch.length - 1]),
   );
-
-  if (responseSchema !== undefined) {
-    await deps.queue.closeStdin(queueJid);
-    return enqueueMessageCheck(deps, queueJid, { responseSchema });
-  }
 
   if (
     !(await deps.queue.sendMessage(queueJid, formatted, {
@@ -513,18 +509,7 @@ export async function processLiveAdmissionWorkItem(
   });
   const messages = replay.messages;
   if (messages.length === 0) return 'completed';
-  const responseSchema = item.triggerDecision.responseSchema;
-  return processQueueMessages(
-    deps,
-    item.queueJid,
-    messages,
-    replay,
-    responseSchema &&
-      typeof responseSchema === 'object' &&
-      !Array.isArray(responseSchema)
-      ? (responseSchema as Record<string, unknown>)
-      : undefined,
-  );
+  return processQueueMessages(deps, item.queueJid, messages, replay);
 }
 
 export async function recoverPendingMessages(

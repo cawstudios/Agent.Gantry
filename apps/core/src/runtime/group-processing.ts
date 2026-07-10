@@ -93,20 +93,20 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     }
     const scopedQueue = options.queued === true || threadId !== undefined;
     const opsRepository = ops();
-    const { messages: missedMessages, hasMore: missedMessagesRemain } =
-      await collectPendingMessagesSince({
-        getMessagesSince: opsRepository.getMessagesSince.bind(opsRepository),
-        chatJid,
-        sinceCursor: await deps.getCursor(queueJid),
-        pageSize: config.MESSAGE_FETCH_PAGE_SIZE,
-        maxMessages: config.MAX_MESSAGES_PER_PROMPT,
-        options: {
-          ...(scopedQueue ? { threadId: threadId ?? null } : {}),
-          ...(group.providerAccountId
-            ? { providerAccountId: group.providerAccountId }
-            : {}),
-        },
-      });
+    const replay = await collectPendingMessagesSince({
+      getMessagesSince: opsRepository.getMessagesSince.bind(opsRepository),
+      chatJid,
+      sinceCursor: await deps.getCursor(queueJid),
+      pageSize: config.MESSAGE_FETCH_PAGE_SIZE,
+      maxMessages: config.MAX_MESSAGES_PER_PROMPT,
+      options: {
+        ...(scopedQueue ? { threadId: threadId ?? null } : {}),
+        ...(group.providerAccountId
+          ? { providerAccountId: group.providerAccountId }
+          : {}),
+      },
+    });
+    const { messages: missedMessages } = replay;
     if (missedMessages.length === 0) return true;
     const latestMessage = missedMessages[missedMessages.length - 1];
     const latestMessageReactionRef =
@@ -295,7 +295,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       },
     });
     if (cmdResult.handled) {
-      if (missedMessagesRemain) deps.queue.enqueueMessageCheck(queueJid);
+      if (replay.hasMore) deps.queue.enqueueMessageCheck(queueJid);
       return cmdResult.success;
     }
     if (
@@ -311,7 +311,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         encodeGroupMessageCursor(toGroupMessageCursor(latestMessage)),
       );
       await deps.saveState();
-      if (missedMessagesRemain) deps.queue.enqueueMessageCheck(queueJid);
+      if (replay.hasMore) deps.queue.enqueueMessageCheck(queueJid);
       return true;
     }
     await notifyFirstProgress();
@@ -731,7 +731,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
           existingRunLeaseFencingVersion:
             options.existingRunLeaseFencingVersion,
           liveStopActionToken: turnOptions.liveStopActionToken,
-          responseSchema: options.responseSchema,
+          responseSchema: replay.responseSchema,
         },
       );
     } finally {
@@ -817,8 +817,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       await sendTrackedDoneProgress(finalProgressState);
     }
     await setTypingState(false);
-    if (resultOk && missedMessagesRemain)
-      deps.queue.enqueueMessageCheck(queueJid);
+    if (resultOk && replay.hasMore) deps.queue.enqueueMessageCheck(queueJid);
     options?.onRunResult?.(output);
     return resultOk;
   }

@@ -3698,11 +3698,6 @@ describe('control server runtime hardening', () => {
       );
       expect(app.queue.enqueueMessageCheck).toHaveBeenCalledWith(
         'app:app-one:conv-1::thread:thread-1',
-        {
-          responseSchema: {
-            oneOf: [{ type: 'object', required: ['answer'] }],
-          },
-        },
       );
     } finally {
       await handle.close();

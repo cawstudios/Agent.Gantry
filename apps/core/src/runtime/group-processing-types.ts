@@ -60,7 +60,6 @@ export type GroupProcessOptions = {
   existingRunLeaseWorkerInstanceId?: string;
   existingRunLeaseFencingVersion?: number;
   finalRetry?: boolean;
-  responseSchema?: Record<string, unknown>;
   onRunResult?: (result: GroupAgentRunResult) => void;
   onFirstProgress?: (input: {
     jid: string;

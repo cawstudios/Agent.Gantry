@@ -10,18 +10,15 @@ import {
 } from './group-queue-policy.js';
 import { createLiveTurnLocalRunnerHooks } from './group-queue-live-turn-hooks.js';
 import {
-  enqueuePendingMessageSignal,
   isGroupStateIdle,
   localContinuationRunnerControlPort,
   type ContinuationHandler,
   type ContinuationOptions,
   type ContinuationRunnerControlPort,
-  type GroupMessageEnqueueContext,
   type GroupStateFields,
   type GroupQueueOptions,
   type ProcessMessagesFn,
   type QueueKind,
-  type QueuedMessageSignal,
   type QueuedTask,
 } from './group-queue-types.js';
 import type { LiveTurnLocalRunnerHooks } from './live-turn-authority.js';
@@ -77,7 +74,7 @@ export class GroupQueue {
         idleWaiting: false,
         isTaskRun: false,
         runningTaskId: null,
-        pendingMessages: [],
+        pendingMessages: false,
         pendingTasks: [],
         process: null,
         runHandle: null,
@@ -162,7 +159,7 @@ export class GroupQueue {
   private refillWaitingMessageBacklog(): void {
     if (this.policy.maxMessageBacklog === UNLIMITED_QUEUE_BACKLOG) return;
     for (const [groupJid, state] of this.groups.entries()) {
-      if (state.pendingMessages.length === 0 || state.active) continue;
+      if (!state.pendingMessages || state.active) continue;
       if (this.waitingMessageGroups.includes(groupJid)) continue;
       if (!this.canAcceptWaitingMessageGroup(groupJid)) return;
       this.enqueueWaitingGroup('message', groupJid);
@@ -211,7 +208,7 @@ export class GroupQueue {
       const state = this.getGroup(candidate);
       const pending =
         kind === 'message'
-          ? state.pendingMessages.length > 0
+          ? state.pendingMessages
           : state.pendingTasks.length > 0;
 
       if (!pending) continue;
@@ -222,17 +219,12 @@ export class GroupQueue {
     return null;
   }
 
-  enqueueMessageCheck(
-    groupJid: string,
-    ctx?: GroupMessageEnqueueContext,
-  ): boolean {
+  enqueueMessageCheck(groupJid: string): boolean {
     if (this.shuttingDown) return false;
 
     const state = this.getGroup(groupJid);
-    const signal = ctx ?? {};
-
     if (state.active) {
-      enqueuePendingMessageSignal(state.pendingMessages, signal);
+      state.pendingMessages = true;
       logger.debug({ groupJid }, 'Agent run active, message queued');
       return true;
     }
@@ -247,10 +239,10 @@ export class GroupQueue {
           },
           'Message queue backlog cap reached, deferring enqueue signal',
         );
-        enqueuePendingMessageSignal(state.pendingMessages, signal);
+        state.pendingMessages = true;
         return false;
       }
-      enqueuePendingMessageSignal(state.pendingMessages, signal);
+      state.pendingMessages = true;
       this.enqueueWaitingGroup('message', groupJid);
       logger.debug(
         { groupJid, activeMessageCount: this.activeMessageCount },
@@ -260,7 +252,7 @@ export class GroupQueue {
     }
 
     this.trackRun(
-      this.runForGroup(groupJid, 'messages', signal).catch((err) =>
+      this.runForGroup(groupJid, 'messages').catch((err) =>
         logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
       ),
     );
@@ -304,10 +296,7 @@ export class GroupQueue {
       return true;
     }
 
-    if (
-      state.pendingMessages.length &&
-      task.admissionClass !== 'interactive_child'
-    ) {
+    if (state.pendingMessages && task.admissionClass !== 'interactive_child') {
       if (!this.canAcceptPendingTask()) {
         return this.rejectTaskBacklog(groupJid, taskId, state);
       }
@@ -517,13 +506,12 @@ export class GroupQueue {
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
-    signal?: QueuedMessageSignal,
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.idleWaiting = false;
     state.isTaskRun = false;
-    const messageSignal = signal ?? state.pendingMessages.shift() ?? {};
+    state.pendingMessages = false;
     this.activeMessageCount++;
 
     logger.debug(
@@ -540,14 +528,13 @@ export class GroupQueue {
       if (this.processMessagesFn) {
         const success = await this.processMessagesFn(groupJid, {
           finalRetry: state.retryCount >= this.policy.maxRetries,
-          ...messageSignal,
         });
         if (success) state.retryCount = 0;
-        else this.scheduleRetry(groupJid, state, messageSignal);
+        else this.scheduleRetry(groupJid, state);
       }
     } catch (err) {
       logger.error({ groupJid, err }, 'Error processing messages for group');
-      this.scheduleRetry(groupJid, state, messageSignal);
+      this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
       state.process = null;
@@ -600,11 +587,7 @@ export class GroupQueue {
     }
   }
 
-  private scheduleRetry(
-    groupJid: string,
-    state: GroupState,
-    signal: QueuedMessageSignal,
-  ): void {
+  private scheduleRetry(groupJid: string, state: GroupState): void {
     state.retryCount++;
     if (state.retryCount > this.policy.maxRetries) {
       logger.error(
@@ -622,7 +605,7 @@ export class GroupQueue {
     );
     this.setTimeoutFn(() => {
       if (!this.shuttingDown) {
-        this.enqueueMessageCheck(groupJid, signal);
+        this.enqueueMessageCheck(groupJid);
       }
     }, delayMs);
   }
@@ -633,7 +616,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
 
     if (
-      state.pendingMessages.length > 0 &&
+      state.pendingMessages &&
       state.pendingTasks[0]?.admissionClass !== 'interactive_child'
     ) {
       if (this.activeMessageCount >= this.policy.maxMessageRuns) {

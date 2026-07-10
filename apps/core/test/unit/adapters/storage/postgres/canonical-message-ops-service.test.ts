@@ -107,6 +107,7 @@ describe('CanonicalMessageOpsService', () => {
       thread_id: 'thread-1',
       reply_to_message_content: 'quoted sensitive body',
       external_message_id: 'provider-event-1',
+      responseSchema: { type: 'object', required: ['answer'] },
       attachments: [
         {
           id: 'attachment-1',
@@ -123,6 +124,7 @@ describe('CanonicalMessageOpsService', () => {
       provider: 'telegram',
       thread_id: 'thread-1',
       external_message_id: 'provider-event-1',
+      response_schema: { type: 'object', required: ['answer'] },
     });
     expect(ref).not.toHaveProperty('content');
     expect(ref).not.toHaveProperty('reply_to_message_content');
@@ -170,6 +172,7 @@ describe('CanonicalMessageOpsService', () => {
         content: 'sensitive body',
         thread_id: 'thread-1',
         reply_to_message_content: undefined,
+        responseSchema: { type: 'object', required: ['answer'] },
         attachments: [
           {
             kind: 'file',

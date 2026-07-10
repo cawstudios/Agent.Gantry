@@ -92,6 +92,7 @@ export interface NewMessage {
     canonicalText: string;
     providerPayload?: unknown;
   };
+  responseSchema?: Record<string, unknown>;
   attachments?: NewMessageAttachment[];
 }
 

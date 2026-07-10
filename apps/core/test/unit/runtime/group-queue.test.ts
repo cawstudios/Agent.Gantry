@@ -91,25 +91,8 @@ describe('GroupQueue', () => {
     expect(maxConcurrent).toBe(1);
   });
 
-  it('preserves a response schema until the queued message run starts', async () => {
-    const processMessages = vi.fn(async () => true);
-    const responseSchema = { type: 'object', required: ['answer'] };
-    queue.setProcessMessagesFn(processMessages);
-
-    queue.enqueueMessageCheck('group1@g.us', { responseSchema });
-    await vi.advanceTimersByTimeAsync(10);
-
-    expect(processMessages).toHaveBeenCalledWith('group1@g.us', {
-      finalRetry: false,
-      responseSchema,
-    });
-  });
-
-  it('coalesces schema-less wakeups queued during an active run', async () => {
-    const seen: Array<{
-      finalRetry: boolean;
-      responseSchema?: Record<string, unknown>;
-    }> = [];
+  it('coalesces N wakeups queued during an active run', async () => {
+    const seen: Array<{ finalRetry: boolean }> = [];
     let releaseFirst: () => void;
 
     queue.setProcessMessagesFn(async (_groupJid, context) => {
@@ -124,129 +107,15 @@ describe('GroupQueue', () => {
 
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group1@g.us');
+    for (let i = 0; i < 100; i++) {
+      queue.enqueueMessageCheck('group1@g.us');
+    }
 
     releaseFirst!();
     await vi.advanceTimersByTimeAsync(10);
     await vi.advanceTimersByTimeAsync(10);
 
     expect(seen).toEqual([{ finalRetry: false }, { finalRetry: false }]);
-  });
-
-  it('keeps schema-carrying wakeups individually ordered and bound', async () => {
-    const schemaA = { type: 'object', required: ['answer'] };
-    const schemaB = { type: 'object', required: ['choice'] };
-    const seen: Array<{
-      finalRetry: boolean;
-      responseSchema?: Record<string, unknown>;
-    }> = [];
-    let releaseFirst: () => void;
-
-    queue.setProcessMessagesFn(async (_groupJid, context) => {
-      seen.push(context);
-      if (seen.length === 1) {
-        await new Promise<void>((resolve) => {
-          releaseFirst = resolve;
-        });
-      }
-      return true;
-    });
-
-    queue.enqueueMessageCheck('group1@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group1@g.us', { responseSchema: schemaA });
-    queue.enqueueMessageCheck('group1@g.us', { responseSchema: schemaB });
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group1@g.us');
-
-    releaseFirst!();
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(10);
-
-    expect(seen).toEqual([
-      { finalRetry: false },
-      { finalRetry: false },
-      { finalRetry: false, responseSchema: schemaA },
-      { finalRetry: false, responseSchema: schemaB },
-      { finalRetry: false },
-    ]);
-  });
-
-  it('keeps response schemas attached to waiting and drained message signals', async () => {
-    queue = new GroupQueue({ maxMessageRuns: 1 });
-    const responseSchema = { type: 'object', required: ['answer'] };
-    const seen: Array<{
-      groupJid: string;
-      context: {
-        finalRetry: boolean;
-        responseSchema?: Record<string, unknown>;
-      };
-    }> = [];
-    let releaseFirst: () => void;
-
-    queue.setProcessMessagesFn(async (groupJid, context) => {
-      seen.push({ groupJid, context });
-      if (groupJid === 'group1@g.us') {
-        await new Promise<void>((resolve) => {
-          releaseFirst = resolve;
-        });
-      }
-      return true;
-    });
-
-    queue.enqueueMessageCheck('group1@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-    queue.enqueueMessageCheck('group2@g.us', { responseSchema });
-    queue.enqueueMessageCheck('group2@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-
-    expect(seen).toEqual([
-      { groupJid: 'group1@g.us', context: { finalRetry: false } },
-    ]);
-
-    releaseFirst!();
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(10);
-
-    expect(seen).toEqual([
-      { groupJid: 'group1@g.us', context: { finalRetry: false } },
-      {
-        groupJid: 'group2@g.us',
-        context: { finalRetry: false, responseSchema },
-      },
-      { groupJid: 'group2@g.us', context: { finalRetry: false } },
-    ]);
-  });
-
-  it('keeps retry response schemas from bleeding into new no-schema messages', async () => {
-    queue = new GroupQueue({ baseRetryMs: 50, maxRetries: 1 });
-    const responseSchema = { type: 'object', required: ['answer'] };
-    const seen: Array<{
-      finalRetry: boolean;
-      responseSchema?: Record<string, unknown>;
-    }> = [];
-
-    queue.setProcessMessagesFn(async (_groupJid, context) => {
-      seen.push(context);
-      return seen.length !== 1;
-    });
-
-    queue.enqueueMessageCheck('group1@g.us', { responseSchema });
-    await vi.advanceTimersByTimeAsync(10);
-    queue.enqueueMessageCheck('group1@g.us');
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(60);
-
-    expect(seen.map((context) => context.responseSchema)).toEqual([
-      responseSchema,
-      undefined,
-      responseSchema,
-    ]);
   });
 
   it('registers live-turn runner hooks with routing metadata', async () => {

@@ -22,16 +22,6 @@ export type ContinuationHandler = () => void;
 
 export interface GroupMessageRunContext {
   finalRetry: boolean;
-  responseSchema?: Record<string, unknown>;
-}
-
-export type GroupMessageEnqueueContext = Pick<
-  GroupMessageRunContext,
-  'responseSchema'
->;
-
-export interface QueuedMessageSignal {
-  responseSchema?: Record<string, unknown>;
 }
 
 export type ProcessMessagesFn = (
@@ -67,7 +57,7 @@ export interface GroupStateFields {
   idleWaiting: boolean;
   isTaskRun: boolean;
   runningTaskId: string | null;
-  pendingMessages: QueuedMessageSignal[];
+  pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   runHandle: string | null;
   workspaceFolder: string | null;
@@ -82,26 +72,12 @@ export function isGroupStateIdle(
 ): boolean {
   return (
     !state.active &&
-    state.pendingMessages.length === 0 &&
+    !state.pendingMessages &&
     state.pendingTasks.length === 0 &&
     !state.runningTaskId &&
     !state.process &&
     !state.idleWaiting
   );
-}
-
-export function enqueuePendingMessageSignal(
-  pendingMessages: QueuedMessageSignal[],
-  signal: QueuedMessageSignal,
-): void {
-  if (
-    signal.responseSchema === undefined &&
-    pendingMessages.at(-1)?.responseSchema === undefined &&
-    pendingMessages.length > 0
-  ) {
-    return;
-  }
-  pendingMessages.push(signal);
 }
 
 export interface GroupQueueOptions extends GroupQueuePolicyOptions {
