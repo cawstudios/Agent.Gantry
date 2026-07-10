@@ -24,9 +24,10 @@ will create, write the bare basename plus prose ("new module in `apps/core/src/r
 
 ## 2. Implementation handoffs
 
-Split work into stages sized for one Codex run (~10 min). One handoff at a
-time — never two writers in the same worktree. For each stage, spawn an Agent
-with `subagent_type: codex:codex-rescue` whose prompt contains:
+One handoff (stage) at a time — never two writers in the same worktree. Stage
+size is bounded by packet separability (see §1), not serial run length —
+Codex fans packets out to its subagents. For each stage, spawn an Agent with
+`subagent_type: codex:codex-rescue` whose prompt contains:
 
 - `--model gpt-5.6-sol --effort xhigh --fresh` on the first line (`--resume`
   instead of `--fresh` to continue an unfinished stage). `gpt-5.6-sol` is the

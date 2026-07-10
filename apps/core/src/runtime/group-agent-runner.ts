@@ -106,6 +106,7 @@ export function createGroupAgentRunner(input: {
         externalSessionId: string;
       };
       maintenanceCompaction?: boolean;
+      responseSchema?: Record<string, unknown>;
     },
   ): Promise<GroupAgentRunResult> {
     const agentHarness = deps.getSelectedAgentHarness(group.folder);
@@ -505,6 +506,7 @@ export function createGroupAgentRunner(input: {
             assistantName: group.trigger || DEFAULT_ASSISTANT_NAME,
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: agentInput.memoryContextBlock,
+            responseSchema: options?.responseSchema,
             ...(agentInput.resumeSessionId
               ? { sessionId: agentInput.resumeSessionId }
               : {}),

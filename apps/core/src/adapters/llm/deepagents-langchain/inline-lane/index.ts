@@ -130,6 +130,9 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
       ];
       const graph = createDeepAgent({
         model: model.model,
+        ...(laneInput.input.responseSchema
+          ? { responseFormat: laneInput.input.responseSchema as never }
+          : {}),
         backend: (config) => new StateBackend(config),
         ...(saver ? { checkpointer: saver } : {}),
         permissions: DENY_ALL_FILESYSTEM,
@@ -159,16 +162,22 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
         firstTurn = false;
 
         let normalized: Awaited<ReturnType<typeof normalizeDeepAgentStream>>;
+        let structuredResponse: unknown;
         try {
           normalized = await normalizeDeepAgentStream({
-            events: graph.streamEvents(
-              { messages },
-              {
-                version: 'v2',
-                signal,
-                configurable: { thread_id: sessionId },
-                // Claude max_turns counts SDK turns; this bounds LangGraph steps.
-                recursionLimit: maxTurns,
+            events: captureStructuredResponse(
+              graph.streamEvents(
+                { messages },
+                {
+                  version: 'v2',
+                  signal,
+                  configurable: { thread_id: sessionId },
+                  // Claude max_turns counts SDK turns; this bounds LangGraph steps.
+                  recursionLimit: maxTurns,
+                },
+              ),
+              (value) => {
+                structuredResponse = value;
               },
             ),
             newSessionId: sessionId,
@@ -185,6 +194,9 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
               actor: 'deepagents',
             },
             emit: (output) => {
+              if (laneInput.input.responseSchema && !output.runtimeEventOnly) {
+                return;
+              }
               emitChain = emitChain.then(() => laneInput.emitOutput(output));
             },
           });
@@ -193,7 +205,18 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
           if (signal.aborted && isAbortError(error)) break;
           if (isGraphRecursionLimitError(error)) {
             await emitChain;
-            const terminal = inlineAgentMaxTurnsError(maxTurns, sessionId);
+            const terminal = laneInput.input.responseSchema
+              ? structuredOutputError(error, sessionId)
+              : inlineAgentMaxTurnsError(maxTurns, sessionId);
+            await laneInput.emitOutput(terminal);
+            return terminal;
+          }
+          if (
+            laneInput.input.responseSchema &&
+            isStructuredOutputError(error)
+          ) {
+            await emitChain;
+            const terminal = structuredOutputError(error, sessionId);
             await laneInput.emitOutput(terminal);
             return terminal;
           }
@@ -201,10 +224,29 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
         }
         if (signal.aborted || closeRequested) break;
 
+        let terminalResult = normalized.terminalResult;
+        if (laneInput.input.responseSchema) {
+          try {
+            terminalResult =
+              structuredResponse === undefined
+                ? null
+                : JSON.stringify(structuredResponse);
+          } catch (error) {
+            const terminal = structuredOutputError(error, sessionId);
+            await laneInput.emitOutput(terminal);
+            return terminal;
+          }
+          if (terminalResult === null) {
+            const terminal = structuredOutputError(undefined, sessionId);
+            await laneInput.emitOutput(terminal);
+            return terminal;
+          }
+        }
+
         const continuedByFollowup = pendingFollowups.length > 0;
         lastTerminal = {
           status: 'success',
-          result: normalized.terminalResult,
+          result: terminalResult,
           newSessionId: sessionId,
           ...(continuedByFollowup ? { continuedByFollowup: true } : {}),
           usage: normalized.terminalUsage,
@@ -524,6 +566,64 @@ function isGraphRecursionLimitError(error: unknown): boolean {
     value.name === 'GraphRecursionError' ||
     value.lc_error_code === 'GRAPH_RECURSION_LIMIT'
   );
+}
+
+async function* captureStructuredResponse(
+  events: AsyncIterable<LangGraphStreamEvent>,
+  capture: (value: unknown) => void,
+): AsyncIterable<LangGraphStreamEvent> {
+  for await (const event of events) {
+    const output = event.data?.output;
+    if (
+      output &&
+      typeof output === 'object' &&
+      'structuredResponse' in output &&
+      output.structuredResponse !== undefined
+    ) {
+      capture(output.structuredResponse);
+    }
+    yield event;
+  }
+}
+
+function isStructuredOutputError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== 'object') return false;
+    const value = current as {
+      name?: unknown;
+      message?: unknown;
+      errors?: unknown;
+      toolNames?: unknown;
+      cause?: unknown;
+    };
+    if (
+      [
+        'StructuredOutputParsingError',
+        'MultipleStructuredOutputsError',
+      ].includes(String(value.name)) ||
+      Array.isArray(value.errors) ||
+      Array.isArray(value.toolNames) ||
+      String(value.message).toLowerCase().includes('structured output')
+    ) {
+      return true;
+    }
+    current = value.cause;
+  }
+  return false;
+}
+
+function structuredOutputError(
+  error: unknown,
+  newSessionId: string,
+): RunnerOutputFrame {
+  const detail = error instanceof Error ? ` ${error.message}` : '';
+  return {
+    status: 'error',
+    result: null,
+    error: `Inline structured output failed schema validation.${detail}`,
+    newSessionId,
+  };
 }
 
 function abortedOutput(newSessionId?: string): RunnerOutputFrame {

@@ -69,6 +69,7 @@ export interface AgentInput {
   runtimeAccess?: CapabilityRuntimeAccess[];
   runtime?: AgentRuntime;
   deepAgentSkills?: DeepAgentSkillProjection;
+  responseSchema?: Record<string, unknown>;
 }
 
 export interface AgentOutput {

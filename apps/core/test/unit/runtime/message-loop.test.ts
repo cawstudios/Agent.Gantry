@@ -661,6 +661,33 @@ describe('thread queue routing', () => {
     expect(enqueued).toEqual(['group@g.us']);
   });
 
+  it('queues response-schema admissions as a fresh structured run', async () => {
+    const msg = makePendingMessage(1);
+    mockGetMessagesSince.mockReturnValueOnce([msg]);
+    const enqueueMessageCheck = vi.fn(() => true);
+    const closeStdin = vi.fn();
+    const sendMessage = vi.fn(() => true);
+    const deps = makeDeps({
+      queue: { enqueueMessageCheck, closeStdin, sendMessage },
+    });
+    const responseSchema = { type: 'object', required: ['answer'] };
+
+    await expect(
+      processLiveAdmissionWorkItem(
+        deps,
+        makeAdmissionItem({
+          triggerDecision: { responseSchema },
+        }),
+      ),
+    ).resolves.toBe('completed');
+
+    expect(closeStdin).toHaveBeenCalledWith('group@g.us');
+    expect(enqueueMessageCheck).toHaveBeenCalledWith('group@g.us', {
+      responseSchema,
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('loads a durable route before processing a claimed live admission item', async () => {
     const msg = {
       id: 'sdk-msg-1',

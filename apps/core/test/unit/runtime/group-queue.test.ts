@@ -91,6 +91,20 @@ describe('GroupQueue', () => {
     expect(maxConcurrent).toBe(1);
   });
 
+  it('preserves a response schema until the queued message run starts', async () => {
+    const processMessages = vi.fn(async () => true);
+    const responseSchema = { type: 'object', required: ['answer'] };
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us', { responseSchema });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledWith('group1@g.us', {
+      finalRetry: false,
+      responseSchema,
+    });
+  });
+
   it('registers live-turn runner hooks with routing metadata', async () => {
     const registrar = vi.fn();
     queue.setLiveTurnRunnerRegistrar(registrar);

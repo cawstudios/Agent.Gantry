@@ -10,6 +10,7 @@ import type {
   AgentTodoRender,
 } from '../../domain/ports/task-lifecycle.js';
 import type { GroupMessageRunContext } from '../../runtime/group-queue-types.js';
+import type { GroupProcessOptions } from '../../runtime/group-processing-types.js';
 import type { RunLease } from '../../domain/ports/worker-coordination.js';
 import type { RuntimeLease } from '../../domain/ports/runtime-lease.js';
 import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
@@ -105,20 +106,7 @@ interface AdmissionApp {
   ) => Promise<ExecutionProviderId> | ExecutionProviderId;
   processGroupMessages: (
     queueJid: string,
-    options: {
-      queued: boolean;
-      existingRunId?: string;
-      existingRunLeaseToken?: string;
-      existingRunLeaseWorkerInstanceId?: string;
-      existingRunLeaseFencingVersion?: number;
-      finalRetry?: boolean;
-      onRunResult?: (result: 'success' | 'error' | 'stopped' | null) => void;
-      onFirstProgress?: (input: {
-        jid: string;
-        messageRef: string;
-      }) => Promise<void> | void;
-      onLiveStopActionToken?: (token: string) => Promise<void> | void;
-    },
+    options: GroupProcessOptions & { queued: boolean },
   ) => Promise<boolean>;
   getOrRecoverCursor: (queueJid: string) => Promise<string>;
   setAgentCursor: (queueJid: string, cursor: string) => void;
@@ -205,6 +193,7 @@ export function buildLiveAdmissionProcessor(input: {
       return app.processGroupMessages(queueJid, {
         queued: true,
         finalRetry: context?.finalRetry === true,
+        responseSchema: context?.responseSchema,
       });
     }
     const { chatJid, threadId, providerAccountId } =
@@ -316,6 +305,7 @@ export function buildLiveAdmissionProcessor(input: {
       const success = await app.processGroupMessages(queueJid, {
         queued: true,
         finalRetry: context?.finalRetry === true,
+        responseSchema: context?.responseSchema,
         existingRunId: liveRunId,
         ...(liveRunFence
           ? {

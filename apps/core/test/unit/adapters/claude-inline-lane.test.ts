@@ -144,6 +144,66 @@ describe('Claude inline lane', () => {
     const options = sdk.query.mock.calls[0]?.[0].options;
     expect(options.maxTurns).toBe(expectedMaxTurns);
     expect(options.effort).toBe(expectedEffort);
+    expect(options.outputFormat).toBeUndefined();
+  });
+
+  it('returns SDK-validated structured output as JSON', async () => {
+    const responseSchema = {
+      type: 'object',
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+      additionalProperties: false,
+    };
+    sdk.query.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          ...resultMessage('structured-result', 'ignored text'),
+          structured_output: { answer: 'done' },
+        };
+      },
+    }));
+
+    const input = laneInput({
+      input: { ...laneInput().input, responseSchema },
+    });
+    const result = await runClaudeInlineAgentLoopLane(input);
+
+    expect(sdk.query.mock.calls[0]?.[0].options.outputFormat).toEqual({
+      type: 'json_schema',
+      schema: responseSchema,
+    });
+    expect(result).toMatchObject({
+      status: 'success',
+      result: JSON.stringify({ answer: 'done' }),
+    });
+    expect(input.emitOutput).toHaveBeenLastCalledWith(result);
+  });
+
+  it('returns a shaped error when structured output violates the schema', async () => {
+    sdk.query.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'error_max_structured_output_retries',
+          errors: ['Structured output did not match the schema.'],
+        };
+      },
+    }));
+    const input = laneInput({
+      input: {
+        ...laneInput().input,
+        responseSchema: { type: 'object' },
+      },
+    });
+
+    const result = await runClaudeInlineAgentLoopLane(input);
+
+    expect(result).toEqual({
+      status: 'error',
+      result: null,
+      error: 'Structured output did not match the schema.',
+    });
+    expect(input.emitOutput).toHaveBeenLastCalledWith(result);
   });
 
   it('emits and returns a named max_turns terminal error', async () => {

@@ -3555,6 +3555,53 @@ describe('control server runtime hardening', () => {
     }
   });
 
+  it('rejects non-object session response schemas with a shaped error', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-message-schema',
+        scopes: ['sessions:write'],
+        appId: 'app-one',
+      },
+    ]);
+    const app = {
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      for (const responseSchema of [null, [], 'object', 42]) {
+        const response = await requestWithRetry(
+          `http://127.0.0.1:${port}/v1/sessions/session-1/messages`,
+          'token-message-schema',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              message: 'hello',
+              response_schema: responseSchema,
+            }),
+          },
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({
+          error: {
+            code: 'INVALID_REQUEST',
+            message: 'response_schema must be a JSON object',
+          },
+        });
+      }
+      expect(controlRepo.getAppSessionById).not.toHaveBeenCalled();
+      expect(app.queue.enqueueMessageCheck).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('persists SDK session messages, emits control events, and queues app work', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
@@ -3594,6 +3641,10 @@ describe('control server runtime hardening', () => {
             threadId: 'thread-1',
             correlationId: 'corr-1',
             responseMode: 'sse',
+            response_schema: {
+              type: 'object',
+              required: ['answer'],
+            },
           }),
         },
       );
@@ -3642,6 +3693,12 @@ describe('control server runtime hardening', () => {
       );
       expect(app.queue.enqueueMessageCheck).toHaveBeenCalledWith(
         'app:app-one:conv-1::thread:thread-1',
+        {
+          responseSchema: {
+            type: 'object',
+            required: ['answer'],
+          },
+        },
       );
     } finally {
       await handle.close();

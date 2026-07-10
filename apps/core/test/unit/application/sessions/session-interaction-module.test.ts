@@ -179,6 +179,10 @@ describe('SessionInteractionModule', () => {
           triggerDecision: {
             source: 'sdk_session',
             responseMode: 'webhook',
+            responseSchema: {
+              type: 'object',
+              required: ['answer'],
+            },
           },
           now: '2026-04-30T00:00:00.000Z',
         },
@@ -223,6 +227,10 @@ describe('SessionInteractionModule', () => {
       senderId: 'user-1',
       senderName: 'User One',
       correlationId: 'corr-1',
+      responseSchema: {
+        type: 'object',
+        required: ['answer'],
+      },
       beforeDurableAdmission: async () => {
         order.push('beforeDurableAdmission');
       },
@@ -241,6 +249,10 @@ describe('SessionInteractionModule', () => {
       threadId: 'thread-1',
       queueKey: 'app:app-one:conv-1::thread:thread-1',
       durableAdmissionCreated: true,
+      responseSchema: {
+        type: 'object',
+        required: ['answer'],
+      },
     });
   });
 

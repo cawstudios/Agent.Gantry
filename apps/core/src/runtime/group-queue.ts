@@ -14,6 +14,8 @@ import {
   type ContinuationHandler,
   type ContinuationOptions,
   type ContinuationRunnerControlPort,
+  type GroupMessageEnqueueContext,
+  type GroupStateFields,
   type GroupQueueOptions,
   type ProcessMessagesFn,
   type QueueKind,
@@ -22,21 +24,7 @@ import {
 import type { LiveTurnLocalRunnerHooks } from './live-turn-authority.js';
 import * as admission from './runtime-admission.js';
 
-interface GroupState {
-  active: boolean;
-  idleWaiting: boolean;
-  isTaskRun: boolean;
-  runningTaskId: string | null;
-  pendingMessages: boolean;
-  pendingTasks: QueuedTask[];
-  process: ChildProcess | null;
-  runHandle: string | null;
-  workspaceFolder: string | null;
-  threadId: string | null;
-  requiredContinuationUserId: string | null;
-  retryCount: number;
-  continuationHandler: ContinuationHandler | null;
-}
+type GroupState = GroupStateFields & { process: ChildProcess | null };
 
 export class GroupQueue {
   private readonly policy: GroupQueuePolicy;
@@ -234,10 +222,14 @@ export class GroupQueue {
     return null;
   }
 
-  enqueueMessageCheck(groupJid: string): boolean {
+  enqueueMessageCheck(
+    groupJid: string,
+    ctx?: GroupMessageEnqueueContext,
+  ): boolean {
     if (this.shuttingDown) return false;
 
     const state = this.getGroup(groupJid);
+    if (ctx?.responseSchema) state.pendingResponseSchema = ctx.responseSchema;
 
     if (state.active) {
       state.pendingMessages = true;
@@ -528,6 +520,8 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskRun = false;
     state.pendingMessages = false;
+    const responseSchema = state.pendingResponseSchema;
+    state.pendingResponseSchema = undefined;
     this.activeMessageCount++;
 
     logger.debug(
@@ -544,13 +538,14 @@ export class GroupQueue {
       if (this.processMessagesFn) {
         const success = await this.processMessagesFn(groupJid, {
           finalRetry: state.retryCount >= this.policy.maxRetries,
+          ...(responseSchema ? { responseSchema } : {}),
         });
         if (success) state.retryCount = 0;
-        else this.scheduleRetry(groupJid, state);
+        else this.scheduleRetry(groupJid, state, responseSchema);
       }
     } catch (err) {
       logger.error({ groupJid, err }, 'Error processing messages for group');
-      this.scheduleRetry(groupJid, state);
+      this.scheduleRetry(groupJid, state, responseSchema);
     } finally {
       state.active = false;
       state.process = null;
@@ -603,7 +598,11 @@ export class GroupQueue {
     }
   }
 
-  private scheduleRetry(groupJid: string, state: GroupState): void {
+  private scheduleRetry(
+    groupJid: string,
+    state: GroupState,
+    responseSchema?: Record<string, unknown>,
+  ): void {
     state.retryCount++;
     if (state.retryCount > this.policy.maxRetries) {
       logger.error(
@@ -613,6 +612,7 @@ export class GroupQueue {
       state.retryCount = 0;
       return;
     }
+    state.pendingResponseSchema ??= responseSchema;
 
     const delayMs = this.policy.baseRetryMs * Math.pow(2, state.retryCount - 1);
     logger.info(

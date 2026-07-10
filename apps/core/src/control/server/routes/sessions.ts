@@ -161,6 +161,20 @@ export async function handleSessionRoutes(
     ]);
     if (!auth) return true;
     const body = (await readJson(req)) as Record<string, unknown>;
+    if (
+      body.response_schema !== undefined &&
+      (typeof body.response_schema !== 'object' ||
+        body.response_schema === null ||
+        Array.isArray(body.response_schema))
+    ) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'response_schema must be a JSON object',
+      );
+      return true;
+    }
     try {
       const accepted = await acceptMessageForControl(ctx, {
         appId: auth.appId,
@@ -174,6 +188,9 @@ export async function handleSessionRoutes(
           typeof body.correlationId === 'string' ? body.correlationId : null,
         responseMode: body.responseMode,
         webhookId: typeof body.webhookId === 'string' ? body.webhookId : null,
+        responseSchema: body.response_schema as
+          | Record<string, unknown>
+          | undefined,
       });
       sendJson(res, 202, {
         accepted: true,

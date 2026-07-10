@@ -501,6 +501,13 @@ describe('control OpenAPI documentation', () => {
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/SendSessionMessageRequest' });
     expect(
+      spec.components.schemas.SendSessionMessageRequest.properties
+        .response_schema,
+    ).toMatchObject({
+      type: 'object',
+      description: expect.stringContaining('structured output'),
+    });
+    expect(
       spec.paths['/v1/jobs']?.post.responses['201'].content['application/json']
         .schema,
     ).toEqual({ $ref: '#/components/schemas/JobCreateResponse' });

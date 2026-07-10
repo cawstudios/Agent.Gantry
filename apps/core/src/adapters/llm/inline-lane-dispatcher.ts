@@ -44,6 +44,7 @@ export interface AdapterInlineAgentInput {
   parentTaskId?: string;
   runLeaseToken?: string;
   runLeaseFencingVersion?: number;
+  responseSchema?: Record<string, unknown>;
 }
 
 export interface AdapterInlineControlPort {

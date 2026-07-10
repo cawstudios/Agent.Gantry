@@ -245,6 +245,86 @@ describe('DeepAgents inline lane', () => {
     expect(input.emitOutput).toHaveBeenLastCalledWith(result);
   });
 
+  it('returns the schema-valid structured response as JSON', async () => {
+    const responseSchema = {
+      type: 'object',
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+      additionalProperties: false,
+    };
+    deep.streamEvents.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield streamEvent('{"answer":"validated"}');
+        yield {
+          event: 'on_chain_end',
+          data: { output: { structuredResponse: { answer: 'validated' } } },
+        };
+      },
+    }));
+    const base = laneInput();
+    const input = laneInput({
+      input: { ...base.input, responseSchema },
+      mcpServers: [],
+    });
+    const lane = createDeepAgentsInlineAgentLoopLane({
+      databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
+      schema: 'gantry_deepagents',
+    });
+
+    const result = await lane(input);
+
+    expect(deep.createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ responseFormat: responseSchema }),
+    );
+    expect(result).toMatchObject({
+      status: 'success',
+      result: '{"answer":"validated"}',
+    });
+    expect(
+      input.emitOutput.mock.calls.filter(
+        ([frame]) => frame.result === '{"answer":"validated"}',
+      ),
+    ).toHaveLength(1);
+    expect(input.emitOutput).toHaveBeenLastCalledWith(result);
+  });
+
+  it('returns a terminal error when structured output violates the schema', async () => {
+    deep.streamEvents.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        throw Object.assign(
+          new Error('Failed to parse structured output: answer is required'),
+          {
+            errors: ['answer is required'],
+          },
+        );
+      },
+    }));
+    const base = laneInput();
+    const input = laneInput({
+      input: {
+        ...base.input,
+        responseSchema: {
+          type: 'object',
+          required: ['answer'],
+        },
+      },
+      mcpServers: [],
+    });
+    const lane = createDeepAgentsInlineAgentLoopLane({
+      databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
+      schema: 'gantry_deepagents',
+    });
+
+    const result = await lane(input);
+
+    expect(result).toMatchObject({
+      status: 'error',
+      result: null,
+      error: expect.stringMatching(/structured output.*schema validation/i),
+    });
+    expect(input.emitOutput).toHaveBeenLastCalledWith(result);
+  });
+
   it('uses PostgresSaver, LangChain core tools, remote MCP, and continuations', async () => {
     let releaseFirst: (() => void) | undefined;
     deep.streamEvents.mockImplementation((_input, options) => {

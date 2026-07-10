@@ -59,17 +59,22 @@ For any non-trivial plan or feature:
 3. Include acceptance criteria, bounded write scope, no-legacy cleanup terms,
    verification commands, runtime smoke steps, PR closeout requirements, and a
    Surface Impact Matrix.
-4. If the user says to pursue it as a goal, call the goal tool only when the
+4. Write each stage's implementation shape as separable work packets — one
+   numbered item per ownership boundary (files/domain + its own acceptance
+   criteria) — so implementation can fan the packets out to subagents
+   immediately. Packets that share files must be merged into one packet;
+   stage size is bounded by packet separability, not serial run length.
+5. If the user says to pursue it as a goal, call the goal tool only when the
    current environment provides it and the user has explicitly asked for goal
    pursuit. Otherwise, treat the goal prompt as the execution contract.
 
 ## Implementation Workflow
 
-1. Split work into Codex-stage-sized tasks by ownership boundary. Size each
-   stage to complete within one Codex run (~10 minutes); if a run is cut off
+1. Split work into stages by ownership boundary, each stage a set of
+   separable packets that fan out to subagents in parallel — stage size is
+   bounded by packet separability, not serial run length. If a run is cut off
    mid-stage, verify what landed, then continue the same stage with
-   `--resume`. Prefer one handoff for a tight change; add more only when files
-   or domains are clearly separable.
+   `--resume`. Prefer one handoff for a tight change.
 2. Give each Codex handoff the exact files or surfaces it owns. Do not ask
    Codex to make product decisions.
 3. Require Codex to use existing repo patterns and to keep diffs surgical.

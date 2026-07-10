@@ -94,6 +94,7 @@ export type SessionQueueIntent = {
   threadId: string | null;
   queueKey: string;
   durableAdmissionCreated: boolean;
+  responseSchema?: Record<string, unknown>;
 };
 
 export class SessionInteractionModule {
@@ -220,6 +221,7 @@ export class SessionInteractionModule {
     correlationId?: string | null;
     responseMode?: unknown;
     webhookId?: string | null;
+    responseSchema?: Record<string, unknown>;
     durableLiveAdmission?: boolean;
     beforeDurableAdmission?: () => Promise<void> | void;
   }): Promise<{
@@ -310,6 +312,9 @@ export class SessionInteractionModule {
           triggerDecision: {
             source: 'sdk_session',
             responseMode,
+            ...(input.responseSchema
+              ? { responseSchema: input.responseSchema }
+              : {}),
           },
           now,
         },
@@ -333,6 +338,9 @@ export class SessionInteractionModule {
         threadId,
         queueKey: makeSessionQueueKey(session.conversationJid, threadId),
         durableAdmissionCreated,
+        ...(input.responseSchema
+          ? { responseSchema: input.responseSchema }
+          : {}),
       },
     };
   }

@@ -345,6 +345,17 @@ function configureProviderMocks(): void {
         subtype: 'init',
         session_id: 'claude-inline-session',
       };
+      if (options.outputFormat) {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          uuid: 'claude-structured-usage',
+          result: '',
+          structured_output: { lane: 'first' },
+          usage: { input_tokens: 4, output_tokens: 2 },
+        };
+        return;
+      }
       const tools = options.mcpServers.gantry.instance.tools;
       await tools
         .find((tool) => tool.name === 'send_message')
@@ -389,8 +400,15 @@ function configureProviderMocks(): void {
     },
   }));
 
-  deep.createAgent.mockImplementation(({ tools }) => ({
+  deep.createAgent.mockImplementation(({ tools, responseFormat }) => ({
     async *streamEvents() {
+      if (responseFormat) {
+        yield {
+          event: 'on_chain_end',
+          data: { output: { structuredResponse: { lane: 'second' } } },
+        };
+        return;
+      }
       await tools
         .find((tool) => tool.name === 'send_message')
         .invoke({ text: 'OpenAI core message' });
@@ -957,7 +975,11 @@ maybeDescribe('inline session turns through the control API', () => {
       expect(response.status).toBe(200);
       return (await response.json()) as { sessionId: string };
     };
-    const runTurn = async (sessionId: string, message: string) => {
+    const runTurn = async (
+      sessionId: string,
+      message: string,
+      responseSchema?: Record<string, unknown>,
+    ) => {
       const runIndex = runIds.length;
       const response = await fetch(
         `${controlServer!.baseUrl}/v1/sessions/${sessionId}/messages`,
@@ -967,7 +989,11 @@ maybeDescribe('inline session turns through the control API', () => {
             authorization: `Bearer ${controlServer!.token}`,
             'content-type': 'application/json',
           },
-          body: JSON.stringify({ message, responseMode: 'sse' }),
+          body: JSON.stringify({
+            message,
+            responseMode: 'sse',
+            ...(responseSchema ? { response_schema: responseSchema } : {}),
+          }),
         },
       );
       expect(response.status).toBe(202);
@@ -987,13 +1013,41 @@ maybeDescribe('inline session turns through the control API', () => {
     await runTurn(claude.sessionId, 'CLAUDE_TURN use every scripted tool');
     const openai = await ensureSession('openai-inline');
     await runTurn(openai.sessionId, 'OPENAI_TURN use every scripted tool');
+    const responseSchema = {
+      type: 'object',
+      properties: { lane: { type: 'string' } },
+      required: ['lane'],
+      additionalProperties: false,
+    };
+    await runTurn(
+      claude.sessionId,
+      'Return the first structured result',
+      responseSchema,
+    );
+    await runTurn(
+      openai.sessionId,
+      'OPENAI_TURN return the second structured result',
+      responseSchema,
+    );
 
-    expect(sdk.query).toHaveBeenCalledOnce();
-    expect(deep.createAgent).toHaveBeenCalledOnce();
+    expect(sdk.query).toHaveBeenCalledTimes(2);
+    expect(deep.createAgent).toHaveBeenCalledTimes(2);
+    expect(sdk.query.mock.calls[1]?.[0].options.outputFormat).toEqual({
+      type: 'json_schema',
+      schema: responseSchema,
+    });
+    expect(deep.createAgent.mock.calls[1]?.[0].responseFormat).toEqual(
+      responseSchema,
+    );
     expect(mcpCalls).toEqual([{ value: 'claude' }, { value: 'openai' }]);
     expect(gatewayCalls).toContain('/openai/mock');
     expect(channelEffects.outbound.map(({ text }) => text)).toEqual(
-      expect.arrayContaining(['Claude core message', 'OpenAI core message']),
+      expect.arrayContaining([
+        'Claude core message',
+        'OpenAI core message',
+        '{"lane":"first"}',
+        '{"lane":"second"}',
+      ]),
     );
     expect(channelEffects.userQuestions).toHaveLength(2);
     expect(channelEffects.permissionRequests).toHaveLength(2);
@@ -1032,7 +1086,7 @@ maybeDescribe('inline session turns through the control API', () => {
         status: pgSchema.agentRunsPostgres.status,
       })
       .from(pgSchema.agentRunsPostgres);
-    expect(runRows.filter((row) => row.status === 'completed')).toHaveLength(2);
+    expect(runRows.filter((row) => row.status === 'completed')).toHaveLength(4);
     await vi.waitFor(
       async () => {
         const liveTurnRows = await runtime.service.db
@@ -1041,7 +1095,7 @@ maybeDescribe('inline session turns through the control API', () => {
             state: pgSchema.liveTurnsPostgres.state,
           })
           .from(pgSchema.liveTurnsPostgres);
-        expect(liveTurnRows).toHaveLength(2);
+        expect(liveTurnRows).toHaveLength(4);
         expect(liveTurnRows).toEqual(
           expect.arrayContaining(
             runRows.map((run) =>

@@ -354,6 +354,12 @@ tools, hosted-tool fields, attachments, and file references. Unsupported
 surfaces return `400` with code `UNSUPPORTED_FIELD` and identify the rejected
 field or tool type.
 
+Direct LLM callers request provider-native strict JSON-schema output in the
+provider-shaped payload, which Gantry passes through to the selected provider.
+Inline agent callers instead send `response_schema` with the session message;
+the selected inline lane enforces that schema and returns the validated payload
+as the turn result.
+
 Clients authenticate with a Control API bearer key carrying `llm:invoke`.
 Missing or invalid keys return `401`; a valid key without the scope returns
 `403`. The request `model` must be a registered Gantry model alias for the

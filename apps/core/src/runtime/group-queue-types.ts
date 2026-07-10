@@ -22,7 +22,13 @@ export type ContinuationHandler = () => void;
 
 export interface GroupMessageRunContext {
   finalRetry: boolean;
+  responseSchema?: Record<string, unknown>;
 }
+
+export type GroupMessageEnqueueContext = Pick<
+  GroupMessageRunContext,
+  'responseSchema'
+>;
 
 export type ProcessMessagesFn = (
   groupJid: string,
@@ -50,6 +56,22 @@ export interface QueuedTask {
   admissionClass: TaskAdmissionClass;
   groupJid: string;
   fn: () => Promise<void>;
+}
+
+export interface GroupStateFields {
+  active: boolean;
+  idleWaiting: boolean;
+  isTaskRun: boolean;
+  runningTaskId: string | null;
+  pendingMessages: boolean;
+  pendingResponseSchema?: Record<string, unknown>;
+  pendingTasks: QueuedTask[];
+  runHandle: string | null;
+  workspaceFolder: string | null;
+  threadId: string | null;
+  requiredContinuationUserId: string | null;
+  retryCount: number;
+  continuationHandler: ContinuationHandler | null;
 }
 
 export interface GroupQueueOptions extends GroupQueuePolicyOptions {

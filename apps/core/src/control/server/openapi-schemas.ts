@@ -612,6 +612,11 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       correlationId: { type: 'string' },
       responseMode: { type: 'string', enum: ['sse', 'webhook'] },
       webhookId: { type: 'string' },
+      response_schema: {
+        type: 'object',
+        description:
+          'JSON Schema object requesting strict structured output for this inline turn.',
+      },
     },
   },
   SendSessionMessageResponse: {
