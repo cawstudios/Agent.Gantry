@@ -41,76 +41,8 @@ function formatSessionRequestIssue(issue: ZodIssue): string {
   return `${path}${issue.message}`;
 }
 
-const JSON_SCHEMA_KEYWORDS = new Set([
-  '$anchor',
-  '$comment',
-  '$defs',
-  '$dynamicAnchor',
-  '$dynamicRef',
-  '$id',
-  '$ref',
-  '$schema',
-  '$vocabulary',
-  'additionalItems',
-  'additionalProperties',
-  'allOf',
-  'anyOf',
-  'const',
-  'contains',
-  'contentEncoding',
-  'contentMediaType',
-  'contentSchema',
-  'default',
-  'definitions',
-  'dependentRequired',
-  'dependentSchemas',
-  'deprecated',
-  'description',
-  'else',
-  'enum',
-  'examples',
-  'exclusiveMaximum',
-  'exclusiveMinimum',
-  'format',
-  'if',
-  'id',
-  'items',
-  'maxContains',
-  'maxItems',
-  'maxLength',
-  'maxProperties',
-  'maximum',
-  'minContains',
-  'minItems',
-  'minLength',
-  'minProperties',
-  'minimum',
-  'multipleOf',
-  'not',
-  'oneOf',
-  'pattern',
-  'patternProperties',
-  'prefixItems',
-  'properties',
-  'propertyNames',
-  'readOnly',
-  'required',
-  'then',
-  'title',
-  'type',
-  'unevaluatedItems',
-  'unevaluatedProperties',
-  'uniqueItems',
-  'writeOnly',
-]);
-
 function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return false;
-  return Object.keys(value).some((key) => JSON_SCHEMA_KEYWORDS.has(key));
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export async function handleSessionRoutes(

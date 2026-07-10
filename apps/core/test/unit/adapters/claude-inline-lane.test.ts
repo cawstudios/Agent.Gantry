@@ -148,12 +148,7 @@ describe('Claude inline lane', () => {
   });
 
   it('returns SDK-validated structured output as JSON', async () => {
-    const responseSchema = {
-      type: 'object',
-      properties: { answer: { type: 'string' } },
-      required: ['answer'],
-      additionalProperties: false,
-    };
+    const responseSchema = {};
     sdk.query.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {
         yield {

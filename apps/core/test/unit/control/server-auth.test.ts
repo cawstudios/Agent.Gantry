@@ -3579,13 +3579,7 @@ describe('control server runtime hardening', () => {
     const handle = startControlServer({ app: app as any });
 
     try {
-      for (const responseSchema of [
-        null,
-        [],
-        'object',
-        42,
-        { name: 'answer' },
-      ]) {
+      for (const responseSchema of [null, [], 'object', 42]) {
         const response = await requestWithRetry(
           `http://127.0.0.1:${port}/v1/sessions/session-1/messages`,
           'token-message-schema',
@@ -3609,6 +3603,58 @@ describe('control server runtime hardening', () => {
       }
       expect(controlRepo.getAppSessionById).not.toHaveBeenCalled();
       expect(app.queue.enqueueMessageCheck).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('accepts empty and arbitrary session response schema objects', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-message-schema-objects',
+        scopes: ['sessions:write'],
+        appId: 'app-one',
+      },
+    ]);
+    controlRepo.getAppSessionById.mockResolvedValue({
+      sessionId: 'session-1',
+      appId: 'app-one',
+      conversationId: 'conv-1',
+      chatJid: 'app:app-one:conv-1',
+      workspaceKey: 'app_app_one_conv_1',
+      title: null,
+      defaultResponseMode: 'sse',
+      defaultWebhookId: null,
+    });
+    const app = {
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      for (const responseSchema of [{}, { name: 'answer' }]) {
+        const response = await requestWithRetry(
+          `http://127.0.0.1:${port}/v1/sessions/session-1/messages`,
+          'token-message-schema-objects',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              message: 'hello',
+              response_schema: responseSchema,
+            }),
+          },
+        );
+
+        expect(response.status).toBe(202);
+        expect(opsRepo.storeMessage).toHaveBeenLastCalledWith(
+          expect.objectContaining({ responseSchema }),
+        );
+      }
     } finally {
       await handle.close();
     }

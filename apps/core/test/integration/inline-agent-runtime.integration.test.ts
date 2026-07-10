@@ -1259,7 +1259,11 @@ maybeDescribe('inline session turns through the control API', () => {
     });
     expect(deep.createAgent.mock.calls[1]?.[0].responseFormat).toMatchObject({
       schema: responseSchema,
-      strict: true,
+      tool: expect.objectContaining({
+        function: expect.objectContaining({
+          parameters: responseSchema,
+        }),
+      }),
     });
     expect(mcpCalls).toEqual([{ value: 'claude' }, { value: 'openai' }]);
     expect(gatewayCalls).toContain('/openai/mock');

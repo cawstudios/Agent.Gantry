@@ -455,16 +455,67 @@ Always mention the migration impact.
     );
   });
 
-  it('returns the schema-valid structured response as JSON', async () => {
+  it('uses tool strategy for structured output when the model lacks native support', async () => {
+    const responseSchema = {};
+    deep.streamEvents.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield streamEvent('{"answer":"validated"}');
+        yield {
+          event: 'on_chain_end',
+          data: { output: { structuredResponse: { answer: 'validated' } } },
+        };
+      },
+    }));
+    const base = laneInput();
+    const input = laneInput({
+      input: { ...base.input, responseSchema },
+      mcpServers: [],
+    });
+    const lane = createDeepAgentsInlineAgentLoopLane({
+      databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
+      schema: 'gantry_deepagents',
+    });
+
+    const result = await lane(input);
+
+    expect(deep.createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseFormat: expect.objectContaining({
+          schema: responseSchema,
+          tool: expect.objectContaining({
+            function: expect.objectContaining({
+              parameters: responseSchema,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      status: 'success',
+      result: '{"answer":"validated"}',
+    });
+    expect(
+      input.emitOutput.mock.calls.filter(
+        ([frame]) => frame.result === '{"answer":"validated"}',
+      ),
+    ).toHaveLength(1);
+    expect(input.emitOutput).toHaveBeenLastCalledWith(result);
+  });
+
+  it('uses provider strategy for structured output when the model declares native support', async () => {
     const responseSchema = {
       type: 'object',
       properties: { answer: { type: 'string' } },
       required: ['answer'],
       additionalProperties: false,
     };
+    model.build.mockResolvedValueOnce({
+      model: { profile: { maxInputTokens: 100, structuredOutput: true } },
+      endpointFamily: 'openai',
+      modelId: 'test-model',
+    });
     deep.streamEvents.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {
-        yield streamEvent('{"answer":"validated"}');
         yield {
           event: 'on_chain_end',
           data: { output: { structuredResponse: { answer: 'validated' } } },
@@ -495,12 +546,6 @@ Always mention the migration impact.
       status: 'success',
       result: '{"answer":"validated"}',
     });
-    expect(
-      input.emitOutput.mock.calls.filter(
-        ([frame]) => frame.result === '{"answer":"validated"}',
-      ),
-    ).toHaveLength(1);
-    expect(input.emitOutput).toHaveBeenLastCalledWith(result);
   });
 
   it('returns a terminal error when structured output violates the schema', async () => {

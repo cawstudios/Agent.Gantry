@@ -13,7 +13,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createDeepAgent, StateBackend } from 'deepagents';
 import type { FileData, FilesystemPermission } from 'deepagents';
-import { providerStrategy } from 'langchain';
+import { ProviderStrategy, ToolStrategy } from 'langchain';
 import pg from 'pg';
 
 import {
@@ -173,6 +173,7 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
           ? {
               responseFormat: responseFormatForSchema(
                 laneInput.input.responseSchema,
+                model.model,
               ),
             }
           : {}),
@@ -667,8 +668,13 @@ function isStructuredOutputError(error: unknown): boolean {
   return false;
 }
 
-function responseFormatForSchema(schema: Record<string, unknown>) {
-  return providerStrategy(schema as never);
+function responseFormatForSchema(
+  schema: Record<string, unknown>,
+  model: ResolvedRunnerModel['model'],
+) {
+  return model.profile.structuredOutput === true
+    ? ProviderStrategy.fromSchema(schema)
+    : ToolStrategy.fromSchema(schema);
 }
 
 function structuredOutputError(
