@@ -1033,19 +1033,24 @@ maybeDescribe('inline session turns through the control API', () => {
       })
       .from(pgSchema.agentRunsPostgres);
     expect(runRows.filter((row) => row.status === 'completed')).toHaveLength(2);
-    const liveTurnRows = await runtime.service.db
-      .select({
-        runId: pgSchema.liveTurnsPostgres.runId,
-        state: pgSchema.liveTurnsPostgres.state,
-      })
-      .from(pgSchema.liveTurnsPostgres);
-    expect(liveTurnRows).toHaveLength(2);
-    expect(liveTurnRows).toEqual(
-      expect.arrayContaining(
-        runRows.map((run) =>
-          expect.objectContaining({ runId: run.id, state: 'completed' }),
-        ),
-      ),
+    await vi.waitFor(
+      async () => {
+        const liveTurnRows = await runtime.service.db
+          .select({
+            runId: pgSchema.liveTurnsPostgres.runId,
+            state: pgSchema.liveTurnsPostgres.state,
+          })
+          .from(pgSchema.liveTurnsPostgres);
+        expect(liveTurnRows).toHaveLength(2);
+        expect(liveTurnRows).toEqual(
+          expect.arrayContaining(
+            runRows.map((run) =>
+              expect.objectContaining({ runId: run.id, state: 'completed' }),
+            ),
+          ),
+        );
+      },
+      { timeout: 20_000, interval: 50 },
     );
     for (const liveTurnId of liveTurnIds) {
       await expect(
