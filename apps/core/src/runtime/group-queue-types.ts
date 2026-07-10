@@ -30,6 +30,10 @@ export type GroupMessageEnqueueContext = Pick<
   'responseSchema'
 >;
 
+export interface QueuedMessageSignal {
+  responseSchema?: Record<string, unknown>;
+}
+
 export type ProcessMessagesFn = (
   groupJid: string,
   context: GroupMessageRunContext,
@@ -63,8 +67,7 @@ export interface GroupStateFields {
   idleWaiting: boolean;
   isTaskRun: boolean;
   runningTaskId: string | null;
-  pendingMessages: boolean;
-  pendingResponseSchema?: Record<string, unknown>;
+  pendingMessages: QueuedMessageSignal[];
   pendingTasks: QueuedTask[];
   runHandle: string | null;
   workspaceFolder: string | null;

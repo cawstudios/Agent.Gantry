@@ -167,7 +167,9 @@ describe('agent runtime settings', () => {
   main_agent:
     name: Main
     runtime: inline
-    model: gpt
+    model: kimi
+    one_time_job_default_model: kimi
+    recurring_job_default_model: kimi
     access:
       sources:
         skills:
@@ -177,9 +179,32 @@ describe('agent runtime settings', () => {
     expect(parsed.agents.main_agent.sources.skills[0]?.id).toBe('skill:writer');
   });
 
+  it.each([
+    ['one_time_job_default_model', 'one_time_job_default_model: opus'],
+    ['recurring_job_default_model', 'recurring_job_default_model: opus'],
+  ])('rejects inline attached skills on a non-DeepAgents %s', (_, setting) => {
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    runtime: inline
+    model: kimi
+    ${setting}
+    access:
+      sources:
+        skills:
+          - id: skill:writer
+`),
+    ).toThrow(
+      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; model opus resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
+    );
+  });
+
   it('uses the global model default for inline skill admission', () => {
     const parsed = parseRuntimeSettings(`agent:
-  default_model: gpt
+  default_model: kimi
+  one_time_job_default_model: kimi
+  recurring_job_default_model: kimi
 agents:
   main_agent:
     name: Main
@@ -206,7 +231,27 @@ agents:
           - id: skill:writer
 `),
     ).toThrow(
-      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
+      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; model opus resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
+    );
+  });
+
+  it('rejects inline attached skills on a non-DeepAgents global job default', () => {
+    expect(() =>
+      parseRuntimeSettings(`agent:
+  default_model: kimi
+  one_time_job_default_model: opus
+  recurring_job_default_model: kimi
+agents:
+  main_agent:
+    name: Main
+    runtime: inline
+    access:
+      sources:
+        skills:
+          - id: skill:writer
+`),
+    ).toThrow(
+      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; model opus resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
     );
   });
 
@@ -304,7 +349,15 @@ agents:
     await expect(
       service.validateCapabilityReferences(settings),
     ).resolves.toContain(
-      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
+      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; model opus resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
+    );
+
+    settings.agent.defaultModel = 'kimi';
+    settings.agent.oneTimeJobDefaultModel = 'opus';
+    await expect(
+      service.validateCapabilityReferences(settings),
+    ).resolves.toContain(
+      `agents.main_agent.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; model opus resolved engine ${DEFAULT_AGENT_ENGINE} is incompatible with attached skills: skill:writer`,
     );
   });
 });

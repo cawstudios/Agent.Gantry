@@ -267,6 +267,8 @@ export function parseConfiguredAgents(
   raw: unknown,
   defaults: {
     model?: string;
+    oneTimeJobDefaultModel?: string;
+    recurringJobDefaultModel?: string;
     modelFamilyOrder?: FamilyOrderOverrides;
   } = {},
 ): Record<string, RuntimeConfiguredAgent> {
@@ -393,6 +395,8 @@ export function parseConfiguredAgents(
       subject: pathPrefix,
       agent,
       defaultModel: defaults.model,
+      defaultOneTimeJobDefaultModel: defaults.oneTimeJobDefaultModel,
+      defaultRecurringJobDefaultModel: defaults.recurringJobDefaultModel,
       modelFamilyOrder: defaults.modelFamilyOrder,
     });
     const workerOnlyError =

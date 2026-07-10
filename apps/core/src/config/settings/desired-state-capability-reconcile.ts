@@ -129,6 +129,10 @@ export async function inlineAgentRuntimeCapabilityErrors(input: {
       subject: `agents.${folder}`,
       agent,
       defaultModel: input.settings.agent.defaultModel,
+      defaultOneTimeJobDefaultModel:
+        input.settings.agent.oneTimeJobDefaultModel,
+      defaultRecurringJobDefaultModel:
+        input.settings.agent.recurringJobDefaultModel,
       modelFamilyOrder: input.settings.modelFamilies,
     });
     if (skillEngineError) errors.push(skillEngineError);

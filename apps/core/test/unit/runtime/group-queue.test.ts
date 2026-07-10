@@ -105,6 +105,78 @@ describe('GroupQueue', () => {
     });
   });
 
+  it('keeps response schemas attached to waiting and drained message signals', async () => {
+    queue = new GroupQueue({ maxMessageRuns: 1 });
+    const responseSchema = { type: 'object', required: ['answer'] };
+    const seen: Array<{
+      groupJid: string;
+      context: {
+        finalRetry: boolean;
+        responseSchema?: Record<string, unknown>;
+      };
+    }> = [];
+    let releaseFirst: () => void;
+
+    queue.setProcessMessagesFn(async (groupJid, context) => {
+      seen.push({ groupJid, context });
+      if (groupJid === 'group1@g.us') {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return true;
+    });
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.enqueueMessageCheck('group2@g.us', { responseSchema });
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(seen).toEqual([
+      { groupJid: 'group1@g.us', context: { finalRetry: false } },
+    ]);
+
+    releaseFirst!();
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(seen).toEqual([
+      { groupJid: 'group1@g.us', context: { finalRetry: false } },
+      {
+        groupJid: 'group2@g.us',
+        context: { finalRetry: false, responseSchema },
+      },
+      { groupJid: 'group2@g.us', context: { finalRetry: false } },
+    ]);
+  });
+
+  it('keeps retry response schemas from bleeding into new no-schema messages', async () => {
+    queue = new GroupQueue({ baseRetryMs: 50, maxRetries: 1 });
+    const responseSchema = { type: 'object', required: ['answer'] };
+    const seen: Array<{
+      finalRetry: boolean;
+      responseSchema?: Record<string, unknown>;
+    }> = [];
+
+    queue.setProcessMessagesFn(async (_groupJid, context) => {
+      seen.push(context);
+      return seen.length !== 1;
+    });
+
+    queue.enqueueMessageCheck('group1@g.us', { responseSchema });
+    await vi.advanceTimersByTimeAsync(10);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(seen.map((context) => context.responseSchema)).toEqual([
+      responseSchema,
+      undefined,
+      responseSchema,
+    ]);
+  });
+
   it('registers live-turn runner hooks with routing metadata', async () => {
     const registrar = vi.fn();
     queue.setLiveTurnRunnerRegistrar(registrar);

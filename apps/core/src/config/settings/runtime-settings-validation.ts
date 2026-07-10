@@ -225,6 +225,8 @@ export function validateLoadedRuntimeSettings(
       subject: `agents.${agentId}`,
       agent,
       defaultModel: settings.agent.defaultModel,
+      defaultOneTimeJobDefaultModel: settings.agent.oneTimeJobDefaultModel,
+      defaultRecurringJobDefaultModel: settings.agent.recurringJobDefaultModel,
       modelFamilyOrder: settings.modelFamilies,
     });
     if (skillEngineError) details.push(skillEngineError);

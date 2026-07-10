@@ -1,10 +1,10 @@
 import {
   formatInlineAgentWorkerOnlyConfigError,
-  inlineAgentSkillEngineConstraintError,
   inlineWorkerOnlyToolRuleLabels,
   isInlineWorkerOnlyToolRule,
   type AgentRuntime,
 } from '../../shared/agent-runtime.js';
+import { DEEPAGENTS_ENGINE } from '../../shared/agent-engine.js';
 import { deriveAgentEngineForProvider } from '../../shared/model-execution-route.js';
 import {
   resolveModelSelectionForWorkloadWithFamilies,
@@ -86,24 +86,53 @@ export function inlineConfiguredSkillEngineConstraintError(input: {
   subject: string;
   agent: RuntimeConfiguredAgent;
   defaultModel?: string;
+  defaultOneTimeJobDefaultModel?: string;
+  defaultRecurringJobDefaultModel?: string;
   modelFamilyOrder?: FamilyOrderOverrides;
 }): string | null {
-  const effectiveModel =
-    input.agent.model?.trim() ||
-    input.defaultModel?.trim() ||
-    DEFAULT_SETUP_MODEL_ALIAS;
-  const resolved = resolveModelSelectionForWorkloadWithFamilies(
-    effectiveModel,
-    'chat',
-    input.modelFamilyOrder,
-  );
-  if (!resolved.ok) return null;
-  return inlineAgentSkillEngineConstraintError({
-    subject: input.subject,
-    agentRuntime: resolveConfiguredAgentRuntime(input.agent),
-    agentEngine: deriveAgentEngineForProvider(resolved.entry.modelRoute.id),
-    attachedSkillSourceIds: input.agent.sources.skills.map(
-      (source) => source.id,
-    ),
-  });
+  const skillIds = input.agent.sources.skills.map((source) => source.id);
+  if (
+    resolveConfiguredAgentRuntime(input.agent) !== 'inline' ||
+    skillIds.length === 0
+  ) {
+    return null;
+  }
+  const formattedSkillIds = [...new Set(skillIds)].sort().join(', ');
+  const selections = [
+    {
+      model:
+        input.agent.model?.trim() ||
+        input.defaultModel?.trim() ||
+        DEFAULT_SETUP_MODEL_ALIAS,
+      workload: 'chat' as const,
+    },
+    {
+      model:
+        input.agent.oneTimeJobDefaultModel?.trim() ||
+        input.defaultOneTimeJobDefaultModel?.trim(),
+      workload: 'one_time_job' as const,
+    },
+    {
+      model:
+        input.agent.recurringJobDefaultModel?.trim() ||
+        input.defaultRecurringJobDefaultModel?.trim(),
+      workload: 'recurring_job' as const,
+    },
+  ];
+  for (const selection of selections) {
+    if (!selection.model) continue;
+    const resolved = resolveModelSelectionForWorkloadWithFamilies(
+      selection.model,
+      selection.workload,
+      input.modelFamilyOrder,
+    );
+    if (!resolved.ok) continue;
+    const agentEngine = deriveAgentEngineForProvider(
+      resolved.entry.modelRoute.id,
+    );
+    if (agentEngine !== DEEPAGENTS_ENGINE) {
+      return `${input.subject}.runtime inline supports attached skills only with engine ${DEEPAGENTS_ENGINE}; model ${selection.model} resolved engine ${agentEngine} is incompatible with attached skills: ${formattedSkillIds}`;
+    }
+  }
+  return null;
 }

@@ -962,6 +962,8 @@ export function parseRuntimeSettingsObject(
     const modelFamilies = parseModelFamilies(root.model_families);
     const parsedAgents = parseConfiguredAgents(root.agents, {
       model: agent.defaultModel,
+      oneTimeJobDefaultModel: agent.oneTimeJobDefaultModel,
+      recurringJobDefaultModel: agent.recurringJobDefaultModel,
       modelFamilyOrder: modelFamilies,
     });
     const providerAccounts = parseProviderAccounts(
