@@ -34,6 +34,8 @@ export interface GantryStructuredTaskInput {
   readonly instructions: string;
   readonly input: Record<string, unknown>;
   readonly outputSchema?: Record<string, unknown>;
+  readonly cacheablePrefix?: string | null;
+  readonly promptCache?: GantryPromptCacheConfig | null;
   readonly correlationId?: string | null;
 }
 
