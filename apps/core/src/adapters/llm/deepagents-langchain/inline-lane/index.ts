@@ -674,7 +674,7 @@ function responseFormatForSchema(
 ) {
   return model.profile.structuredOutput === true
     ? ProviderStrategy.fromSchema(schema)
-    : ToolStrategy.fromSchema(schema);
+    : ToolStrategy.fromSchema({ ...schema, title: 'gantry_structured_output' });
 }
 
 function structuredOutputError(

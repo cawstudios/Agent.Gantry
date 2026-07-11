@@ -74,7 +74,7 @@ function settingsDesiredStateService() {
 }
 
 describe('agent runtime settings', () => {
-  it('separates configured runtime lookup from selected runtime defaulting', async () => {
+  it('resolves configured runtime defaults without resolving missing agents', async () => {
     const originalHome = process.env.GANTRY_HOME;
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-runtime-'),
@@ -98,6 +98,14 @@ describe('agent runtime settings', () => {
       capabilities: [],
       accessPreset: 'full',
     };
+    settings.agents.default_agent = {
+      name: 'Default',
+      folder: 'default_agent',
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full',
+    };
     fs.writeFileSync(
       path.join(runtimeHome, 'settings.yaml'),
       renderRuntimeSettingsYaml(settings),
@@ -110,6 +118,7 @@ describe('agent runtime settings', () => {
 
       expect(config.getConfiguredAgentRuntime('worker_agent')).toBe('worker');
       expect(config.getConfiguredAgentRuntime('inline_agent')).toBe('inline');
+      expect(config.getConfiguredAgentRuntime('default_agent')).toBe('worker');
       expect(config.getConfiguredAgentRuntime('missing_agent')).toBeUndefined();
       expect(config.getSelectedAgentRuntime('missing_agent')).toBe('worker');
     } finally {
