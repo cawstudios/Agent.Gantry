@@ -137,12 +137,12 @@ export function canonicalThirdPartyMcpToolName(
 
 export function gatedToolErrorResult(
   message: string,
-  category: 'permission' | 'validation' = 'permission',
+  category: 'business' | 'permission' | 'validation' = 'permission',
 ): {
   content: Array<{ type: 'text'; text: string }>;
   isError: true;
   error: {
-    category: 'permission' | 'validation';
+    category: 'business' | 'permission' | 'validation';
     isRetryable: false;
     message: string;
   };

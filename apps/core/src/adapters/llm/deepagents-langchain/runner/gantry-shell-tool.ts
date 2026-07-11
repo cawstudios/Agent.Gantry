@@ -238,15 +238,15 @@ export function createGantryShellTool(
 async function runShellCommand(
   command: string,
   config: GantryShellToolConfig,
-): Promise<string> {
+): Promise<unknown> {
   if (config.signal?.aborted) {
-    return formatResult({
+    return failedShellCommandResult({
       stdout: '',
       stderr: '',
       exitNote: 'Command aborted (run stopped).',
     });
   }
-  return new Promise<string>((resolve) => {
+  return new Promise<unknown>((resolve) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -259,13 +259,13 @@ async function runShellCommand(
       detached: process.platform !== 'win32',
     });
 
-    const finish = (text: string) => {
+    const finish = (result: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (forceKillTimer) clearTimeout(forceKillTimer);
       config.signal?.removeEventListener('abort', onAbort);
-      resolve(text);
+      resolve(result);
     };
 
     const terminate = (exitNote: string) => {
@@ -298,7 +298,7 @@ async function runShellCommand(
     });
     child.on('error', (err) => {
       finish(
-        formatResult({
+        failedShellCommandResult({
           stdout,
           stderr,
           exitNote: `Failed to start command: ${err.message}`,
@@ -311,9 +311,22 @@ async function runShellCommand(
         (signalName
           ? `Command terminated by signal ${signalName}.`
           : `Command exited with code ${code ?? 'null'}.`);
-      finish(formatResult({ stdout, stderr, exitNote }));
+      const text = formatResult({ stdout, stderr, exitNote });
+      finish(
+        !exitNoteOverride && !signalName && code === 0
+          ? text
+          : gatedToolErrorResult(text, 'business'),
+      );
     });
   });
+}
+
+function failedShellCommandResult(input: {
+  stdout: string;
+  stderr: string;
+  exitNote: string;
+}) {
+  return gatedToolErrorResult(formatResult(input), 'business');
 }
 
 function killShellProcessGroup(

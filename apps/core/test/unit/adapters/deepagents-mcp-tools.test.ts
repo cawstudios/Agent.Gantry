@@ -173,7 +173,7 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
     await connected.close();
   });
 
-  it('does not count a gated denial as require_prior success', async () => {
+  it('counts only a successful RunCommand toward require_prior', async () => {
     vi.stubEnv('GANTRY_MCP_SERVER_PATH', '/tmp/fake-gantry-mcp.js');
     vi.stubEnv('GANTRY_DEEPAGENTS_SHELL_ENABLED', '1');
     const memorySearch = vi.fn(async () => ({
@@ -183,7 +183,7 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
       gantry: [structuredTool('memory_search', 'Search memory.', memorySearch)],
     };
     const connected = await connectGantryAndThirdPartyMcpTools({
-      configuredAllowedTools: ['RunCommand(echo allowed)'],
+      configuredAllowedTools: ['RunCommand(false)', 'RunCommand(echo allowed)'],
       toolRules: [
         {
           tool: 'memory_search',
@@ -208,8 +208,13 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
     );
 
     await expect(
-      shell?.invoke({ command: 'echo denied' } as never),
-    ).resolves.toMatchObject({ isError: true });
+      shell?.invoke({ command: 'false' } as never),
+    ).resolves.toMatchObject({
+      isError: true,
+      content: [
+        { type: 'text', text: expect.stringContaining('exited with code 1') },
+      ],
+    });
     await expect(guarded?.invoke({} as never)).resolves.toMatchObject({
       isError: true,
       error: {
