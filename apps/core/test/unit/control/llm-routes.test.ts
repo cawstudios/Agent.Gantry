@@ -283,7 +283,7 @@ describe('direct LLM control routes', () => {
         },
       }),
       res as unknown as ServerResponse,
-      context({ broker: gatewayBroker }),
+      context({ broker: gatewayBroker, maxTokens: 32 }),
       '/llm/v1/messages/count_tokens',
     );
     expect(res.statusCode).toBe(200);
@@ -305,12 +305,60 @@ describe('direct LLM control routes', () => {
   });
 
   it.each([
-    { maxTokens: 32, requested: 33, status: 400 },
-    { maxTokens: 32, requested: 32, status: 200 },
-    { maxTokens: undefined, requested: 1000, status: 200 },
+    {
+      name: 'Messages over the limit',
+      path: '/llm/v1/messages',
+      maxTokens: 32,
+      body: { model: 'sonnet', max_tokens: 33 },
+      status: 400,
+      requested: 33,
+    },
+    {
+      name: 'Messages at the limit',
+      path: '/llm/v1/messages',
+      maxTokens: 32,
+      body: { model: 'sonnet', max_tokens: 32 },
+      status: 200,
+    },
+    {
+      name: 'unlimited Messages',
+      path: '/llm/v1/messages',
+      maxTokens: undefined,
+      body: { model: 'sonnet', max_tokens: 1000 },
+      status: 200,
+    },
+    {
+      name: 'missing Chat Completions limit on a limited key',
+      path: '/llm/v1/chat/completions',
+      maxTokens: 32,
+      body: { model: 'gpt' },
+      status: 400,
+    },
+    {
+      name: 'missing Chat Completions limit on an unlimited key',
+      path: '/llm/v1/chat/completions',
+      maxTokens: undefined,
+      body: { model: 'gpt' },
+      status: 200,
+    },
+    {
+      name: 'multiple Chat Completions choices over the limit',
+      path: '/llm/v1/chat/completions',
+      maxTokens: 32,
+      body: { model: 'gpt', max_tokens: 32, n: 2 },
+      status: 400,
+      requested: 64,
+    },
+    {
+      name: 'one Chat Completions choice at the limit',
+      path: '/llm/v1/chat/completions',
+      maxTokens: 32,
+      body: { model: 'gpt', max_tokens: 32, n: 1 },
+      status: 200,
+    },
   ])(
-    'enforces the API-key output limit %#',
-    async ({ maxTokens, requested, status }) => {
+    'enforces the API-key output limit: $name',
+    async ({ path, maxTokens, body, requested, status }) => {
       const gatewayBroker = broker();
       const fetchMock = vi.fn(
         async () => new Response('{"id":"msg_limited"}', { status: 200 }),
@@ -318,19 +366,25 @@ describe('direct LLM control routes', () => {
       vi.stubGlobal('fetch', fetchMock);
       const res = new TestResponse();
       await handleLlmRoutes(
-        request({ body: { model: 'sonnet', max_tokens: requested } }),
+        request({ body }),
         res as unknown as ServerResponse,
         context({ broker: gatewayBroker, maxTokens }),
-        '/llm/v1/messages',
+        path,
       );
       expect(res.statusCode).toBe(status);
       if (status === 400) {
-        expect(JSON.parse(res.body())).toMatchObject({
+        const response = JSON.parse(res.body());
+        expect(response).toMatchObject({
           error: {
             code: 'MAX_TOKENS_EXCEEDED',
-            details: { field: 'max_tokens', limit: maxTokens, requested },
+            details: { field: 'max_tokens', limit: maxTokens },
           },
         });
+        if (requested === undefined) {
+          expect(response.error.details).not.toHaveProperty('requested');
+        } else {
+          expect(response.error.details.requested).toBe(requested);
+        }
         expect(fetchMock).not.toHaveBeenCalled();
       } else {
         expect(fetchMock).toHaveBeenCalledOnce();

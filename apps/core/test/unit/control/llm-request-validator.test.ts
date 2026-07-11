@@ -28,9 +28,49 @@ describe('LLM passthrough request validator', () => {
       findUnsupportedLlmRequestField('messages', { max_tokens: 100 }, 100),
     ).toBeNull();
     expect(
+      findUnsupportedLlmRequestField('chat_completions', {}, undefined),
+    ).toBeNull();
+    expect(
       findUnsupportedLlmRequestField('chat_completions', {
         max_completion_tokens: 101,
       }),
+    ).toBeNull();
+  });
+
+  it.each(['messages', 'chat_completions'] as const)(
+    'requires an explicit output limit for limited %s requests',
+    (endpoint) => {
+      expect(findUnsupportedLlmRequestField(endpoint, {}, 100)).toEqual({
+        code: 'MAX_TOKENS_EXCEEDED',
+        field: 'max_tokens',
+        limit: 100,
+        message:
+          'This API key requires an explicit "max_tokens" (or "max_completion_tokens") at or below its output-token limit of 100.',
+      });
+    },
+  );
+
+  it('accounts for multiple chat completion choices', () => {
+    expect(
+      findUnsupportedLlmRequestField(
+        'chat_completions',
+        { max_tokens: 60, n: 2 },
+        100,
+      ),
+    ).toEqual({
+      code: 'MAX_TOKENS_EXCEEDED',
+      field: 'max_tokens',
+      limit: 100,
+      requested: 120,
+      message:
+        'Request field "max_tokens" value 60 with n=2 requests 120 output tokens, exceeding this API key\'s output-token limit of 100.',
+    });
+    expect(
+      findUnsupportedLlmRequestField(
+        'chat_completions',
+        { max_tokens: 100, n: 1 },
+        100,
+      ),
     ).toBeNull();
   });
 
@@ -38,6 +78,7 @@ describe('LLM passthrough request validator', () => {
     expect(
       findUnsupportedLlmRequestField('count_tokens', { max_tokens: 101 }, 100),
     ).toBeNull();
+    expect(findUnsupportedLlmRequestField('count_tokens', {}, 100)).toBeNull();
   });
 
   it('allows client-side tools, structured output, and thinking parameters', () => {

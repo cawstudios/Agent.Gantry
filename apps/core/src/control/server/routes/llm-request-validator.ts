@@ -43,7 +43,7 @@ export function findUnsupportedLlmRequestField(
   const tokenLimitViolation =
     endpoint === 'count_tokens'
       ? null
-      : findTokenLimitViolation(body, maxTokens);
+      : findTokenLimitViolation(endpoint, body, maxTokens);
   if (tokenLimitViolation) return tokenLimitViolation;
   return endpoint === 'messages' || endpoint === 'count_tokens'
     ? findUnsupportedMessagesField(body)
@@ -51,23 +51,41 @@ export function findUnsupportedLlmRequestField(
 }
 
 function findTokenLimitViolation(
+  endpoint: Exclude<LlmPassthroughEndpoint, 'count_tokens'>,
   body: Record<string, unknown>,
   maxTokens: number | undefined,
 ): UnsupportedLlmRequestField | null {
   if (maxTokens === undefined) return null;
+  let hasDeclaredLimit = false;
   for (const field of OUTPUT_TOKEN_FIELDS) {
-    const requested = body[field];
-    if (typeof requested === 'number' && requested > maxTokens) {
+    const declared = body[field];
+    if (typeof declared === 'number') {
+      hasDeclaredLimit = true;
+      const choices =
+        endpoint === 'chat_completions' && typeof body.n === 'number'
+          ? body.n
+          : 1;
+      const requested = declared * choices;
+      if (requested <= maxTokens) continue;
       return {
         code: 'MAX_TOKENS_EXCEEDED',
         field,
         limit: maxTokens,
         requested,
-        message: `Request field "${field}" value ${requested} exceeds this API key's output-token limit of ${maxTokens}.`,
+        message:
+          choices === 1
+            ? `Request field "${field}" value ${requested} exceeds this API key's output-token limit of ${maxTokens}.`
+            : `Request field "${field}" value ${declared} with n=${choices} requests ${requested} output tokens, exceeding this API key's output-token limit of ${maxTokens}.`,
       };
     }
   }
-  return null;
+  if (hasDeclaredLimit) return null;
+  return {
+    code: 'MAX_TOKENS_EXCEEDED',
+    field: 'max_tokens',
+    limit: maxTokens,
+    message: `This API key requires an explicit "max_tokens" (or "max_completion_tokens") at or below its output-token limit of ${maxTokens}.`,
+  };
 }
 
 function findUnsupportedMessagesField(
