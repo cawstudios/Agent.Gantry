@@ -128,6 +128,11 @@ vi.mock('@core/runtime/agent-spawn-host.js', () => ({
     brokerProfile: 'gantry',
     revoke: credentials.revoke,
   })),
+  withControls: (input: unknown) => input,
+  createConfiguredRunTokenBudget: () => ({
+    exceeded: false,
+    enforce: (output: unknown) => output,
+  }),
 }));
 
 vi.mock('@core/runtime/agent-spawn-admission.js', () => ({
