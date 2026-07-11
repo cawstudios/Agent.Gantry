@@ -1481,16 +1481,21 @@ maybeDescribe('inline session turns through the control API', () => {
       },
       { timeout: 20_000, interval: 50 },
     );
-    const childTasks = await runtime.service.db
-      .select({
-        kind: pgSchema.agentAsyncTasksPostgres.kind,
-        status: pgSchema.agentAsyncTasksPostgres.status,
-      })
-      .from(pgSchema.agentAsyncTasksPostgres);
-    expect(childTasks).toEqual([
-      { kind: 'delegated_agent', status: 'completed' },
-      { kind: 'delegated_agent', status: 'completed' },
-    ]);
+    await vi.waitFor(
+      async () => {
+        const childTasks = await runtime.service.db
+          .select({
+            kind: pgSchema.agentAsyncTasksPostgres.kind,
+            status: pgSchema.agentAsyncTasksPostgres.status,
+          })
+          .from(pgSchema.agentAsyncTasksPostgres);
+        expect(childTasks).toEqual([
+          { kind: 'delegated_agent', status: 'completed' },
+          { kind: 'delegated_agent', status: 'completed' },
+        ]);
+      },
+      { timeout: 20_000, interval: 50 },
+    );
     expect(delegatedSpawn.run).toHaveBeenCalledWith(
       expect.objectContaining({ folder: 'child_inline' }),
       expect.objectContaining({
