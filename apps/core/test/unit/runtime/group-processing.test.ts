@@ -8,6 +8,7 @@ import {
 import type { AgentOutput } from '@core/runtime/agent-spawn-types.js';
 import type { GroupProcessingDeps } from '@core/runtime/group-processing-types.js';
 import { PartialMessageDeliveryError } from '@core/domain/messages/partial-delivery.js';
+import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 import { buildProviderSessionAccessFingerprint } from '@core/runtime/provider-session-access-fingerprint.js';
 import { createAgentExecutionAdapterRegistry } from '@core/application/agent-execution/agent-execution-adapter-registry.js';
 
@@ -1396,6 +1397,97 @@ describe('createGroupProcessor', () => {
       expect(channel.sendMessage).toHaveBeenCalledWith(
         'group1@g.us',
         candidate,
+      );
+    });
+
+    it('publishes normalized model usage with the resolved model fields', async () => {
+      const usage = {
+        ...makeUsage(12, 4),
+        model: 'sonnet',
+        provider: 'anthropic',
+      };
+      const publishRuntimeEvent = vi.fn().mockResolvedValue(undefined);
+      const { deps } = setupHappyPath({
+        agentOutput: {
+          status: 'success',
+          result: 'done',
+          usage,
+          usageEventId: 'usage-event-1',
+        },
+      });
+      deps.publishRuntimeEvent = publishRuntimeEvent;
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+
+      await expect(processGroupMessages('group1@g.us')).resolves.toBe(true);
+      expect(publishRuntimeEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: RUNTIME_EVENT_TYPES.MODEL_USAGE,
+          payload: {
+            usage,
+            usageEventId: 'usage-event-1',
+            modelAlias: 'sonnet',
+            providerId: 'anthropic',
+          },
+        }),
+      );
+    });
+
+    it('delivers output when normalized model usage preparation fails', async () => {
+      const usage = makeUsage(12, 4);
+      Object.defineProperty(usage, 'model', {
+        get: () => {
+          throw new Error('usage model unavailable');
+        },
+      });
+      const { deps, channel } = setupHappyPath({
+        agentOutput: {
+          status: 'success',
+          result: 'done',
+          usage,
+        },
+      });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+
+      await expect(processGroupMessages('group1@g.us')).resolves.toBe(true);
+      expect(channel.sendMessage).toHaveBeenCalledWith('group1@g.us', 'done');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.any(Error),
+          group: 'TestGroup',
+        }),
+        'Failed to prepare normalized model usage runtime event',
+      );
+    });
+
+    it('delivers output when normalized model usage publication fails', async () => {
+      const publishRuntimeEvent = vi
+        .fn()
+        .mockRejectedValue(new Error('usage event insert failed'));
+      const { deps, channel } = setupHappyPath({
+        agentOutput: {
+          status: 'success',
+          result: 'done',
+          usage: {
+            ...makeUsage(12, 4),
+            model: 'sonnet',
+            provider: 'anthropic',
+          },
+        },
+      });
+      deps.publishRuntimeEvent = publishRuntimeEvent;
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+
+      await expect(processGroupMessages('group1@g.us')).resolves.toBe(true);
+      expect(channel.sendMessage).toHaveBeenCalledWith('group1@g.us', 'done');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.any(Error),
+          group: 'TestGroup',
+        }),
+        'Failed to publish normalized model usage runtime event',
       );
     });
 

@@ -173,7 +173,8 @@ export function createGroupAgentRunner(input: {
     });
     const turnContext = compactionDeltaReplay.turnContext;
     const runtimeAppId = turnContext?.appId ?? turnAppId;
-    let defaultRuntimeModel: string | undefined;
+    const defaultRuntimeModel =
+      group.agentConfig?.model ?? defaultInteractiveModel;
     const forwardedRuntimeEventKeys = new Set<string>();
     const defaultMemoryScope = memoryScopeForConversationKind(
       group.conversationKind,
@@ -269,25 +270,33 @@ export function createGroupAgentRunner(input: {
     };
     const wrappedOnOutput = async (output: AgentOutput) => {
       await persistProviderSessionFromOutput(output);
-      defaultRuntimeModel ??=
-        group.agentConfig?.model ?? defaultInteractiveModel;
+      let normalizedUsageRuntimeEvent:
+        | NonNullable<AgentOutput['runtimeEvents']>[number]
+        | undefined;
       if (output.usage) {
-        recordRuntimeModelUsage({
-          group,
-          threadId: sessionThreadId,
-          usage: output.usage,
-          usageEventId: output.usageEventId,
-          getDefaultModel: () => defaultRuntimeModel,
-        });
-        (output.runtimeEvents ??= []).push({
-          eventType: RUNTIME_EVENT_TYPES.MODEL_USAGE,
-          payload: {
+        try {
+          recordRuntimeModelUsage({
+            group,
+            threadId: sessionThreadId,
             usage: output.usage,
             usageEventId: output.usageEventId,
-            modelAlias: output.usage.model ?? defaultRuntimeModel,
-            providerId: output.usage.provider,
-          } satisfies import('../domain/events/events.js').NormalizedUsageEventPayload,
-        });
+            getDefaultModel: () => defaultRuntimeModel,
+          });
+          normalizedUsageRuntimeEvent = {
+            eventType: RUNTIME_EVENT_TYPES.MODEL_USAGE,
+            payload: {
+              usage: output.usage,
+              usageEventId: output.usageEventId,
+              modelAlias: output.usage.model ?? defaultRuntimeModel,
+              providerId: output.usage.provider,
+            } satisfies import('../domain/events/events.js').NormalizedUsageEventPayload,
+          };
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name },
+            'Failed to prepare normalized model usage runtime event',
+          );
+        }
       }
       if (output.contextUsage) {
         modelStatus.updateSelection({
@@ -313,6 +322,28 @@ export function createGroupAgentRunner(input: {
         sessionThreadId,
         forwardedKeys: forwardedRuntimeEventKeys,
       });
+      if (normalizedUsageRuntimeEvent) {
+        try {
+          await forwardRuntimeEvents({
+            output: {
+              ...output,
+              runtimeEvents: [normalizedUsageRuntimeEvent],
+            },
+            publishRuntimeEvent: deps.publishRuntimeEvent,
+            runtimeAppId,
+            turnAgentId: turnContext?.agentId,
+            runId: runState.runId,
+            chatJid,
+            sessionThreadId,
+            forwardedKeys: forwardedRuntimeEventKeys,
+          });
+        } catch (err) {
+          logger.warn(
+            { err, group: group.name },
+            'Failed to publish normalized model usage runtime event',
+          );
+        }
+      }
       if (
         output.compactBoundary &&
         turnContext?.agentSessionId &&
