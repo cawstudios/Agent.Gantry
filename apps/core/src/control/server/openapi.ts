@@ -14,6 +14,7 @@ import { extendedOpenApiRouteDocs } from './openapi-routes-extended.js';
 import { adminOpenApiSchemas } from './openapi-schemas-admin.js';
 import { automationOpenApiSchemas } from './openapi-schemas-automation.js';
 import { extensionOpenApiSchemas } from './openapi-schemas-extensions.js';
+import { llmOpenApiSchemas } from './openapi-schemas-llm.js';
 import { openApiSchemas } from './openapi-schemas.js';
 
 const routeDocs: RouteDoc[] = [
@@ -138,6 +139,7 @@ export const GANTRY_OPENAPI_DOCUMENT = {
       ...adminOpenApiSchemas,
       ...automationOpenApiSchemas,
       ...extensionOpenApiSchemas,
+      ...llmOpenApiSchemas,
       ErrorEnvelope: {
         type: 'object',
         required: ['error'],

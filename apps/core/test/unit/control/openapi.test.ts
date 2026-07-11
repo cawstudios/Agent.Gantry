@@ -31,6 +31,7 @@ import { handleWebhookRoutes } from '@core/control/server/routes/webhooks.js';
 const expectedControlRoutes = [
   'POST /llm/v1/chat/completions',
   'POST /llm/v1/messages',
+  'POST /llm/v1/messages/count_tokens',
   'GET /v1/agents',
   'POST /v1/agents',
   'GET /v1/agents/{agentId}',
@@ -492,6 +493,42 @@ describe('control OpenAPI documentation', () => {
     expect(spec.paths['/llm/v1/messages']?.post.description).toContain(
       'Rejects provider-side server tools',
     );
+    expect(spec.paths['/llm/v1/messages/count_tokens']?.post).toMatchObject({
+      operationId: 'invokeLlmMessagesCountTokens',
+      'x-gantry-required-scopes': ['llm:invoke'],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/LlmMessagesCountTokensRequest',
+            },
+          },
+        },
+      },
+      responses: {
+        '200': {
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/LlmMessagesCountTokensResponse',
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(spec.components.schemas.LlmMessagesCountTokensRequest).toMatchObject(
+      {
+        required: ['model', 'messages'],
+        properties: { model: { type: 'string' }, messages: { type: 'array' } },
+      },
+    );
+    expect(
+      spec.components.schemas.LlmMessagesCountTokensResponse,
+    ).toMatchObject({
+      required: ['input_tokens'],
+      properties: { input_tokens: { type: 'integer', minimum: 0 } },
+    });
     expect(spec.paths['/llm/v1/chat/completions']?.post.description).toContain(
       'Rejects hosted provider tools',
     );

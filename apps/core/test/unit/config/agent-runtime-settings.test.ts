@@ -153,6 +153,7 @@ describe('agent runtime settings', () => {
     runtime: inline
     model: gpt
     max_turns: 12
+    max_run_tokens: 4096
     effort: xhigh
     thinking: on
     max_output_tokens: 2048
@@ -164,6 +165,7 @@ describe('agent runtime settings', () => {
     const rendered = renderRuntimeSettingsYaml(parsed);
     expect(rendered).toContain('runtime: inline');
     expect(rendered).toContain('max_turns: 12');
+    expect(rendered).toContain('max_run_tokens: 4096');
     expect(rendered).toContain('effort: xhigh');
     expect(rendered).toContain('thinking: on');
     expect(rendered).toContain('max_output_tokens: 2048');
@@ -171,6 +173,7 @@ describe('agent runtime settings', () => {
     expect(resolveConfiguredAgentRuntime(roundTripped)).toBe('inline');
     expect(roundTripped).toMatchObject({
       maxTurns: 12,
+      maxRunTokens: 4096,
       effort: 'xhigh',
       thinking: { mode: 'on' },
       maxOutputTokens: 2048,
@@ -180,6 +183,14 @@ describe('agent runtime settings', () => {
   it.each([
     ['max_turns: 0', 'agents.main_agent.max_turns must be a positive integer'],
     ['max_turns: -1', 'agents.main_agent.max_turns must be a positive integer'],
+    [
+      'max_run_tokens: 0',
+      'agents.main_agent.max_run_tokens must be a positive integer',
+    ],
+    [
+      'max_run_tokens: -1',
+      'agents.main_agent.max_run_tokens must be a positive integer',
+    ],
     [
       'max_output_tokens: 0',
       'agents.main_agent.max_output_tokens must be a positive integer',

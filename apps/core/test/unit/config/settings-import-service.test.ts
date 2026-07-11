@@ -649,7 +649,7 @@ describe('importFleetSettingsRevision', () => {
   });
 
   it('appends a revision stamped with the current reader version', async () => {
-    expect(CURRENT_SETTINGS_READER_VERSION).toBe(8);
+    expect(CURRENT_SETTINGS_READER_VERSION).toBe(9);
     capabilityErrors = [];
     const repo = new FakeRevisionRepo();
     const outcome = await importFleetSettingsRevision(
@@ -750,6 +750,7 @@ describe('importFleetSettingsRevision', () => {
       folder: 'researcher',
       agentHarness: 'anthropic_sdk',
       maxTurns: 14,
+      maxRunTokens: 32_000,
       effort: 'medium',
       thinking: { mode: 'on', budgetTokens: 8192 },
       model: 'opus-4.6',
@@ -829,6 +830,7 @@ describe('importFleetSettingsRevision', () => {
       (document.agents as Record<string, Record<string, unknown>>).researcher,
     ).toMatchObject({
       max_turns: 14,
+      max_run_tokens: 32_000,
       effort: 'medium',
       thinking: { mode: 'on', budget_tokens: 8192 },
     });
@@ -880,6 +882,7 @@ describe('importFleetSettingsRevision', () => {
     expect(restored.agents.researcher.agentHarness).toBe('anthropic_sdk');
     expect(restored.agents.researcher).toMatchObject({
       maxTurns: 14,
+      maxRunTokens: 32_000,
       effort: 'medium',
       thinking: { mode: 'on', budgetTokens: 8192 },
     });

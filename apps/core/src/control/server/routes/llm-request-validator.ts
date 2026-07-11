@@ -1,11 +1,19 @@
-export type LlmPassthroughEndpoint = 'messages' | 'chat_completions';
+export type LlmPassthroughEndpoint =
+  | 'messages'
+  | 'count_tokens'
+  | 'chat_completions';
 
 export type UnsupportedLlmRequestField = {
   field: string;
   message: string;
+  code?: 'MAX_TOKENS_EXCEEDED';
+  limit?: number;
+  requested?: number;
   toolType?: string;
   value?: string;
 };
+
+const OUTPUT_TOKEN_FIELDS = ['max_tokens', 'max_completion_tokens'] as const;
 
 const MESSAGES_PROVIDER_EXECUTION_FIELDS = ['mcp_servers', 'container'];
 const CHAT_HOSTED_TOOL_FIELDS = [
@@ -30,10 +38,36 @@ const SERVER_EXECUTION_BETA =
 export function findUnsupportedLlmRequestField(
   endpoint: LlmPassthroughEndpoint,
   body: Record<string, unknown>,
+  maxTokens?: number,
 ): UnsupportedLlmRequestField | null {
-  return endpoint === 'messages'
+  const tokenLimitViolation =
+    endpoint === 'count_tokens'
+      ? null
+      : findTokenLimitViolation(body, maxTokens);
+  if (tokenLimitViolation) return tokenLimitViolation;
+  return endpoint === 'messages' || endpoint === 'count_tokens'
     ? findUnsupportedMessagesField(body)
     : findUnsupportedChatField(body);
+}
+
+function findTokenLimitViolation(
+  body: Record<string, unknown>,
+  maxTokens: number | undefined,
+): UnsupportedLlmRequestField | null {
+  if (maxTokens === undefined) return null;
+  for (const field of OUTPUT_TOKEN_FIELDS) {
+    const requested = body[field];
+    if (typeof requested === 'number' && requested > maxTokens) {
+      return {
+        code: 'MAX_TOKENS_EXCEEDED',
+        field,
+        limit: maxTokens,
+        requested,
+        message: `Request field "${field}" value ${requested} exceeds this API key's output-token limit of ${maxTokens}.`,
+      };
+    }
+  }
+  return null;
 }
 
 function findUnsupportedMessagesField(

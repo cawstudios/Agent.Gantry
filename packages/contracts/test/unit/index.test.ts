@@ -161,12 +161,14 @@ describe('contracts package', () => {
       RuntimeSettingsConfiguredAgentSchema.parse({
         ...agent,
         maxTurns: 12,
+        maxRunTokens: 8192,
         effort: 'xhigh',
         thinking: { mode: 'on', budgetTokens: 4096 },
         maxOutputTokens: 2048,
       }),
     ).toMatchObject({
       maxTurns: 12,
+      maxRunTokens: 8192,
       effort: 'xhigh',
       thinking: { mode: 'on', budgetTokens: 4096 },
       maxOutputTokens: 2048,
@@ -174,6 +176,10 @@ describe('contracts package', () => {
     expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
       ...agent,
       thinking: { mode: 'off', budgetTokens: 1 },
+    });
+    expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
+      ...agent,
+      maxRunTokens: 0,
     });
     expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
       ...agent,

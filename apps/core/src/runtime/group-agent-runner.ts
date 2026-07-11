@@ -27,7 +27,7 @@ import {
   createRuntimeResultSummaryAccumulator,
   summarizeRuntimeResultForPersistence,
 } from './session-resume-runtime.js';
-import { createRuntimeModelStatusAccess } from './model-status-store.js';
+import { createRuntimeModelStatusAccess as createModelStatus } from './model-status-store.js';
 import { recordRuntimeModelUsage } from './model-status-output.js';
 import {
   buildProviderSessionAccessFingerprint,
@@ -52,6 +52,7 @@ import {
 } from './proactive-surfacing-gate.js';
 import { forwardRuntimeEvents } from './runtime-event-forwarding.js';
 import { isMissingProviderSessionError } from './failover-eligibility.js';
+import { createConfiguredRunTokenBudget } from './agent-spawn-host.js';
 import { logger, redactString } from '../infrastructure/logging/logger.js';
 import { memoryReviewerApproverAllowed } from './group-agent-runner-memory-review.js';
 import { prepareCompactionDeltaReplay } from './group-agent-runner-compaction-delta.js';
@@ -139,10 +140,8 @@ export function createGroupAgentRunner(input: {
     if (options?.maintenanceCompaction && !maintenanceCompactionPrompt)
       return 'error';
     const sessionThreadId = options?.memoryContext?.threadId ?? null;
-    const modelStatus = createRuntimeModelStatusAccess(
-      group.folder,
-      sessionThreadId,
-    );
+    const modelStatus = createModelStatus(group.folder, sessionThreadId);
+    const runTokenBudget = createConfiguredRunTokenBudget(group.folder);
     const streamedResult = createRuntimeResultSummaryAccumulator();
     const loadTurnContext = async (promoteReadyProviderSession: boolean) =>
       ops().getAgentTurnContext?.({
@@ -298,6 +297,8 @@ export function createGroupAgentRunner(input: {
       if (output.status !== 'error' && output.result) {
         streamedResult.append(String(output.result));
       }
+      output = runTokenBudget.enforce(output);
+      if (runTokenBudget.exceeded) deps.queue.stopGroup?.(queueJid);
       await forwardRuntimeEvents({
         output,
         publishRuntimeEvent: deps.publishRuntimeEvent,
@@ -558,7 +559,7 @@ export function createGroupAgentRunner(input: {
           },
           wrappedOnOutput,
           runOptions,
-        );
+        ).then((output) => runTokenBudget.enforce(output));
       let output = await invokeAgent({
         memoryContextBlock,
         ...(firstModel ? { model: firstModel } : {}),

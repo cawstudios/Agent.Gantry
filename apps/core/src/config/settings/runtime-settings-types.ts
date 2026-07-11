@@ -185,6 +185,7 @@ export interface RuntimeConfiguredAgent {
   folder: string;
   runtime?: AgentRuntime;
   maxTurns?: number;
+  maxRunTokens?: number;
   effort?: AgentEffort;
   thinking?: RuntimeAgentThinking;
   maxOutputTokens?: number;

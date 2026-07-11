@@ -226,6 +226,9 @@ function renderConfiguredAgentsYaml(
     if (agent.maxTurns !== undefined) {
       lines.push(`    max_turns: ${agent.maxTurns}`);
     }
+    if (agent.maxRunTokens !== undefined) {
+      lines.push(`    max_run_tokens: ${agent.maxRunTokens}`);
+    }
     if (agent.effort !== undefined) {
       lines.push(`    effort: ${quoteYamlString(agent.effort)}`);
     }

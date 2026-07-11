@@ -75,6 +75,7 @@ export const RuntimeSettingsConfiguredAgentSchema = z
     agentHarness: AgentHarnessSchema.optional(),
     runtime: z.enum(['worker', 'inline']).optional(),
     maxTurns: z.number().int().positive().optional(),
+    maxRunTokens: z.number().int().positive().optional(),
     effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
     thinking: z
       .discriminatedUnion('mode', [

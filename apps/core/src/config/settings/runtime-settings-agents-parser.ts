@@ -303,6 +303,7 @@ export function parseConfiguredAgents(
         key !== 'relationship_mode' &&
         key !== 'runtime' &&
         key !== 'max_turns' &&
+        key !== 'max_run_tokens' &&
         key !== 'effort' &&
         key !== 'thinking' &&
         key !== 'max_output_tokens' &&
@@ -313,7 +314,7 @@ export function parseConfiguredAgents(
         key !== 'access'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, runtime, max_turns, effort, thinking, max_output_tokens, model, agent_harness, job model defaults, or access. Install agents under conversations.*.installed_agents.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, runtime, max_turns, max_run_tokens, effort, thinking, max_output_tokens, model, agent_harness, job model defaults, or access. Install agents under conversations.*.installed_agents.`,
         );
       }
     }
@@ -379,6 +380,10 @@ export function parseConfiguredAgents(
       maxTurns: parseAgentMaxTurnsValue(
         map.max_turns,
         `${pathPrefix}.max_turns`,
+      ),
+      maxRunTokens: parseAgentPositiveIntegerValue(
+        map.max_run_tokens,
+        `${pathPrefix}.max_run_tokens`,
       ),
       effort: parseAgentEffortValue(map.effort, `${pathPrefix}.effort`),
       thinking: parseAgentThinkingValue(map.thinking, `${pathPrefix}.thinking`),

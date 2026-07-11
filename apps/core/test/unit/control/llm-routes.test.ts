@@ -88,12 +88,13 @@ function request(input: {
   return req;
 }
 
-function apiKey(scopes: Scope[] = ['llm:invoke']) {
+function apiKey(scopes: Scope[] = ['llm:invoke'], maxTokens?: number) {
   return {
     kid: 'llm-key',
     tokenHash: createHash('sha256').update(TOKEN).digest(),
     scopes: new Set(scopes),
     appId: 'app-one',
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
   };
 }
 
@@ -133,13 +134,14 @@ function context(input: {
   broker: AgentCredentialBroker;
   scopes?: Scope[];
   consume?: boolean;
+  maxTokens?: number;
 }): ControlRouteContext {
   return {
     app: {
       getCredentialBroker: async () => input.broker,
     } as RuntimeApp,
     runtimeHome: '/tmp/gantry',
-    keys: [apiKey(input.scopes)],
+    keys: [apiKey(input.scopes, input.maxTokens)],
     processRole: 'all',
     liveExecution: true,
     roleReadinessRequirements: {
@@ -261,6 +263,80 @@ describe('direct LLM control routes', () => {
       }),
     );
   });
+
+  it('forwards Messages token counts and returns the provider response', async () => {
+    const gatewayBroker = broker();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('{"input_tokens":9}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const res = new TestResponse();
+    await handleLlmRoutes(
+      request({
+        body: {
+          model: 'sonnet',
+          messages: [{ role: 'user', content: 'count me' }],
+        },
+      }),
+      res as unknown as ServerResponse,
+      context({ broker: gatewayBroker }),
+      '/llm/v1/messages/count_tokens',
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body()).toBe('{"input_tokens":9}');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:9000/anthropic/v1/messages/count_tokens',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const forwarded = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body));
+    expect(forwarded.model).toBe('claude-sonnet-4-6');
+    expect(requestLogs).toContainEqual(
+      expect.objectContaining({
+        route: '/llm/v1/messages/count_tokens',
+        apiKeyId: 'llm-key',
+        modelAlias: 'sonnet',
+        statusCode: 200,
+      }),
+    );
+  });
+
+  it.each([
+    { maxTokens: 32, requested: 33, status: 400 },
+    { maxTokens: 32, requested: 32, status: 200 },
+    { maxTokens: undefined, requested: 1000, status: 200 },
+  ])(
+    'enforces the API-key output limit %#',
+    async ({ maxTokens, requested, status }) => {
+      const gatewayBroker = broker();
+      const fetchMock = vi.fn(
+        async () => new Response('{"id":"msg_limited"}', { status: 200 }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const res = new TestResponse();
+      await handleLlmRoutes(
+        request({ body: { model: 'sonnet', max_tokens: requested } }),
+        res as unknown as ServerResponse,
+        context({ broker: gatewayBroker, maxTokens }),
+        '/llm/v1/messages',
+      );
+      expect(res.statusCode).toBe(status);
+      if (status === 400) {
+        expect(JSON.parse(res.body())).toMatchObject({
+          error: {
+            code: 'MAX_TOKENS_EXCEEDED',
+            details: { field: 'max_tokens', limit: maxTokens, requested },
+          },
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+      } else {
+        expect(fetchMock).toHaveBeenCalledOnce();
+      }
+    },
+  );
 
   it('forwards OpenAI Chat Completions streaming responses without buffering', async () => {
     const gatewayBroker = broker();
@@ -605,35 +681,42 @@ describe('direct LLM control routes', () => {
     expect(gatewayBroker.getInjection).not.toHaveBeenCalled();
   });
 
-  it('requires llm:invoke scope', async () => {
+  it.each(['/llm/v1/messages', '/llm/v1/messages/count_tokens'])(
+    'requires llm:invoke scope on %s',
+    async (path) => {
+      const gatewayBroker = broker();
+      const res = new TestResponse();
+
+      await handleLlmRoutes(
+        request({ body: { model: 'sonnet' } }),
+        res as unknown as ServerResponse,
+        context({ broker: gatewayBroker, scopes: ['sessions:read'] }),
+        path,
+      );
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body()).toContain('llm:invoke');
+      expect(gatewayBroker.getInjection).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['/llm/v1/messages', 'claude-sonnet-4-6', 'Provider model ID'],
+    ['/llm/v1/messages/count_tokens', 'claude-sonnet-4-6', 'Provider model ID'],
+    ['/llm/v1/messages/count_tokens', 'missing-alias', 'Unknown model'],
+  ])('rejects unregistered model %s', async (path, model, message) => {
     const gatewayBroker = broker();
     const res = new TestResponse();
 
     await handleLlmRoutes(
-      request({ body: { model: 'sonnet' } }),
-      res as unknown as ServerResponse,
-      context({ broker: gatewayBroker, scopes: ['sessions:read'] }),
-      '/llm/v1/messages',
-    );
-
-    expect(res.statusCode).toBe(403);
-    expect(res.body()).toContain('llm:invoke');
-    expect(gatewayBroker.getInjection).not.toHaveBeenCalled();
-  });
-
-  it('rejects raw provider model ids', async () => {
-    const gatewayBroker = broker();
-    const res = new TestResponse();
-
-    await handleLlmRoutes(
-      request({ body: { model: 'claude-sonnet-4-6' } }),
+      request({ body: { model } }),
       res as unknown as ServerResponse,
       context({ broker: gatewayBroker }),
-      '/llm/v1/messages',
+      path,
     );
 
     expect(res.statusCode).toBe(400);
-    expect(res.body()).toContain('Provider model ID');
+    expect(res.body()).toContain(message);
     expect(gatewayBroker.getInjection).not.toHaveBeenCalled();
   });
 

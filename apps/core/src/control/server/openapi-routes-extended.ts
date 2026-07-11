@@ -13,6 +13,16 @@ export const extendedOpenApiRouteDocs: RouteDoc[] = [
   ),
   doc(
     'post',
+    '/llm/v1/messages/count_tokens',
+    'invokeLlmMessagesCountTokens',
+    'LLM',
+    'Count Messages tokens',
+    'Counts input tokens for a Messages-shaped request after resolving the Gantry model alias.',
+    ['llm:invoke'],
+    { body: 'json' },
+  ),
+  doc(
+    'post',
     '/llm/v1/chat/completions',
     'invokeLlmChatCompletions',
     'LLM',

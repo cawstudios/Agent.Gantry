@@ -80,7 +80,7 @@ export async function handleLlmRoutes(
   }
 
   const rawBody = await readRawBody(req, MAX_LLM_BODY_BYTES);
-  const resolved = resolveLlmRequest(endpoint, rawBody, res);
+  const resolved = resolveLlmRequest(endpoint, rawBody, res, auth.maxTokens);
   if (!resolved) return true;
 
   const apiRequestId = randomUUID();
@@ -166,7 +166,7 @@ export async function handleLlmRoutes(
     res.off('close', abortGateway);
     res.off('finish', markResponseCompleted);
     await recordControlRequestLog({
-      route: `/llm/v1/${endpoint === 'messages' ? 'messages' : 'chat/completions'}`,
+      route: pathname,
       method: req.method ?? 'POST',
       statusCode,
       apiKeyId: auth.kid,
@@ -195,6 +195,7 @@ export async function handleLlmRoutes(
 
 function llmEndpointFor(pathname: string): LlmPassthroughEndpoint | undefined {
   if (pathname === '/llm/v1/messages') return 'messages';
+  if (pathname === '/llm/v1/messages/count_tokens') return 'count_tokens';
   if (pathname === '/llm/v1/chat/completions') return 'chat_completions';
   return undefined;
 }
@@ -203,16 +204,29 @@ function resolveLlmRequest(
   endpoint: LlmPassthroughEndpoint,
   rawBody: Buffer,
   res: ServerResponse,
+  maxTokens?: number,
 ): ResolvedLlmRequest | null {
   const body = parseBody(rawBody, res);
   if (!body) return null;
-  const unsupported = findUnsupportedLlmRequestField(endpoint, body);
+  const unsupported = findUnsupportedLlmRequestField(endpoint, body, maxTokens);
   if (unsupported) {
-    sendError(res, 400, 'UNSUPPORTED_FIELD', unsupported.message, {
-      field: unsupported.field,
-      ...(unsupported.toolType ? { toolType: unsupported.toolType } : {}),
-      ...(unsupported.value ? { value: unsupported.value } : {}),
-    });
+    sendError(
+      res,
+      400,
+      unsupported.code ?? 'UNSUPPORTED_FIELD',
+      unsupported.message,
+      {
+        field: unsupported.field,
+        ...(unsupported.limit !== undefined
+          ? { limit: unsupported.limit }
+          : {}),
+        ...(unsupported.requested !== undefined
+          ? { requested: unsupported.requested }
+          : {}),
+        ...(unsupported.toolType ? { toolType: unsupported.toolType } : {}),
+        ...(unsupported.value ? { value: unsupported.value } : {}),
+      },
+    );
     return null;
   }
   const model = typeof body.model === 'string' ? body.model.trim() : '';
@@ -239,7 +253,11 @@ function resolveLlmRequest(
     alias: resolution.alias,
     provider,
     tail:
-      endpoint === 'messages' ? '/v1/messages' : chatCompletionsTail(provider),
+      endpoint === 'messages'
+        ? '/v1/messages'
+        : endpoint === 'count_tokens'
+          ? '/v1/messages/count_tokens'
+          : chatCompletionsTail(provider),
   };
 }
 
@@ -269,7 +287,7 @@ function endpointCompatibilityError(
   endpoint: LlmPassthroughEndpoint,
   provider: ModelProviderDefinition,
 ): string | undefined {
-  if (endpoint === 'messages') {
+  if (endpoint !== 'chat_completions') {
     return provider.executionRoute.engine === DEEPAGENTS_ENGINE
       ? `Model route ${provider.id} does not support Messages passthrough`
       : undefined;

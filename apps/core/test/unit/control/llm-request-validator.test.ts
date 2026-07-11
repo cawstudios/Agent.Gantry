@@ -3,6 +3,43 @@ import { describe, expect, it } from 'vitest';
 import { findUnsupportedLlmRequestField } from '@core/control/server/routes/llm-request-validator.js';
 
 describe('LLM passthrough request validator', () => {
+  it.each([
+    ['messages', 'max_tokens'],
+    ['messages', 'max_completion_tokens'],
+    ['chat_completions', 'max_tokens'],
+    ['chat_completions', 'max_completion_tokens'],
+  ] as const)(
+    'rejects %s requests whose %s exceeds the API key limit',
+    (endpoint, field) => {
+      expect(
+        findUnsupportedLlmRequestField(endpoint, { [field]: 101 }, 100),
+      ).toEqual({
+        code: 'MAX_TOKENS_EXCEEDED',
+        field,
+        limit: 100,
+        requested: 101,
+        message: `Request field "${field}" value 101 exceeds this API key's output-token limit of 100.`,
+      });
+    },
+  );
+
+  it('allows requests at the API key token limit or without a limit', () => {
+    expect(
+      findUnsupportedLlmRequestField('messages', { max_tokens: 100 }, 100),
+    ).toBeNull();
+    expect(
+      findUnsupportedLlmRequestField('chat_completions', {
+        max_completion_tokens: 101,
+      }),
+    ).toBeNull();
+  });
+
+  it('does not apply output-token limits to count_tokens requests', () => {
+    expect(
+      findUnsupportedLlmRequestField('count_tokens', { max_tokens: 101 }, 100),
+    ).toBeNull();
+  });
+
   it('allows client-side tools, structured output, and thinking parameters', () => {
     expect(
       findUnsupportedLlmRequestField('messages', {
