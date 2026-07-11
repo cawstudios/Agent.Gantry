@@ -173,6 +173,107 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
     await connected.close();
   });
 
+  it('blocks Gantry delegate_task under the canonical AgentDelegation rule', async () => {
+    vi.stubEnv('GANTRY_MCP_SERVER_PATH', '/tmp/fake-gantry-mcp.js');
+    vi.stubEnv('GANTRY_ASYNC_TASK_TOOLS_ENABLED', '1');
+    const delegateTask = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'delegated' }],
+    }));
+    mcpState.serverTools = {
+      gantry: [
+        structuredTool('delegate_task', 'Delegate a task.', delegateTask),
+      ],
+    };
+    const connected = await connectGantryAndThirdPartyMcpTools({
+      configuredAllowedTools: ['AgentDelegation'],
+      toolRules: [
+        {
+          tool: 'AgentDelegation',
+          action: 'block',
+          reason: 'delegation is blocked',
+        },
+      ],
+      hideAuthorityTools: false,
+      gate: {
+        workspaceFolder: 'group',
+        memoryBlock: '',
+        gateContext: { conversationId: 'tg:group' },
+        permissionEnv: {},
+        lockedAccessPreset: true,
+      } as never,
+    });
+
+    const delegated = connected.tools.find(
+      ({ name }) => name === 'delegate_task',
+    );
+    await expect(delegated?.invoke({} as never)).resolves.toMatchObject({
+      isError: true,
+      error: { message: expect.stringContaining('delegation is blocked') },
+    });
+    expect(delegateTask).not.toHaveBeenCalled();
+    await connected.close();
+  });
+
+  it('records successful Gantry delegation under AgentDelegation', async () => {
+    vi.stubEnv('GANTRY_MCP_SERVER_PATH', '/tmp/fake-gantry-mcp.js');
+    vi.stubEnv('GANTRY_ASYNC_TASK_TOOLS_ENABLED', '1');
+    const delegateTask = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'delegated' }],
+    }));
+    const memorySearch = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'results' }],
+    }));
+    mcpState.serverTools = {
+      gantry: [
+        structuredTool('delegate_task', 'Delegate a task.', delegateTask),
+        structuredTool('memory_search', 'Search memory.', memorySearch),
+      ],
+    };
+    const connected = await connectGantryAndThirdPartyMcpTools({
+      configuredAllowedTools: ['AgentDelegation'],
+      toolRules: [
+        {
+          tool: 'memory_search',
+          action: 'require_prior',
+          prior: 'AgentDelegation',
+          reason: 'delegate before searching memory',
+        },
+      ],
+      toolSuccessLedger: new RunScopedToolSuccessLedger(),
+      hideAuthorityTools: false,
+      gate: {
+        workspaceFolder: 'group',
+        memoryBlock: '',
+        gateContext: { conversationId: 'tg:group' },
+        permissionEnv: {},
+        lockedAccessPreset: true,
+      } as never,
+    });
+    const delegated = connected.tools.find(
+      ({ name }) => name === 'delegate_task',
+    );
+    const guarded = connected.tools.find(
+      ({ name }) => name === 'memory_search',
+    );
+
+    await expect(guarded?.invoke({} as never)).resolves.toMatchObject({
+      isError: true,
+      error: {
+        message: expect.stringContaining('delegate before searching memory'),
+      },
+    });
+    expect(memorySearch).not.toHaveBeenCalled();
+
+    await expect(delegated?.invoke({} as never)).resolves.toMatchObject({
+      content: [{ type: 'text', text: 'delegated' }],
+    });
+    await expect(guarded?.invoke({} as never)).resolves.toMatchObject({
+      content: [{ type: 'text', text: 'results' }],
+    });
+    expect(memorySearch).toHaveBeenCalledOnce();
+    await connected.close();
+  });
+
   it('counts only a successful RunCommand toward require_prior', async () => {
     vi.stubEnv('GANTRY_MCP_SERVER_PATH', '/tmp/fake-gantry-mcp.js');
     vi.stubEnv('GANTRY_DEEPAGENTS_SHELL_ENABLED', '1');
@@ -233,7 +334,7 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
     await connected.close();
   });
 
-  it('denies require_prior, then allows after the prior tool succeeds', async () => {
+  it('keeps other Gantry server tools under their bare canonical names', async () => {
     vi.stubEnv('GANTRY_MCP_SERVER_PATH', '/tmp/fake-gantry-mcp.js');
     const sendMessage = vi.fn(async () => ({
       content: [{ type: 'text', text: 'sent' }],

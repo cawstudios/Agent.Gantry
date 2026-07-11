@@ -21,7 +21,10 @@ import {
   type DeepAgentsFacadeToolName,
 } from './gantry-facade-tools.js';
 import { isHostPrivateBrowserMcpServerName } from '../../../../shared/agent-tool-references.js';
-import { isRunCommandToolRule } from '../../../../shared/gantry-tool-facades.js';
+import {
+  canonicalGantryToolRuleName,
+  isRunCommandToolRule,
+} from '../../../../shared/gantry-tool-facades.js';
 import {
   evaluateDeclarativeToolRules,
   type DeclarativeToolRule,
@@ -186,7 +189,7 @@ export async function connectGantryAndThirdPartyMcpTools(
   const toolEntries: DeclarativeToolEntry[] = [
     ...gantryTools.map((tool) => ({
       tool,
-      canonicalName: () => tool.name,
+      canonicalName: () => canonicalGantryToolRuleName(tool.name),
     })),
     ...facadeTools.map((tool) => ({
       tool,
