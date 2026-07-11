@@ -337,7 +337,9 @@ agents:
     tool_rules:
       - tool: Bash
         action: block
-        when: { arg: command, matches: '^rm\s' }
+        when:
+          arg: command
+          matches: '^rm\s'
         reason: destructive command
       - tool: process_refund
         action: require_prior

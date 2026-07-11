@@ -1154,7 +1154,7 @@ client.usage.query({
   from, // ISO timestamp, required
   to,   // ISO timestamp, required
   agentId?, apiKeyId?, runId?, jobId?, model?,
-  groupBy?, // 'agent' | 'api_key' | 'model' | 'day'
+  group_by?, // 'agent' | 'api_key' | 'model' | 'day'
 })
 ```
 
