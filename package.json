@@ -97,6 +97,7 @@
     "cron-parser": "5.5.0",
     "dayjs": "^1.11.20",
     "deepagents": "1.10.2",
+    "langchain": "1.4.4",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
     "google-auth-library": "^10.7.0",
