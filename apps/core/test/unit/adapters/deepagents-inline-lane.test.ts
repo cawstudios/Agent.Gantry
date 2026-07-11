@@ -245,6 +245,34 @@ describe('DeepAgents inline lane', () => {
     });
   });
 
+  it('threads inline effort, thinking, and output cap into the built model', async () => {
+    deep.streamEvents.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield streamEvent('done');
+      },
+    }));
+    const lane = createDeepAgentsInlineAgentLoopLane({
+      databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
+      schema: 'gantry_deepagents',
+    });
+
+    await lane(
+      laneInput({
+        effort: 'high',
+        configuredThinking: { mode: 'on' },
+        maxOutputTokens: 4096,
+      }),
+    );
+
+    expect(model.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effort: 'high',
+        configuredThinking: { mode: 'on' },
+        maxOutputTokens: 4096,
+      }),
+    );
+  });
+
   it('emits and returns a named max_turns error on graph recursion', async () => {
     deep.streamEvents.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {

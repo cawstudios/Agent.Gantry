@@ -10,6 +10,7 @@ import type { EgressSettings } from '../../shared/egress-policy.js';
 import type { AgentHarness } from '../../shared/agent-engine.js';
 import type { AgentRuntime } from '../../shared/agent-runtime.js';
 import type { ModelWorkload } from '../../shared/model-catalog.js';
+import type { ModelEffortLevel } from '../../shared/model-catalog.js';
 
 export interface RuntimeProviderSettings {
   enabled: boolean;
@@ -173,7 +174,10 @@ export interface RuntimeConfiguredAgentCapability {
 }
 
 export type AgentAccessPreset = 'full' | 'locked';
-export type AgentEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type AgentEffort = ModelEffortLevel;
+export type RuntimeAgentThinking =
+  | { mode: 'off'; budgetTokens?: never }
+  | { mode: 'on'; budgetTokens?: number };
 export type { AgentRuntime };
 
 export interface RuntimeConfiguredAgent {
@@ -182,6 +186,8 @@ export interface RuntimeConfiguredAgent {
   runtime?: AgentRuntime;
   maxTurns?: number;
   effort?: AgentEffort;
+  thinking?: RuntimeAgentThinking;
+  maxOutputTokens?: number;
   persona?: AgentPersona;
   relationshipMode?: AgentRelationshipMode;
   model?: string;

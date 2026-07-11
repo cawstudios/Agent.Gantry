@@ -182,6 +182,11 @@ describe('SessionInteractionModule', () => {
             type: 'object',
             required: ['answer'],
           },
+          agentControls: {
+            effort: 'high',
+            thinking: { mode: 'on', budgetTokens: 1024 },
+            maxOutputTokens: 4096,
+          },
         },
         liveAdmission: {
           appId: 'default',
@@ -235,6 +240,11 @@ describe('SessionInteractionModule', () => {
       responseSchema: {
         type: 'object',
         required: ['answer'],
+      },
+      agentControls: {
+        effort: 'high',
+        thinking: { mode: 'on', budgetTokens: 1024 },
+        maxOutputTokens: 4096,
       },
       beforeDurableAdmission: async () => {
         order.push('beforeDurableAdmission');

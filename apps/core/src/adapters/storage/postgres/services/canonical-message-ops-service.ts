@@ -11,6 +11,7 @@ import type {
 } from '../repositories/canonical-message-repository.postgres.js';
 
 type NewMessageAttachment = NonNullable<NewMessage['attachments']>[number];
+type AgentControls = NonNullable<NewMessage['agentControls']>;
 
 function hasCursorBoundary(cursor: { timestamp: string }): boolean {
   return cursor.timestamp.trim().length > 0;
@@ -48,6 +49,54 @@ function publicThreadId(
 
 function toStringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function agentControlsFromExternalRef(
+  ref: Record<string, unknown>,
+): AgentControls | undefined {
+  const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(
+    String(ref.effort),
+  )
+    ? (ref.effort as AgentControls['effort'])
+    : undefined;
+  const rawThinking = ref.thinking;
+  let thinking: AgentControls['thinking'];
+  if (
+    rawThinking &&
+    typeof rawThinking === 'object' &&
+    !Array.isArray(rawThinking)
+  ) {
+    const value = rawThinking as Record<string, unknown>;
+    const validKeys = Object.keys(value).every(
+      (key) => key === 'mode' || key === 'budgetTokens',
+    );
+    const validBudget =
+      value.budgetTokens === undefined ||
+      (typeof value.budgetTokens === 'number' &&
+        Number.isInteger(value.budgetTokens) &&
+        value.budgetTokens > 0);
+    if (validKeys && value.mode === 'off' && value.budgetTokens === undefined) {
+      thinking = { mode: 'off' };
+    } else if (validKeys && value.mode === 'on' && validBudget) {
+      thinking =
+        value.budgetTokens === undefined
+          ? { mode: 'on' }
+          : { mode: 'on', budgetTokens: value.budgetTokens as number };
+    }
+  }
+  const maxOutputTokens =
+    typeof ref.max_output_tokens === 'number' &&
+    Number.isInteger(ref.max_output_tokens) &&
+    ref.max_output_tokens > 0
+      ? ref.max_output_tokens
+      : undefined;
+  return effort || thinking || maxOutputTokens
+    ? {
+        ...(effort ? { effort } : {}),
+        ...(thinking ? { thinking } : {}),
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
+      }
+    : undefined;
 }
 
 function toAttachmentKind(
@@ -278,6 +327,7 @@ export class CanonicalMessageOpsService {
       ref.providerAccountId ??
       (externalRef.provider_account_id as string | undefined);
     const responseSchema = externalRef.response_schema;
+    const agentControls = agentControlsFromExternalRef(externalRef);
     return {
       id: ref.id || row.id,
       chat_jid: chatJid,
@@ -298,6 +348,7 @@ export class CanonicalMessageOpsService {
       !Array.isArray(responseSchema)
         ? { responseSchema: responseSchema as Record<string, unknown> }
         : {}),
+      ...(agentControls ? { agentControls } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       delivery_status:
         ref.delivery_status ??

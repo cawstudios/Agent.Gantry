@@ -1349,6 +1349,96 @@ agents:
     );
   });
 
+  it('rejects unsupported agent controls during settings apply validation', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.no_effort = {
+      name: 'No effort',
+      folder: 'no_effort',
+      model: 'haiku',
+      effort: 'high',
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.agents.no_thinking = {
+      name: 'No thinking',
+      folder: 'no_thinking',
+      model: 'haiku',
+      thinking: { mode: 'on' },
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.agents.no_output_cap = {
+      name: 'No output cap',
+      folder: 'no_output_cap',
+      model: 'opus',
+      maxOutputTokens: 4096,
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full',
+    };
+
+    const result = validateLoadedRuntimeSettings(
+      '/tmp/gantry-missing',
+      settings,
+    );
+    const details = result.failure?.details.join('\n');
+    expect(details).toContain(
+      'agents.no_effort.effort is not supported by model haiku.',
+    );
+    expect(details).toContain(
+      'agents.no_thinking.thinking is not supported by model haiku.',
+    );
+    expect(details).toContain(
+      'agents.no_output_cap.max_output_tokens is not supported by model opus',
+    );
+    expect(details).toContain(
+      'use agents.no_output_cap.effort as the output-quality lever.',
+    );
+  });
+
+  it('validates agent controls against inherited job model defaults', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agent.oneTimeJobDefaultModel = 'haiku';
+    settings.agent.recurringJobDefaultModel = 'haiku';
+    settings.agents.inherited = {
+      name: 'Inherited',
+      folder: 'inherited',
+      model: 'opus',
+      effort: 'high',
+      thinking: { mode: 'on' },
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full',
+    };
+
+    const inherited = validateLoadedRuntimeSettings(
+      '/tmp/gantry-missing',
+      settings,
+    );
+    expect(inherited.failure?.details).toEqual(
+      expect.arrayContaining([
+        'agents.inherited.effort is not supported by model haiku.',
+        'agents.inherited.thinking is not supported by model haiku.',
+      ]),
+    );
+
+    settings.agents.inherited.oneTimeJobDefaultModel = 'opus-4.6';
+    settings.agents.inherited.recurringJobDefaultModel = 'sonnet';
+    const overridden = validateLoadedRuntimeSettings(
+      '/tmp/gantry-missing',
+      settings,
+    );
+    expect(overridden.failure?.details.join('\n') ?? '').not.toContain(
+      'agents.inherited.',
+    );
+  });
+
   it('accepts configured provider refs before env fallback', () => {
     const originalDatabaseUrl = process.env.GANTRY_DATABASE_URL;
     const originalSecretEncryptionKey = process.env.SECRET_ENCRYPTION_KEY;

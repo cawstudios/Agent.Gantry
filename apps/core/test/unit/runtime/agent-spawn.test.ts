@@ -103,7 +103,8 @@ vi.mock('fs', async () => {
 });
 
 // Mock agent-spawn-host to avoid real filesystem operations
-vi.mock('@core/runtime/agent-spawn-host.js', () => ({
+vi.mock('@core/runtime/agent-spawn-host.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   getHostRuntimeCredentialEnv: vi.fn().mockResolvedValue({
     env: {
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:4567/anthropic',
@@ -1543,6 +1544,62 @@ describe('agent-spawn timeout behavior', () => {
         compiledSystemPrompt: 'compiled profile prompt',
       }),
     );
+  });
+
+  it('merges worker defaults while preserving per-request control precedence', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: { enabled: true, denylist: [], denylistPaths: [] },
+        egress: { denylist: [] },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'direct',
+          resourceLimits: { cpuSeconds: 0, memoryMb: 0, maxProcesses: 0 },
+        },
+      },
+      agents: {
+        'test-group': {
+          effort: 'low',
+          thinking: { mode: 'on' },
+        },
+      },
+    } as never);
+    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
+
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      {
+        ...testInput,
+        effort: 'high',
+        configuredThinking: { mode: 'off' },
+      },
+      () => {},
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(JSON.parse(String(writeSpy.mock.calls[0]?.[0]))).toMatchObject({
+      effort: 'high',
+      configuredThinking: { mode: 'off' },
+    });
+
+    fakeProc = createFakeProcess();
+    const defaultWriteSpy = vi.spyOn(fakeProc.stdin, 'write');
+    const defaultRun = spawnTestAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await defaultRun;
+
+    expect(
+      JSON.parse(String(defaultWriteSpy.mock.calls[0]?.[0])),
+    ).toMatchObject({
+      effort: 'low',
+      configuredThinking: { mode: 'on' },
+    });
   });
 
   it('passes memory context blocks through runner stdin only when input provides one', async () => {

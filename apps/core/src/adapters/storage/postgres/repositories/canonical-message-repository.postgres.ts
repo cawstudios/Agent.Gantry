@@ -225,17 +225,18 @@ export function externalRefForMessage(msg: NewMessage) {
     reply_to_message_id: msg.reply_to_message_id,
     reply_to_sender_name: msg.reply_to_sender_name,
     response_schema: msg.responseSchema,
+    effort: msg.agentControls?.effort,
+    thinking: msg.agentControls?.thinking,
+    max_output_tokens: msg.agentControls?.maxOutputTokens,
     delivery_retry_tail: retryTail,
   };
 }
 
 export class PostgresCanonicalMessageRepository {
   private readonly graph: PostgresCanonicalGraphRepository;
-
   constructor(private readonly db: CanonicalDb) {
     this.graph = new PostgresCanonicalGraphRepository(db);
   }
-
   async saveMessage(
     msg: NewMessage,
     options: { liveAdmission?: MessageLiveAdmissionInput } = {},

@@ -45,6 +45,7 @@ import {
   PageRequestSchema,
   ProviderSessionResponseSchema,
   RuntimeLimitSchema,
+  RuntimeSettingsConfiguredAgentSchema,
   RuntimeSettingsResponseSchema,
   SchemaDescriptorSchema,
   StreamEventSchema,
@@ -145,6 +146,38 @@ describe('contracts package', () => {
 
     expect(LlmProfileRefSchema.parse({ modelAlias: 'opus' })).toEqual({
       modelAlias: 'opus',
+    });
+  });
+
+  it('validates configured agent control settings', () => {
+    const agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+    };
+    expect(
+      RuntimeSettingsConfiguredAgentSchema.parse({
+        ...agent,
+        maxTurns: 12,
+        effort: 'xhigh',
+        thinking: { mode: 'on', budgetTokens: 4096 },
+        maxOutputTokens: 2048,
+      }),
+    ).toMatchObject({
+      maxTurns: 12,
+      effort: 'xhigh',
+      thinking: { mode: 'on', budgetTokens: 4096 },
+      maxOutputTokens: 2048,
+    });
+    expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
+      ...agent,
+      thinking: { mode: 'off', budgetTokens: 1 },
+    });
+    expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
+      ...agent,
+      maxOutputTokens: 0,
     });
   });
 

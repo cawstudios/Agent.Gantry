@@ -384,6 +384,9 @@ async function buildInlineModel(
     gatewayBaseUrl: baseUrl,
     gatewayToken: token,
     sessionId,
+    effort: input.effort,
+    configuredThinking: input.configuredThinking,
+    maxOutputTokens: input.maxOutputTokens,
     ...(openRouterProviderRouting ? { openRouterProviderRouting } : {}),
     ...(input.resolvedModel.value.modelEntry.contextWindowTokens
       ? {
@@ -393,7 +396,6 @@ async function buildInlineModel(
       : {}),
   });
 }
-
 function toOpenRouterProviderPreferences(
   routing: OpenRouterProviderRouting | undefined,
 ): OpenRouterProviderPreferences | undefined {

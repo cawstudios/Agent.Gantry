@@ -30,6 +30,7 @@ import type {
   RuntimeSettingsValidationResult,
 } from './runtime-settings-types.js';
 import {
+  configuredAgentControlConstraintErrors,
   formatInlineAgentWorkerOnlyConfigError,
   inlineConfiguredSkillEngineConstraintError,
   inlineWorkerOnlyConfiguredCapabilityLabels,
@@ -221,6 +222,18 @@ export function validateLoadedRuntimeSettings(
   }
 
   for (const [agentId, agent] of Object.entries(settings.agents)) {
+    details.push(
+      ...configuredAgentControlConstraintErrors({
+        subject: `agents.${agentId}`,
+        agent,
+        defaultModel: settings.agent.defaultModel,
+        defaultOneTimeJobDefaultModel: settings.agent.oneTimeJobDefaultModel,
+        defaultRecurringJobDefaultModel:
+          settings.agent.recurringJobDefaultModel,
+        defaultAgentHarness: settings.agent.agentHarness,
+        modelFamilyOrder: settings.modelFamilies,
+      }),
+    );
     const skillEngineError = inlineConfiguredSkillEngineConstraintError({
       subject: `agents.${agentId}`,
       agent,

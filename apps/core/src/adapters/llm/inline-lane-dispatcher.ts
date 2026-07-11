@@ -3,7 +3,10 @@ import type { LlmProfileResolution } from '../../application/model-resolution/ll
 import type { HostnameLookup } from '../../domain/network/public-address-policy.js';
 import type { SkillArtifactStore } from '../../domain/ports/skill-artifact-store.js';
 import type { SkillCatalogRepository } from '../../domain/ports/repositories.js';
-import type { ConversationRoute } from '../../domain/types.js';
+import type {
+  AgentControlThinking,
+  ConversationRoute,
+} from '../../domain/types.js';
 import type { RunnerOutputFrame } from '../../runner/runner-frame.js';
 import type { AgentPersona } from '../../shared/agent-persona.js';
 import { DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
@@ -72,6 +75,8 @@ export interface AdapterInlineAgentLoopLaneInput {
   runtimeDataDir: string;
   maxTurns?: number;
   effort?: InlineAgentEffort;
+  configuredThinking?: AgentControlThinking;
+  maxOutputTokens?: number;
   emitOutput(output: RunnerOutputFrame): Promise<void>;
 }
 

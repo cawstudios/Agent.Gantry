@@ -2,17 +2,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsDesiredStateService } from '@core/config/settings/desired-state-service.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
 import { parseRuntimeSettings } from '@core/config/settings/runtime-settings-parser.js';
 import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
-import { resolveConfiguredAgentRuntime } from '@core/config/settings/runtime-settings-agent-runtime.js';
+import {
+  configuredAgentControlConstraintErrors,
+  resolveConfiguredAgentRuntime,
+} from '@core/config/settings/runtime-settings-agent-runtime.js';
 import {
   DEFAULT_AGENT_ENGINE,
   DEEPAGENTS_ENGINE,
 } from '@core/shared/agent-engine.js';
+import {
+  configureCustomModelCatalogEntries,
+  resolveModelSelection,
+} from '@core/shared/model-catalog.js';
 
 function emptySources() {
   return { skills: [], mcpServers: [], tools: [] };
@@ -74,6 +81,8 @@ function settingsDesiredStateService() {
 }
 
 describe('agent runtime settings', () => {
+  afterEach(() => configureCustomModelCatalogEntries([]));
+
   it('resolves configured runtime defaults without resolving missing agents', async () => {
     const originalHome = process.env.GANTRY_HOME;
     const runtimeHome = fs.mkdtempSync(
@@ -142,8 +151,11 @@ describe('agent runtime settings', () => {
   main_agent:
     name: Main
     runtime: inline
+    model: gpt
     max_turns: 12
     effort: xhigh
+    thinking: on
+    max_output_tokens: 2048
 `);
     expect(resolveConfiguredAgentRuntime(parsed.agents.main_agent)).toBe(
       'inline',
@@ -153,14 +165,25 @@ describe('agent runtime settings', () => {
     expect(rendered).toContain('runtime: inline');
     expect(rendered).toContain('max_turns: 12');
     expect(rendered).toContain('effort: xhigh');
+    expect(rendered).toContain('thinking: on');
+    expect(rendered).toContain('max_output_tokens: 2048');
     const roundTripped = parseRuntimeSettings(rendered).agents.main_agent;
     expect(resolveConfiguredAgentRuntime(roundTripped)).toBe('inline');
-    expect(roundTripped).toMatchObject({ maxTurns: 12, effort: 'xhigh' });
+    expect(roundTripped).toMatchObject({
+      maxTurns: 12,
+      effort: 'xhigh',
+      thinking: { mode: 'on' },
+      maxOutputTokens: 2048,
+    });
   });
 
   it.each([
     ['max_turns: 0', 'agents.main_agent.max_turns must be a positive integer'],
     ['max_turns: -1', 'agents.main_agent.max_turns must be a positive integer'],
+    [
+      'max_output_tokens: 0',
+      'agents.main_agent.max_output_tokens must be a positive integer',
+    ],
     [
       'effort: extreme',
       'agents.main_agent.effort must be one of low, medium, high, xhigh, max',
@@ -174,6 +197,233 @@ describe('agent runtime settings', () => {
     ${setting}
 `),
     ).toThrow(error);
+  });
+
+  it('parses and renders scalar thinking modes', () => {
+    const parsed = parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    model: gpt
+    thinking: off
+`);
+
+    expect(parsed.agents.main_agent.thinking).toEqual({ mode: 'off' });
+    expect(renderRuntimeSettingsYaml(parsed)).toContain('thinking: off');
+  });
+
+  it.each([
+    [
+      `thinking:
+      mode: off
+      budget_tokens: 1024`,
+      'agents.main_agent.thinking.budget_tokens requires agents.main_agent.thinking.mode on',
+    ],
+    [
+      `thinking:
+      mode: on
+      budget_tokens: -1`,
+      'agents.main_agent.thinking.budget_tokens must be a positive integer',
+    ],
+  ])('rejects invalid thinking settings', (setting, error) => {
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    model: gpt
+    ${setting}
+`),
+    ).toThrow(error);
+  });
+
+  it.each([
+    [
+      'model: haiku\n    effort: high',
+      'agents.main_agent.effort is not supported by model haiku.',
+    ],
+    [
+      'model: haiku\n    thinking: on',
+      'agents.main_agent.thinking is not supported by model haiku.',
+    ],
+    [
+      'model: gpt\n    effort: max',
+      'agents.main_agent.effort max is not supported by model gpt; supported levels are low, medium, high, xhigh.',
+    ],
+    [
+      'model: gpt\n    thinking:\n      mode: on\n      budget_tokens: 4096',
+      'agents.main_agent.thinking.budget_tokens is not supported by model gpt.',
+    ],
+    [
+      'model: opus\n    thinking:\n      mode: on\n      budget_tokens: 4096',
+      'agents.main_agent.thinking.budget_tokens is not supported by model opus.',
+    ],
+    [
+      'model: sonnet\n    effort: xhigh',
+      'agents.main_agent.effort xhigh is not supported by model sonnet; supported levels are low, medium, high, max.',
+    ],
+    [
+      'model: opus\n    max_output_tokens: 1024',
+      `agents.main_agent.max_output_tokens is not supported by model opus on agent harness ${DEFAULT_AGENT_ENGINE}; use agents.main_agent.effort as the output-quality lever.`,
+    ],
+    [
+      `model: gpt\n    agent_harness: ${DEFAULT_AGENT_ENGINE}\n    effort: high`,
+      'agents.main_agent.effort cannot be applied to model gpt:',
+    ],
+  ])('rejects unsupported model and knob combinations', (setting, error) => {
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    ${setting}
+`),
+    ).toThrow(error);
+  });
+
+  it('accepts manual thinking budgets on Claude 4.6 models', () => {
+    expect(() =>
+      parseRuntimeSettings(`agents:
+  main_agent:
+    name: Main
+    model: opus-4.6
+    thinking:
+      mode: on
+      budget_tokens: 4096
+`),
+    ).not.toThrow();
+  });
+
+  it('validates controls against explicit job models', () => {
+    const agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      model: 'opus',
+      recurringJobDefaultModel: 'haiku',
+      effort: 'high' as const,
+      thinking: { mode: 'on' as const },
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full' as const,
+    };
+
+    expect(
+      configuredAgentControlConstraintErrors({
+        subject: 'agents.main_agent',
+        agent,
+      }),
+    ).toEqual([
+      'agents.main_agent.effort is not supported by model haiku.',
+      'agents.main_agent.thinking is not supported by model haiku.',
+    ]);
+    expect(
+      configuredAgentControlConstraintErrors({
+        subject: 'agents.main_agent',
+        agent: {
+          ...agent,
+          oneTimeJobDefaultModel: 'opus-4.6',
+          recurringJobDefaultModel: 'sonnet',
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it('validates controls against inherited job models unless overridden', () => {
+    const agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      model: 'opus',
+      effort: 'high' as const,
+      thinking: { mode: 'on' as const },
+      bindings: {},
+      sources: emptySources(),
+      capabilities: [],
+      accessPreset: 'full' as const,
+    };
+    const defaults = {
+      defaultOneTimeJobDefaultModel: 'haiku',
+      defaultRecurringJobDefaultModel: 'haiku',
+    };
+
+    expect(
+      configuredAgentControlConstraintErrors({
+        subject: 'agents.main_agent',
+        agent,
+        ...defaults,
+      }),
+    ).toEqual([
+      'agents.main_agent.effort is not supported by model haiku.',
+      'agents.main_agent.thinking is not supported by model haiku.',
+    ]);
+    expect(
+      configuredAgentControlConstraintErrors({
+        subject: 'agents.main_agent',
+        agent: {
+          ...agent,
+          oneTimeJobDefaultModel: 'opus-4.6',
+          recurringJobDefaultModel: 'sonnet',
+        },
+        ...defaults,
+      }),
+    ).toEqual([]);
+  });
+
+  it('applies global job model defaults during settings parsing', () => {
+    const inherited = `agent:
+  default_model: opus
+  one_time_job_default_model: haiku
+  recurring_job_default_model: haiku
+agents:
+  main_agent:
+    name: Main
+    effort: high
+    thinking: on
+`;
+
+    expect(() => parseRuntimeSettings(inherited)).toThrow(
+      'agents.main_agent.effort is not supported by model haiku.; agents.main_agent.thinking is not supported by model haiku.',
+    );
+    expect(() =>
+      parseRuntimeSettings(`${inherited.trimEnd()}
+    one_time_job_default_model: opus-4.6
+    recurring_job_default_model: sonnet
+`),
+    ).not.toThrow();
+  });
+
+  it('validates effort against the model-supported levels', () => {
+    const resolved = resolveModelSelection('opus');
+    if (!resolved.ok) throw new Error(resolved.message);
+    configureCustomModelCatalogEntries([
+      {
+        ...resolved.entry,
+        id: 'test:low-effort',
+        aliases: ['low-effort'],
+        recommendedAlias: 'low-effort',
+        runnerModel: 'test-low-effort',
+        modelRoute: {
+          ...resolved.entry.modelRoute,
+          providerModelId: 'test-low-effort',
+        },
+        supportedEffortLevels: ['low'],
+      },
+    ]);
+
+    expect(
+      configuredAgentControlConstraintErrors({
+        subject: 'agents.main_agent',
+        agent: {
+          name: 'Main',
+          folder: 'main_agent',
+          model: 'low-effort',
+          effort: 'high',
+          bindings: {},
+          sources: emptySources(),
+          capabilities: [],
+          accessPreset: 'full',
+        },
+      }),
+    ).toEqual([
+      'agents.main_agent.effort high is not supported by model low-effort; supported levels are low.',
+    ]);
   });
 
   it('leaves worker execution selected when iteration settings are present', () => {

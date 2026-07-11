@@ -508,6 +508,13 @@ describe('control OpenAPI documentation', () => {
       description: expect.stringContaining('structured output'),
     });
     expect(
+      spec.components.schemas.SendSessionMessageRequest.properties,
+    ).toMatchObject({
+      effort: { enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+      thinking: { oneOf: expect.any(Array) },
+      max_output_tokens: { type: 'integer', minimum: 1 },
+    });
+    expect(
       spec.paths['/v1/jobs']?.post.responses['201'].content['application/json']
         .schema,
     ).toEqual({ $ref: '#/components/schemas/JobCreateResponse' });

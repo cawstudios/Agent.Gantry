@@ -90,6 +90,18 @@ describe('model provider registry', () => {
     });
   });
 
+  it('declares the provider reasoning capability source', () => {
+    expect(getModelProviderDefinition('anthropic')).toMatchObject({
+      sdkModelCapabilityMetadata: true,
+    });
+    expect(getModelProviderDefinition('openrouter')).toMatchObject({
+      supportsReasoningEffort: true,
+    });
+    expect(getModelProviderDefinition('openai')).toMatchObject({
+      supportsReasoningEffort: true,
+    });
+  });
+
   it('makes OpenAI an executable chat and memory model route', () => {
     const openai = getModelProviderDefinition('openai');
     expect(openai?.executable).toBe(true);

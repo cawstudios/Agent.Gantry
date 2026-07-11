@@ -617,6 +617,33 @@ export const openApiSchemas: Record<string, JsonSchema> = {
         description:
           'JSON Schema object requesting strict structured output for this inline turn.',
       },
+      effort: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      thinking: {
+        oneOf: [
+          { type: 'string', enum: ['off', 'on'] },
+          {
+            type: 'object',
+            required: ['mode'],
+            additionalProperties: false,
+            properties: {
+              mode: { type: 'string', enum: ['off'] },
+            },
+          },
+          {
+            type: 'object',
+            required: ['mode'],
+            additionalProperties: false,
+            properties: {
+              mode: { type: 'string', enum: ['on'] },
+              budget_tokens: { type: 'integer', minimum: 1 },
+            },
+          },
+        ],
+      },
+      max_output_tokens: { type: 'integer', minimum: 1 },
     },
   },
   SendSessionMessageResponse: {

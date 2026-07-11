@@ -35,6 +35,7 @@ import {
 } from '../native-sdk-skills.js';
 import { readContextUsage } from '../runner/context-usage.js';
 import { MessageStream } from '../runner/message-stream.js';
+import { resolveConfiguredAgentControlOptions } from '../runner/model-config.js';
 import { usageEventIdForMessage } from '../runner/query-usage-event-id.js';
 import {
   sdkResultFailureMessage,
@@ -69,6 +70,10 @@ export const runClaudeInlineAgentLoopLane: ProviderInlineAgentLoopLane = async (
   if (input.signal.aborted) return abortedOutput();
   const maxTurns = input.maxTurns ?? DEFAULT_INLINE_AGENT_MAX_TURNS;
   const responseSchema = input.input.responseSchema;
+  const configuredControls = resolveConfiguredAgentControlOptions(
+    input.configuredThinking,
+    input.effort,
+  );
   validateModelCredentialProjectionForEntry({
     model: input.resolvedModel.value.modelEntry,
     projection: {
@@ -124,7 +129,7 @@ export const runClaudeInlineAgentLoopLane: ProviderInlineAgentLoopLane = async (
         abortController,
         model: input.resolvedModel.value.runnerModel,
         maxTurns,
-        ...(input.effort ? { effort: input.effort } : {}),
+        ...configuredControls,
         // The SDK implements outputFormat with its strict StructuredOutput answer tool.
         ...(responseSchema
           ? { outputFormat: { type: 'json_schema', schema: responseSchema } }

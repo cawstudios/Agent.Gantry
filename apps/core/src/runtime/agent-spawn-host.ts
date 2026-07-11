@@ -59,6 +59,22 @@ export interface HostRuntimeCredentialEnvOptions {
   >;
 }
 
+export function withControls(
+  input: AgentInput,
+  defaults?: {
+    effort?: AgentInput['effort'];
+    thinking?: AgentInput['configuredThinking'];
+    maxOutputTokens?: number;
+  },
+): AgentInput {
+  return {
+    ...input,
+    effort: input.effort ?? defaults?.effort,
+    configuredThinking: input.configuredThinking ?? defaults?.thinking,
+    maxOutputTokens: input.maxOutputTokens ?? defaults?.maxOutputTokens,
+  };
+}
+
 export async function prepareInlineAgentHostContext(
   group: ConversationRoute,
   input: AgentInput,
@@ -92,6 +108,10 @@ export async function prepareInlineAgentHostContext(
         measureAsync: async (_name, fn) => fn(),
       })
     : undefined;
+  const effectiveInput = withControls(
+    input,
+    runtimeSettings.agents?.[group.folder],
+  );
   return {
     resolvedModel,
     compiledSystemPrompt,
@@ -100,7 +120,9 @@ export async function prepareInlineAgentHostContext(
     idleTimeoutMs: IDLE_TIMEOUT,
     sandboxProvider: runtimeSettings.runtime.sandbox.provider,
     maxTurns: runtimeSettings.agents?.[group.folder]?.maxTurns,
-    effort: runtimeSettings.agents?.[group.folder]?.effort,
+    effort: effectiveInput.effort,
+    configuredThinking: effectiveInput.configuredThinking,
+    maxOutputTokens: effectiveInput.maxOutputTokens,
   };
 }
 

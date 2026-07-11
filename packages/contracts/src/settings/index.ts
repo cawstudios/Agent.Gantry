@@ -74,6 +74,20 @@ export const RuntimeSettingsConfiguredAgentSchema = z
     model: z.string().optional(),
     agentHarness: AgentHarnessSchema.optional(),
     runtime: z.enum(['worker', 'inline']).optional(),
+    maxTurns: z.number().int().positive().optional(),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+    thinking: z
+      .discriminatedUnion('mode', [
+        z.object({ mode: z.literal('off') }).strict(),
+        z
+          .object({
+            mode: z.literal('on'),
+            budgetTokens: z.number().int().positive().optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
     oneTimeJobDefaultModel: z.string().optional(),
     recurringJobDefaultModel: z.string().optional(),
     bindings: z.record(z.string(), RuntimeSettingsConfiguredAgentBindingSchema),

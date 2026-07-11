@@ -6,6 +6,7 @@ import {
 } from '@core/shared/agent-engine.js';
 import { validateAgentPreSpawnAdmission } from '@core/runtime/agent-spawn-admission.js';
 import type { AgentInput } from '@core/runtime/agent-spawn-types.js';
+import { resolveModelSelection } from '@core/shared/model-catalog.js';
 
 const baseInput: AgentInput = {
   prompt: 'hello',
@@ -14,6 +15,8 @@ const baseInput: AgentInput = {
 };
 
 describe('agent spawn admission', () => {
+  const opus = resolveModelSelection('opus');
+  if (!opus.ok) throw new Error(opus.message);
   it('rejects inline pre-spawn admission with every worker-only capability named', () => {
     const error = validateAgentPreSpawnAdmission({
       agentRuntime: 'inline',
@@ -90,5 +93,50 @@ describe('agent spawn admission', () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it('names unsupported control fields and models before provider invocation', () => {
+    expect(
+      validateAgentPreSpawnAdmission({
+        agentRuntime: 'worker',
+        agentEngine: DEFAULT_AGENT_ENGINE,
+        modelEntry: opus.entry,
+        sandboxProvider: 'direct',
+        securityEnv: {},
+        agentInput: { ...baseInput, maxOutputTokens: 1024 },
+      }),
+    ).toBe(
+      'max_output_tokens is not supported by model opus; use effort as the output-quality lever.',
+    );
+
+    expect(
+      validateAgentPreSpawnAdmission({
+        agentRuntime: 'worker',
+        agentEngine: DEFAULT_AGENT_ENGINE,
+        modelEntry: { ...opus.entry, supportsThinking: false },
+        sandboxProvider: 'direct',
+        securityEnv: {},
+        agentInput: {
+          ...baseInput,
+          model: 'opus-no-thinking',
+          configuredThinking: { mode: 'on', budgetTokens: 1024 },
+        },
+      }),
+    ).toBe('thinking is not supported by model opus-no-thinking.');
+
+    expect(
+      validateAgentPreSpawnAdmission({
+        agentRuntime: 'worker',
+        agentEngine: DEFAULT_AGENT_ENGINE,
+        modelEntry: { ...opus.entry, supportsThinkingBudget: false },
+        sandboxProvider: 'direct',
+        securityEnv: {},
+        agentInput: {
+          ...baseInput,
+          model: 'opus-no-budget',
+          configuredThinking: { mode: 'on', budgetTokens: 1024 },
+        },
+      }),
+    ).toBe('thinking.budget_tokens is not supported by model opus-no-budget.');
   });
 });

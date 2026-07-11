@@ -11,6 +11,8 @@ const inlineAgentSettings = vi.hoisted(() => ({
   current: {} as {
     maxTurns?: number;
     effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    configuredThinking?: { mode: 'off' | 'on'; budgetTokens?: number };
+    maxOutputTokens?: number;
   },
 }));
 
@@ -296,6 +298,8 @@ describe('runInlineAgent', () => {
     inlineAgentSettings.current = {
       maxTurns: 7,
       effort: 'high',
+      configuredThinking: { mode: 'on', budgetTokens: 2048 },
+      maxOutputTokens: 4096,
     };
     const lane = vi.fn<InlineAgentLoopLane>(async () => ({
       status: 'success',
@@ -305,7 +309,12 @@ describe('runInlineAgent', () => {
     await runInlineAgent(group, agentInput, vi.fn(), undefined, options(lane));
 
     expect(lane).toHaveBeenCalledWith(
-      expect.objectContaining({ maxTurns: 7, effort: 'high' }),
+      expect.objectContaining({
+        maxTurns: 7,
+        effort: 'high',
+        configuredThinking: { mode: 'on', budgetTokens: 2048 },
+        maxOutputTokens: 4096,
+      }),
     );
   });
 

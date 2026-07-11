@@ -147,6 +147,30 @@ describe('Claude inline lane', () => {
     expect(options.outputFormat).toBeUndefined();
   });
 
+  it.each([
+    [{ mode: 'off' }, { type: 'disabled' }],
+    [{ mode: 'on' }, { type: 'adaptive' }],
+    [
+      { mode: 'on', budgetTokens: 4096 },
+      { type: 'enabled', budgetTokens: 4096 },
+    ],
+  ])(
+    'maps configured thinking %j into SDK options',
+    async (configuredThinking, expected) => {
+      sdk.query.mockImplementation(() => ({
+        async *[Symbol.asyncIterator]() {
+          yield resultMessage('thinking-result', 'done');
+        },
+      }));
+
+      await runClaudeInlineAgentLoopLane(laneInput({ configuredThinking }));
+
+      expect(sdk.query.mock.calls[0]?.[0].options.thinking).toMatchObject(
+        expected,
+      );
+    },
+  );
+
   it('returns SDK-validated structured output as JSON', async () => {
     const responseSchema = {};
     sdk.query.mockImplementation(() => ({

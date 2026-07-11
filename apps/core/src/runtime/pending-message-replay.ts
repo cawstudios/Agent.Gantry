@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { NewMessage } from '../domain/types.js';
+import type { AgentControlOverrides, NewMessage } from '../domain/types.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
@@ -18,6 +18,7 @@ export interface PendingMessageReplay {
   hasMore: boolean;
   cursorAfter: string | null;
   responseSchema?: Record<string, unknown>;
+  agentControls?: AgentControlOverrides;
 }
 
 export async function collectPendingMessagesSince(input: {
@@ -77,18 +78,21 @@ function selectPendingMessageBatch(
   messages: NewMessage[],
   hasMore: boolean,
 ): PendingMessageReplay {
-  const firstSchema = messages.findIndex(
-    (message) => message.responseSchema !== undefined,
+  const firstControlled = messages.findIndex(
+    (message) =>
+      message.responseSchema !== undefined ||
+      message.agentControls !== undefined,
   );
-  if (firstSchema < 0) {
+  if (firstControlled < 0) {
     return { messages, hasMore, cursorAfter: messagesCursor(messages) };
   }
-  const selected = messages.slice(0, firstSchema + 1);
+  const selected = messages.slice(0, firstControlled + 1);
   return {
     messages: selected,
     hasMore: hasMore || selected.length < messages.length,
     cursorAfter: messagesCursor(selected),
-    responseSchema: messages[firstSchema]!.responseSchema,
+    responseSchema: messages[firstControlled]!.responseSchema,
+    agentControls: messages[firstControlled]!.agentControls,
   };
 }
 

@@ -102,6 +102,68 @@ describe('model catalog resolution', () => {
     expect(findModelByRunnerModel('gpt-5.5')?.responseFamily).toBe('openai');
   });
 
+  it('surfaces model reasoning and thinking capabilities', () => {
+    const opus = resolveModelSelection('opus');
+    const opus47 = resolveModelSelection('opus-4.7');
+    const opus46 = resolveModelSelection('opus-4.6');
+    const sonnet = resolveModelSelection('sonnet');
+    const haiku = resolveModelSelection('haiku');
+    const gpt = resolveModelSelection('gpt');
+    const kimi = resolveModelSelection('kimi');
+    if (
+      !opus.ok ||
+      !opus47.ok ||
+      !opus46.ok ||
+      !sonnet.ok ||
+      !haiku.ok ||
+      !gpt.ok ||
+      !kimi.ok
+    ) {
+      throw new Error('expected built-in model aliases to resolve');
+    }
+
+    expect(opus.entry).toMatchObject({
+      supportsEffort: true,
+      supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      supportsAdaptiveThinking: true,
+      supportsReasoningEffort: false,
+      supportsThinkingBudget: false,
+    });
+    expect(opus47.entry).toMatchObject({
+      supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      supportsAdaptiveThinking: true,
+      supportsThinkingBudget: false,
+    });
+    for (const entry of [opus46.entry, sonnet.entry]) {
+      expect(entry).toMatchObject({
+        supportsEffort: true,
+        supportedEffortLevels: ['low', 'medium', 'high', 'max'],
+        supportsAdaptiveThinking: true,
+        supportsReasoningEffort: false,
+        supportsThinkingBudget: true,
+      });
+    }
+    expect(haiku.entry).toMatchObject({
+      supportsEffort: false,
+      supportedEffortLevels: [],
+      supportsAdaptiveThinking: false,
+      supportsReasoningEffort: false,
+      supportsThinkingBudget: false,
+    });
+    expect(gpt.entry).toMatchObject({
+      supportsEffort: false,
+      supportedEffortLevels: ['low', 'medium', 'high', 'xhigh'],
+      supportsAdaptiveThinking: false,
+      supportsReasoningEffort: true,
+      supportsThinkingBudget: false,
+    });
+    expect(kimi.entry).toMatchObject({
+      supportedEffortLevels: ['low', 'medium', 'high', 'xhigh'],
+      supportsReasoningEffort: true,
+      supportsThinkingBudget: false,
+    });
+  });
+
   it('resolves Bedrock and Vertex aliases through the DeepAgents lane', () => {
     expect(resolveModelSelection('bedrock-oss')).toMatchObject({
       ok: true,

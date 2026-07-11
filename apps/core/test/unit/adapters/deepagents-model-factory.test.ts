@@ -85,6 +85,84 @@ describe('deepagents model factory', () => {
     );
   });
 
+  it('maps effort, thinking, and the output cap onto ChatOpenAI invocation config', async () => {
+    const resolved = await buildRunnerModel({
+      provider: 'openai',
+      modelId: 'gpt-5.5',
+      gatewayBaseUrl: loopbackBaseUrl,
+      gatewayToken,
+      effort: 'high',
+      configuredThinking: { mode: 'on' },
+      maxOutputTokens: 4096,
+    });
+    const underlying = await (
+      resolved.model as unknown as {
+        _getModelInstance: () => Promise<{
+          reasoning?: { effort?: string };
+          maxTokens?: number;
+          invocationParams(
+            options: Record<string, unknown>,
+          ): Record<string, unknown>;
+        }>;
+      }
+    )._getModelInstance();
+
+    expect(underlying.reasoning).toEqual({ effort: 'high' });
+    expect(underlying.maxTokens).toBe(4096);
+    expect(underlying.invocationParams({})).toMatchObject({
+      reasoning_effort: 'high',
+      max_completion_tokens: 4096,
+    });
+  });
+
+  it.each([
+    [{ mode: 'off' as const }, 'none'],
+    [{ mode: 'on' as const }, 'medium'],
+  ])('maps thinking %o to reasoning effort %s', async (thinking, effort) => {
+    const resolved = await buildRunnerModel({
+      provider: 'openai',
+      modelId: 'gpt-5.5',
+      gatewayBaseUrl: loopbackBaseUrl,
+      gatewayToken,
+      configuredThinking: thinking,
+    });
+    const underlying = await (
+      resolved.model as unknown as {
+        _getModelInstance: () => Promise<{
+          invocationParams(
+            options: Record<string, unknown>,
+          ): Record<string, unknown>;
+        }>;
+      }
+    )._getModelInstance();
+
+    expect(underlying.invocationParams({}).reasoning_effort).toBe(effort);
+  });
+
+  it('does not inject reasoning or output controls when absent', async () => {
+    const resolved = await buildRunnerModel({
+      provider: 'openai',
+      modelId: 'gpt-5.5',
+      gatewayBaseUrl: loopbackBaseUrl,
+      gatewayToken,
+    });
+    const underlying = await (
+      resolved.model as unknown as {
+        _getModelInstance: () => Promise<{
+          reasoning?: unknown;
+          maxTokens?: number;
+          invocationParams(
+            options: Record<string, unknown>,
+          ): Record<string, unknown>;
+        }>;
+      }
+    )._getModelInstance();
+
+    expect(underlying.reasoning).toBeUndefined();
+    expect(underlying.maxTokens).toBeUndefined();
+    expect(underlying.invocationParams({}).reasoning_effort).toBeUndefined();
+  });
+
   it.each([
     ['groq', 'llama-3.3-70b-versatile', 'http://127.0.0.1:4567/groq'],
     ['deepseek', 'deepseek-v4-pro', 'http://127.0.0.1:4567/deepseek'],
@@ -153,6 +231,54 @@ describe('deepagents model factory', () => {
     expect(model.apiKey).toBe(gatewayToken);
     expect(model.streamUsage).toBe(true);
     expect(resolved.modelId).toBe('moonshotai/kimi-k2.6');
+  });
+
+  it('maps controls onto the OpenRouter request body', async () => {
+    const resolved = await buildRunnerModel({
+      provider: 'openrouter',
+      modelId: 'moonshotai/kimi-k2.6',
+      gatewayBaseUrl: openrouterBaseUrl,
+      gatewayToken,
+      effort: 'xhigh',
+      configuredThinking: { mode: 'on' },
+      maxOutputTokens: 2048,
+    });
+    const model = resolved.model as unknown as {
+      maxTokens?: number;
+      modelKwargs?: Record<string, unknown>;
+      invocationParams(
+        options: Record<string, unknown>,
+      ): Record<string, unknown>;
+    };
+
+    expect(model.maxTokens).toBe(2048);
+    expect(model.modelKwargs).toEqual({ reasoning: { effort: 'xhigh' } });
+    expect(model.invocationParams({})).toMatchObject({
+      max_tokens: 2048,
+      reasoning: { effort: 'xhigh' },
+    });
+  });
+
+  it.each([
+    [{ effort: 'max' as const }, 'does not support effort "max"'],
+    [
+      { configuredThinking: { mode: 'on' as const, budgetTokens: 1024 } },
+      'does not support thinking budget tokens',
+    ],
+    [
+      { effort: 'high' as const, provider: 'groq' },
+      'does not support reasoning effort',
+    ],
+  ])('fails closed for an unsupported control: %o', async (controls, error) => {
+    await expect(
+      buildRunnerModel({
+        provider: 'openai',
+        modelId: 'gpt-5.5',
+        gatewayBaseUrl: loopbackBaseUrl,
+        gatewayToken,
+        ...controls,
+      }),
+    ).rejects.toThrow(error);
   });
 
   it('accepts the sandbox-runtime private gateway alias', async () => {

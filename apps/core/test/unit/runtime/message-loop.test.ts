@@ -681,6 +681,28 @@ describe('thread queue routing', () => {
     expect(deps.cursors).toEqual({});
   });
 
+  it('starts a fresh turn for durable per-request model controls', async () => {
+    const msg = {
+      ...makePendingMessage(1),
+      agentControls: { effort: 'high' as const },
+    };
+    mockGetMessagesSince.mockReturnValueOnce([msg]);
+    const enqueueMessageCheck = vi.fn(() => true);
+    const closeStdin = vi.fn();
+    const sendMessage = vi.fn(() => true);
+    const deps = makeDeps({
+      queue: { enqueueMessageCheck, closeStdin, sendMessage },
+    });
+
+    await expect(
+      processLiveAdmissionWorkItem(deps, makeAdmissionItem()),
+    ).resolves.toBe('completed');
+
+    expect(closeStdin).toHaveBeenCalledWith('group@g.us');
+    expect(enqueueMessageCheck).toHaveBeenCalledWith('group@g.us');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('loads a durable route before processing a claimed live admission item', async () => {
     const msg = {
       id: 'sdk-msg-1',

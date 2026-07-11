@@ -1,4 +1,4 @@
-import type { NewMessage } from '../../domain/types.js';
+import type { AgentControlOverrides, NewMessage } from '../../domain/types.js';
 import type {
   RuntimeEvent,
   RuntimeEventFilter,
@@ -223,6 +223,7 @@ export class SessionInteractionModule {
     responseMode?: unknown;
     webhookId?: string | null;
     responseSchema?: Record<string, unknown>;
+    agentControls?: AgentControlOverrides;
     durableLiveAdmission?: boolean;
     beforeDurableAdmission?: () => Promise<void> | void;
   }): Promise<{
@@ -269,6 +270,7 @@ export class SessionInteractionModule {
       external_message_id: messageId,
       thread_id: threadId ?? undefined,
       responseSchema: input.responseSchema,
+      agentControls: input.agentControls,
     };
     await this.deps.ops.storeChatMetadata(
       session.conversationJid,

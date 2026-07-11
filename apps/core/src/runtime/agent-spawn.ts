@@ -18,10 +18,7 @@ import {
 import { resolveAgentAccessPolicy } from '../config/profiles.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { ConversationRoute } from '../domain/types.js';
-import {
-  getHostRuntimeCredentialEnv,
-  prepareHostRuntimeContext,
-} from './agent-spawn-host.js';
+import * as host from './agent-spawn-host.js';
 import {
   McpServerService,
   type MaterializedMcpCapability,
@@ -149,9 +146,9 @@ export async function spawnAgent(
       error: resolvedModel.message,
     };
   }
+  input = host.withControls(input, runtimeSettings.agents?.[group.folder]);
   const agentEngine = resolvedModel.value.agentEngine;
   const effectiveModel = resolvedModel.value.runnerModel;
-  const effectiveModelEntry = resolvedModel.value.modelEntry;
   const preSpawnAdmissionError = hostStartup.measure(
     'preSpawnAdmissionMs',
     () =>
@@ -159,6 +156,7 @@ export async function spawnAgent(
         agentInput: input,
         agentEngine,
         agentRuntime,
+        modelEntry: resolvedModel.value.modelEntry,
         securityEnv: process.env,
         sandboxProvider: runtimeSettings.runtime.sandbox.provider,
       }),
@@ -167,6 +165,7 @@ export async function spawnAgent(
     return { status: 'error', result: null, error: preSpawnAdmissionError };
   }
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
+  const credentials = host.getHostRuntimeCredentialEnv;
   const agentAccessPolicy = resolveAgentAccessPolicy(
     runtimeSettings.agents?.[group.folder]?.accessPreset,
   );
@@ -200,7 +199,7 @@ export async function spawnAgent(
     compiledSystemPrompt,
     yoloMode: effectiveYoloModeSettings(runtimeSettings.permissions.yoloMode),
   };
-  const hostRuntime = prepareHostRuntimeContext(group);
+  const hostRuntime = host.prepareHostRuntimeContext(group);
   let executionAdapter: NonNullable<RunAgentOptions['executionAdapter']>;
   try {
     executionAdapter = resolveAgentExecutionAdapter({
@@ -226,10 +225,10 @@ export async function spawnAgent(
   const hostCredentials = await hostStartup.measureAsync(
     'credentialProjectionMs',
     () =>
-      getHostRuntimeCredentialEnv(agentIdentifier, options?.credentialBroker, {
+      credentials(agentIdentifier, options?.credentialBroker, {
         purpose: 'model_runtime',
         runContext: input,
-        modelRouteId: effectiveModelEntry?.modelRoute.id,
+        modelRouteId: resolvedModel.value.modelEntry.modelRoute.id,
       }),
   );
   let preparedExecution: Awaited<ReturnType<typeof executionAdapter.prepare>>;
@@ -241,7 +240,7 @@ export async function spawnAgent(
         hostRuntime,
         groupDir,
         effectiveModel,
-        effectiveModelEntry,
+        effectiveModelEntry: resolvedModel.value.modelEntry,
         modelCredentialProjection: {
           env: hostCredentials.env,
           credentialProviders: hostCredentials.credentialProviders,

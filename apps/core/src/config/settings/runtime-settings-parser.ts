@@ -964,6 +964,7 @@ export function parseRuntimeSettingsObject(
       model: agent.defaultModel,
       oneTimeJobDefaultModel: agent.oneTimeJobDefaultModel,
       recurringJobDefaultModel: agent.recurringJobDefaultModel,
+      agentHarness: agent.agentHarness,
       modelFamilyOrder: modelFamilies,
     });
     const providerAccounts = parseProviderAccounts(

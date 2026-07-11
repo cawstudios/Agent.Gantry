@@ -231,6 +231,8 @@ export async function exportCurrentDesiredState(input: {
       runtime: existing?.runtime === 'inline' ? 'inline' : undefined,
       maxTurns: existing?.maxTurns,
       effort: existing?.effort,
+      thinking: existing?.thinking,
+      maxOutputTokens: existing?.maxOutputTokens,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
       bindings: existing?.bindings ?? {},
@@ -492,6 +494,8 @@ export async function exportCurrentDesiredState(input: {
       runtime: existing?.runtime === 'inline' ? 'inline' : undefined,
       maxTurns: existing?.maxTurns,
       effort: existing?.effort,
+      thinking: existing?.thinking,
+      maxOutputTokens: existing?.maxOutputTokens,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
       bindings: {

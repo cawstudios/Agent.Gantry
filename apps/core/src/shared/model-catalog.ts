@@ -19,6 +19,7 @@ import {
 
 export type ModelResponseFamily = string;
 export type ModelRouteId = ModelRouteProviderId;
+export type ModelEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ModelExecutionProviderId =
   | 'anthropic:claude-agent-sdk'
   | 'deepagents:langchain'
@@ -71,6 +72,20 @@ const ALL_MODEL_WORKLOADS = [
   'memory_dreaming',
   'memory_consolidation',
 ] as const satisfies readonly ModelWorkload[];
+const OPENAI_MODEL_WORKLOADS = [
+  'chat',
+  'memory_extractor',
+  'memory_dreaming',
+  'memory_consolidation',
+] as const satisfies readonly ModelWorkload[];
+const ALL_MODEL_EFFORT_LEVELS = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const satisfies readonly ModelEffortLevel[];
+const REASONING_EFFORT_LEVELS = ALL_MODEL_EFFORT_LEVELS.slice(0, -1);
 const MODEL_RUNTIME_CREDENTIAL_PROFILE_REF = 'gantry-model-access';
 const CLAUDE_MODELS_OVERVIEW_SOURCE = {
   label: 'Anthropic models overview',
@@ -82,27 +97,32 @@ const CLAUDE_MODEL_IDS_SOURCE = {
   url: 'https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions',
   verifiedAt: '2026-05-21',
 };
+const OPUS_MODEL_METADATA = {
+  contextWindowTokens: 1_000_000,
+  maxOutputTokens: 128_000,
+  inputUsdPerMillionTokens: 5,
+  outputUsdPerMillionTokens: 25,
+  cachedInputUsdPerMillionTokens: 0.5,
+  cacheWriteUsdPerMillionTokens: 6.25,
+  cacheMode: DIRECT_PROMPT_CACHE_MODE,
+  cacheTokenFields: DIRECT_PROMPT_CACHE_TOKEN_FIELDS,
+  supportsThinking: true,
+  supportsTools: true,
+  supportedWorkloads: ['chat', 'one_time_job', 'recurring_job'],
+} as const;
 
-function gptDocsUrl(modelId: string): string {
+function gptSource(model: string) {
   const host = ['developers', 'op' + 'enai', 'com'].join('.');
-  return `https://${host}/api/docs/models/${modelId}`;
+  return {
+    label: `${model} model`,
+    url: `https://${host}/api/docs/models/${model.toLowerCase().replace(' ', '-')}`,
+    verifiedAt: '2026-06-19',
+  };
 }
 
-const GPT_55_SOURCE = {
-  label: 'GPT-5.5 model',
-  url: gptDocsUrl('gpt-5.5'),
-  verifiedAt: '2026-06-19',
-};
-const GPT_54_SOURCE = {
-  label: 'GPT-5.4 model',
-  url: gptDocsUrl('gpt-5.4'),
-  verifiedAt: '2026-06-19',
-};
-const GPT_54_MINI_SOURCE = {
-  label: 'GPT-5.4 mini model',
-  url: gptDocsUrl('gpt-5.4-mini'),
-  verifiedAt: '2026-06-19',
-};
+const GPT_55_SOURCE = gptSource('GPT-5.5');
+const GPT_54_SOURCE = gptSource('GPT-5.4');
+const GPT_54_MINI_SOURCE = gptSource('GPT-5.4 mini');
 const OPENROUTER_PROVIDER_AVAILABILITY: ModelProviderAvailability = {
   verifiedAt: '2026-06-22',
   evidence: {
@@ -146,6 +166,11 @@ export interface ModelCatalogEntry {
   cacheMode: ModelCacheMode;
   cacheTokenFields: readonly string[];
   supportsThinking?: boolean;
+  supportsEffort: boolean;
+  supportedEffortLevels: readonly ModelEffortLevel[];
+  supportsAdaptiveThinking: boolean;
+  supportsReasoningEffort: boolean;
+  supportsThinkingBudget: boolean;
   supportsTools?: boolean;
   capabilities: ModelCapabilityDescriptor;
   supportedWorkloads: readonly ModelWorkload[];
@@ -283,6 +308,9 @@ export function executableModelEntry(input: {
   cacheMode: ModelCacheMode;
   cacheTokenFields: readonly string[];
   supportsThinking?: boolean;
+  supportedEffortLevels?: readonly ModelEffortLevel[];
+  supportsAdaptiveThinking?: boolean;
+  supportsThinkingBudget?: boolean;
   supportsTools?: boolean;
   supportedWorkloads: readonly ModelWorkload[];
   providerAvailability?: ModelProviderAvailability;
@@ -295,11 +323,21 @@ export function executableModelEntry(input: {
       `Model catalog route ${input.route.id} is not executable in the provider registry.`,
     );
   }
+  const supportsReasoningEffort =
+    provider.supportsReasoningEffort === true &&
+    input.supportsThinking === true;
   return {
     ...input,
     responseFamily: provider.responseFamily,
     credentialProfileRef: MODEL_RUNTIME_CREDENTIAL_PROFILE_REF,
     modelRoute: input.route,
+    supportsEffort: input.supportedEffortLevels !== undefined,
+    supportedEffortLevels:
+      input.supportedEffortLevels ??
+      (supportsReasoningEffort ? REASONING_EFFORT_LEVELS : []),
+    supportsAdaptiveThinking: input.supportsAdaptiveThinking ?? false,
+    supportsReasoningEffort,
+    supportsThinkingBudget: input.supportsThinkingBudget ?? false,
     capabilities: {
       ...CURRENT_RESPONSE_FAMILY_CAPABILITIES,
       thinking: input.supportsThinking ?? false,
@@ -338,17 +376,9 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     aliases: ['opus', 'opus-4.8'],
     recommendedAlias: 'opus',
     source: CLAUDE_MODELS_OVERVIEW_SOURCE,
-    contextWindowTokens: 1_000_000,
-    maxOutputTokens: 128_000,
-    inputUsdPerMillionTokens: 5,
-    outputUsdPerMillionTokens: 25,
-    cachedInputUsdPerMillionTokens: 0.5,
-    cacheWriteUsdPerMillionTokens: 6.25,
-    cacheMode: DIRECT_PROMPT_CACHE_MODE,
-    cacheTokenFields: DIRECT_PROMPT_CACHE_TOKEN_FIELDS,
-    supportsThinking: true,
-    supportsTools: true,
-    supportedWorkloads: ['chat', 'one_time_job', 'recurring_job'],
+    ...OPUS_MODEL_METADATA,
+    supportedEffortLevels: ALL_MODEL_EFFORT_LEVELS,
+    supportsAdaptiveThinking: true,
   }),
   executableModelEntry({
     id: 'anthropic:opus-4.7',
@@ -358,17 +388,9 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     aliases: ['opus-4.7'],
     recommendedAlias: 'opus-4.7',
     source: CLAUDE_MODELS_OVERVIEW_SOURCE,
-    contextWindowTokens: 1_000_000,
-    maxOutputTokens: 128_000,
-    inputUsdPerMillionTokens: 5,
-    outputUsdPerMillionTokens: 25,
-    cachedInputUsdPerMillionTokens: 0.5,
-    cacheWriteUsdPerMillionTokens: 6.25,
-    cacheMode: DIRECT_PROMPT_CACHE_MODE,
-    cacheTokenFields: DIRECT_PROMPT_CACHE_TOKEN_FIELDS,
-    supportsThinking: true,
-    supportsTools: true,
-    supportedWorkloads: ['chat', 'one_time_job', 'recurring_job'],
+    ...OPUS_MODEL_METADATA,
+    supportedEffortLevels: ALL_MODEL_EFFORT_LEVELS,
+    supportsAdaptiveThinking: true,
   }),
   executableModelEntry({
     id: 'anthropic:opus-4.6',
@@ -378,17 +400,10 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     aliases: ['opus-4.6'],
     recommendedAlias: 'opus-4.6',
     source: CLAUDE_MODEL_IDS_SOURCE,
-    contextWindowTokens: 1_000_000,
-    maxOutputTokens: 128_000,
-    inputUsdPerMillionTokens: 5,
-    outputUsdPerMillionTokens: 25,
-    cachedInputUsdPerMillionTokens: 0.5,
-    cacheWriteUsdPerMillionTokens: 6.25,
-    cacheMode: DIRECT_PROMPT_CACHE_MODE,
-    cacheTokenFields: DIRECT_PROMPT_CACHE_TOKEN_FIELDS,
-    supportsThinking: true,
-    supportsTools: true,
-    supportedWorkloads: ['chat', 'one_time_job', 'recurring_job'],
+    ...OPUS_MODEL_METADATA,
+    supportedEffortLevels: ['low', 'medium', 'high', 'max'],
+    supportsAdaptiveThinking: true,
+    supportsThinkingBudget: true,
   }),
   executableModelEntry({
     id: 'anthropic:sonnet-4.6',
@@ -407,6 +422,9 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     cacheMode: DIRECT_PROMPT_CACHE_MODE,
     cacheTokenFields: DIRECT_PROMPT_CACHE_TOKEN_FIELDS,
     supportsThinking: true,
+    supportedEffortLevels: ['low', 'medium', 'high', 'max'],
+    supportsAdaptiveThinking: true,
+    supportsThinkingBudget: true,
     supportsTools: true,
     supportedWorkloads: ALL_MODEL_WORKLOADS,
   }),
@@ -506,12 +524,7 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     cacheTokenFields: ['prompt_tokens_details.cached_tokens'],
     supportsThinking: true,
     supportsTools: true,
-    supportedWorkloads: [
-      'chat',
-      'memory_extractor',
-      'memory_dreaming',
-      'memory_consolidation',
-    ],
+    supportedWorkloads: OPENAI_MODEL_WORKLOADS,
     experimental: true,
   }),
   executableModelEntry({
@@ -530,12 +543,7 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     cacheTokenFields: ['prompt_tokens_details.cached_tokens'],
     supportsThinking: true,
     supportsTools: true,
-    supportedWorkloads: [
-      'chat',
-      'memory_extractor',
-      'memory_dreaming',
-      'memory_consolidation',
-    ],
+    supportedWorkloads: OPENAI_MODEL_WORKLOADS,
     experimental: true,
   }),
   executableModelEntry({
@@ -555,12 +563,7 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = [
     cacheTokenFields: ['prompt_tokens_details.cached_tokens'],
     supportsThinking: true,
     supportsTools: true,
-    supportedWorkloads: [
-      'chat',
-      'memory_extractor',
-      'memory_dreaming',
-      'memory_consolidation',
-    ],
+    supportedWorkloads: OPENAI_MODEL_WORKLOADS,
     experimental: true,
   }),
   // Additional OpenAI-chat-completions-compatible providers on the deepagents

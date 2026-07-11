@@ -13,6 +13,7 @@ import {
   NewMessage,
   ProgressUpdateOptions,
   ConversationRoute,
+  type AgentControlOverrides,
 } from '../domain/types.js';
 import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
 import type {
@@ -296,6 +297,7 @@ async function processQueueMessages(
     hasMore: boolean;
     cursorAfter: string | null;
     responseSchema?: Record<string, unknown>;
+    agentControls?: AgentControlOverrides;
   },
 ): Promise<MessageAdmissionProcessingResult> {
   const opsRepository = resolveMessageRepository(deps);
@@ -383,7 +385,10 @@ async function processQueueMessages(
   if (initialBatch.length === 0) {
     initialBatch = groupMessages;
   }
-  if (replay.responseSchema !== undefined) {
+  if (
+    replay.responseSchema !== undefined ||
+    replay.agentControls !== undefined
+  ) {
     await deps.queue.closeStdin(queueJid);
     return enqueueMessageCheck(deps, queueJid);
   }

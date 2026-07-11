@@ -106,6 +106,8 @@ export interface InlineAgentLoopLaneInput {
   runtimeDataDir: string;
   maxTurns?: number;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  configuredThinking?: import('../domain/types.js').AgentControlThinking;
+  maxOutputTokens?: number;
   jobActivity: InlineJobActivity;
   emitOutput(output: AgentOutput): Promise<void>;
 }
@@ -187,8 +189,14 @@ export async function runInlineAgent(
   }
 
   const admissionError = validateAgentPreSpawnAdmission({
-    agentInput: input,
+    agentInput: {
+      ...input,
+      effort: hostContext.effort,
+      configuredThinking: hostContext.configuredThinking,
+      maxOutputTokens: hostContext.maxOutputTokens,
+    },
     agentEngine: resolvedModel.value.agentEngine,
+    modelEntry: resolvedModel.value.modelEntry,
     agentRuntime: 'inline',
     stdioMcpSourceIds: mcpSourceRecords
       .filter(({ definition }) => definition.transport === 'stdio_template')
@@ -256,6 +264,8 @@ export async function runInlineAgent(
       runtimeDataDir: hostContext.dataDir,
       maxTurns: hostContext.maxTurns,
       effort: hostContext.effort,
+      configuredThinking: hostContext.configuredThinking,
+      maxOutputTokens: hostContext.maxOutputTokens,
     });
   } catch (error) {
     return inlineFailure('Inline agent setup failed', error);
@@ -285,6 +295,8 @@ async function executeInlineRun(input: {
   runtimeDataDir: string;
   maxTurns?: number;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  configuredThinking?: import('../domain/types.js').AgentControlThinking;
+  maxOutputTokens?: number;
 }): Promise<AgentOutput> {
   const controlPort = new InMemoryInlineRunnerControlPort();
   const handle = createInlineRunHandle(input.controller, controlPort);
@@ -448,6 +460,8 @@ async function executeInlineRun(input: {
         runtimeDataDir: input.runtimeDataDir,
         maxTurns: input.maxTurns,
         effort: input.effort,
+        configuredThinking: input.configuredThinking,
+        maxOutputTokens: input.maxOutputTokens,
         jobActivity,
         emitOutput,
       }),

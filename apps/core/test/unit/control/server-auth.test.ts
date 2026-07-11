@@ -3661,6 +3661,63 @@ describe('control server runtime hardening', () => {
     }
   });
 
+  it('rejects malformed per-turn model controls synchronously', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-message-controls-invalid',
+        scopes: ['sessions:write'],
+        appId: 'app-one',
+      },
+    ]);
+    const app = {
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      const cases = [
+        [{ effort: 'extreme' }, 'effort must be one of'],
+        [
+          { thinking: { mode: 'off', budget_tokens: 1 } },
+          'requires thinking.mode on',
+        ],
+        [
+          { thinking: { mode: 'on', budget_tokens: 0 } },
+          'must be a positive integer',
+        ],
+        [
+          { max_output_tokens: 0 },
+          'max_output_tokens must be a positive integer',
+        ],
+      ] as const;
+      for (const [controls, message] of cases) {
+        const response = await requestWithRetry(
+          `http://127.0.0.1:${port}/v1/sessions/session-1/messages`,
+          'token-message-controls-invalid',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ message: 'hello', ...controls }),
+          },
+        );
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({
+          error: {
+            code: 'INVALID_REQUEST',
+            message: expect.stringContaining(message),
+          },
+        });
+      }
+      expect(controlRepo.getAppSessionById).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('rejects response schemas when the session runtime is unresolved', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
@@ -3828,6 +3885,9 @@ describe('control server runtime hardening', () => {
             response_schema: {
               oneOf: [{ type: 'object', required: ['answer'] }],
             },
+            effort: 'high',
+            thinking: { mode: 'on', budget_tokens: 2048 },
+            max_output_tokens: 4096,
           }),
         },
       );
@@ -3858,6 +3918,11 @@ describe('control server runtime hardening', () => {
           thread_id: 'thread-1',
           responseSchema: {
             oneOf: [{ type: 'object', required: ['answer'] }],
+          },
+          agentControls: {
+            effort: 'high',
+            thinking: { mode: 'on', budgetTokens: 2048 },
+            maxOutputTokens: 4096,
           },
         }),
       );

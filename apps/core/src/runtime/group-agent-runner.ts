@@ -1,4 +1,7 @@
-import type { ConversationRoute } from '../domain/types.js';
+import type {
+  AgentControlOverrides,
+  ConversationRoute,
+} from '../domain/types.js';
 import { collectCompactBoundaryMemory } from '../jobs/compact-memory.js';
 import { defaultModelStatusSelection } from '../session/session-model-status.js';
 import type { AgentOutput } from './agent-spawn.js';
@@ -107,6 +110,7 @@ export function createGroupAgentRunner(input: {
       };
       maintenanceCompaction?: boolean;
       responseSchema?: Record<string, unknown>;
+      agentControls?: AgentControlOverrides;
     },
   ): Promise<GroupAgentRunResult> {
     const agentHarness = deps.getSelectedAgentHarness(group.folder);
@@ -507,6 +511,9 @@ export function createGroupAgentRunner(input: {
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: agentInput.memoryContextBlock,
             responseSchema: options?.responseSchema,
+            effort: options?.agentControls?.effort,
+            configuredThinking: options?.agentControls?.thinking,
+            maxOutputTokens: options?.agentControls?.maxOutputTokens,
             ...(agentInput.resumeSessionId
               ? { sessionId: agentInput.resumeSessionId }
               : {}),

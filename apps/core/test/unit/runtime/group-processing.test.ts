@@ -791,6 +791,52 @@ describe('createGroupProcessor', () => {
       expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledTimes(1);
     });
 
+    it('isolates per-request controls to one turn and threads their effective field names', async () => {
+      const controls = {
+        effort: 'high' as const,
+        thinking: { mode: 'on' as const, budgetTokens: 2048 },
+        maxOutputTokens: 4096,
+      };
+      const messages = [
+        makeMessage({
+          id: '1',
+          timestamp: '1',
+          content: 'controlled',
+          agentControls: controls,
+        }),
+        makeMessage({ id: '2', timestamp: '2', content: 'plain follow-up' }),
+      ];
+      const { deps } = setupHappyPath({ messages });
+      let cursor = '0';
+      deps.getCursor = vi.fn(() => cursor);
+      deps.setCursor = vi.fn((_queueJid, nextCursor) => {
+        cursor = nextCursor;
+      });
+      mockGetMessagesSince.mockImplementation((_jid, sinceCursor) => {
+        const afterTimestamp = decodeGroupMessageCursor(
+          String(sinceCursor),
+        ).timestamp;
+        return messages.filter(
+          (message) => Number(message.timestamp) > Number(afterTimestamp),
+        );
+      });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+      await processGroupMessages('group1@g.us');
+
+      expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
+        effort: 'high',
+        configuredThinking: { mode: 'on', budgetTokens: 2048 },
+        maxOutputTokens: 4096,
+      });
+      expect(mockSpawnAgent.mock.calls[1][1].effort).toBeUndefined();
+      expect(
+        mockSpawnAgent.mock.calls[1][1].configuredThinking,
+      ).toBeUndefined();
+      expect(mockSpawnAgent.mock.calls[1][1].maxOutputTokens).toBeUndefined();
+    });
+
     it('keeps plain message turns schema-less', async () => {
       const { deps } = setupHappyPath();
 

@@ -38,6 +38,17 @@ export interface ThinkingOverride {
   display?: 'summarized' | 'omitted';
 }
 
+export type AgentControlThinking =
+  | { mode: 'off'; budgetTokens?: never }
+  | { mode: 'on'; budgetTokens?: number };
+export type AgentControlEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export interface AgentControlOverrides {
+  effort?: AgentControlEffort;
+  thinking?: AgentControlThinking;
+  maxOutputTokens?: number;
+}
+
 export interface AllowedRoot {
   // Absolute path or ~ for home (e.g., "~/projects", "/var/repos")
   path: string;
@@ -93,6 +104,7 @@ export interface NewMessage {
     providerPayload?: unknown;
   };
   responseSchema?: Record<string, unknown>;
+  agentControls?: AgentControlOverrides;
   attachments?: NewMessageAttachment[];
 }
 

@@ -108,6 +108,11 @@ describe('CanonicalMessageOpsService', () => {
       reply_to_message_content: 'quoted sensitive body',
       external_message_id: 'provider-event-1',
       responseSchema: { type: 'object', required: ['answer'] },
+      agentControls: {
+        effort: 'high',
+        thinking: { mode: 'on', budgetTokens: 2048 },
+        maxOutputTokens: 4096,
+      },
       attachments: [
         {
           id: 'attachment-1',
@@ -125,6 +130,9 @@ describe('CanonicalMessageOpsService', () => {
       thread_id: 'thread-1',
       external_message_id: 'provider-event-1',
       response_schema: { type: 'object', required: ['answer'] },
+      effort: 'high',
+      thinking: { mode: 'on', budgetTokens: 2048 },
+      max_output_tokens: 4096,
     });
     expect(ref).not.toHaveProperty('content');
     expect(ref).not.toHaveProperty('reply_to_message_content');
@@ -173,6 +181,11 @@ describe('CanonicalMessageOpsService', () => {
         thread_id: 'thread-1',
         reply_to_message_content: undefined,
         responseSchema: { type: 'object', required: ['answer'] },
+        agentControls: {
+          effort: 'high',
+          thinking: { mode: 'on', budgetTokens: 2048 },
+          maxOutputTokens: 4096,
+        },
         attachments: [
           {
             kind: 'file',
@@ -188,6 +201,36 @@ describe('CanonicalMessageOpsService', () => {
       'attachment body must not leak',
     );
     expect(JSON.stringify(result)).not.toContain('provider-secret');
+  });
+
+  it('rejects invalid persisted thinking metadata during replay mapping', async () => {
+    const invalidThinking = [
+      { mode: 'off', budgetTokens: 1 },
+      { mode: 'on', budgetTokens: 0 },
+      { mode: 'on', budgetTokens: 1.5 },
+    ];
+    const listInboundMessages = vi.fn().mockResolvedValue(
+      invalidThinking.map((thinking, index) =>
+        messageRow({
+          id: `message:tg:one:invalid-${index}`,
+          external_ref_json: JSON.stringify({
+            id: `invalid-${index}`,
+            chat_jid: 'tg:one',
+            thinking,
+          }),
+        }),
+      ),
+    );
+    const service = new CanonicalMessageOpsService({
+      listInboundMessages,
+    } as unknown as PostgresCanonicalMessageRepository);
+
+    const result = await service.getMessagesSince('tg:one', '');
+
+    expect(result).toHaveLength(3);
+    for (const message of result) {
+      expect(message.agentControls).toBeUndefined();
+    }
   });
 
   it('requests recent top-level messages before a cursor and returns them oldest-to-newest', async () => {

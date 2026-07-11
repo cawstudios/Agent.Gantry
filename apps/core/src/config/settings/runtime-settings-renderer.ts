@@ -229,6 +229,20 @@ function renderConfiguredAgentsYaml(
     if (agent.effort !== undefined) {
       lines.push(`    effort: ${quoteYamlString(agent.effort)}`);
     }
+    if (agent.thinking !== undefined) {
+      if (agent.thinking.budgetTokens === undefined) {
+        lines.push(`    thinking: ${agent.thinking.mode}`);
+      } else {
+        lines.push(
+          '    thinking:',
+          '      mode: on',
+          `      budget_tokens: ${agent.thinking.budgetTokens}`,
+        );
+      }
+    }
+    if (agent.maxOutputTokens !== undefined) {
+      lines.push(`    max_output_tokens: ${agent.maxOutputTokens}`);
+    }
     if (agent.model) {
       lines.push(`    model: ${quoteYamlString(agent.model)}`);
     }

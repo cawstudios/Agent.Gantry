@@ -309,7 +309,7 @@ export const coreOpenApiRouteDocs: RouteDoc[] = [
     'sendSessionMessage',
     'Sessions',
     'Accept a session message',
-    'Persists an inbound SDK message and enqueues processing. Optional response_schema requests strict structured output for this inline turn.',
+    'Persists an inbound SDK message and enqueues processing. Optional response_schema and model controls apply to this turn.',
     ['sessions:write'],
     { body: 'json', parameters: [ids.session], status: '202' },
   ),

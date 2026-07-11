@@ -732,6 +732,7 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             options.existingRunLeaseFencingVersion,
           liveStopActionToken: turnOptions.liveStopActionToken,
           responseSchema: replay.responseSchema,
+          agentControls: replay.agentControls,
         },
       );
     } finally {

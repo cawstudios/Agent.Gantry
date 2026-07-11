@@ -32,7 +32,7 @@ import { migrateLegacyAgentBindings } from './settings-revision-legacy-bindings.
  * applied) by an older worker until it is upgraded (ADR-3 skew safety contract).
  * Bump this whenever a settings-schema change would break older readers.
  */
-export const CURRENT_SETTINGS_READER_VERSION = 7;
+export const CURRENT_SETTINGS_READER_VERSION = 8;
 
 export interface SettingsImportValidationResult {
   ok: boolean;
@@ -439,6 +439,14 @@ export function settingsToRevisionDocument(
       runtime: agent.runtime === 'inline' ? 'inline' : undefined,
       max_turns: agent.maxTurns,
       effort: agent.effort,
+      thinking:
+        agent.thinking?.budgetTokens === undefined
+          ? agent.thinking?.mode
+          : {
+              mode: agent.thinking.mode,
+              budget_tokens: agent.thinking.budgetTokens,
+            },
+      max_output_tokens: agent.maxOutputTokens,
       model: agent.model,
       agent_harness: agent.agentHarness,
       one_time_job_default_model: agent.oneTimeJobDefaultModel,
