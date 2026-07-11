@@ -1,11 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import {
+  connectGantryAndThirdPartyMcpTools,
   dropCollidingThirdPartyTools,
   rejectExternalThirdPartyMcpServer,
 } from '@core/adapters/llm/deepagents-langchain/runner/mcp-tools.js';
 import { GANTRY_SHELL_TOOL_NAME } from '@core/adapters/llm/deepagents-langchain/runner/gantry-shell-tool.js';
 import { DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES } from '@core/adapters/llm/deepagents-langchain/runner/gantry-facade-tools.js';
+import { RunScopedToolSuccessLedger } from '@core/runner/tool-gate-core.js';
+
+const mcpState = vi.hoisted(() => ({
+  serverTools: {} as Record<string, unknown[]>,
+}));
+
+vi.mock(['@langchain', 'mcp-adapters'].join('/'), () => ({
+  MultiServerMCPClient: class {
+    async initializeConnections() {
+      return mcpState.serverTools;
+    }
+    async close() {}
+  },
+}));
 
 // Minimal structural stand-in for a LangChain tool; the filter only reads `.name`.
 type ToolLike = Parameters<typeof dropCollidingThirdPartyTools>[1][number];
@@ -17,6 +33,8 @@ function fakeTool(name: string): ToolLike {
 describe('dropCollidingThirdPartyTools', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    mcpState.serverTools = {};
   });
 
   it('drops a third-party tool that shadows a selected Gantry authority tool and warns', () => {
@@ -68,6 +86,79 @@ describe('dropCollidingThirdPartyTools', () => {
     );
     expect(kept.map((t) => t.name)).toEqual(['alpha', 'beta']);
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('declarative DeepAgents tool-rule wrapper', () => {
+  it('denies require_prior, then allows after the prior tool succeeds', async () => {
+    vi.stubEnv('GANTRY_MCP_SERVER_PATH', '/tmp/fake-gantry-mcp.js');
+    const sendMessage = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'sent' }],
+    }));
+    const memorySearch = vi.fn(async () => ({
+      content: [{ type: 'text', text: 'results' }],
+    }));
+    const structuredTool = (
+      name: string,
+      description: string,
+      invoke: (input: unknown) => Promise<unknown>,
+    ) => ({
+      name,
+      description,
+      schema: z.object({}).passthrough(),
+      invoke,
+    });
+    mcpState.serverTools = {
+      gantry: [
+        structuredTool('send_message', 'Send a message.', sendMessage),
+        structuredTool('memory_search', 'Search memory.', memorySearch),
+      ],
+    };
+    const toolSuccessLedger = new RunScopedToolSuccessLedger();
+    const onToolRuleDenial = vi.fn();
+    const connected = await connectGantryAndThirdPartyMcpTools({
+      configuredAllowedTools: [],
+      toolRules: [
+        {
+          tool: 'memory_search',
+          action: 'require_prior',
+          prior: 'send_message',
+          reason: 'announce before searching memory',
+        },
+      ],
+      toolSuccessLedger,
+      onToolRuleDenial,
+      hideAuthorityTools: false,
+      gate: {
+        workspaceFolder: 'group',
+        memoryBlock: '',
+        gateContext: { conversationId: 'tg:group' },
+        permissionEnv: {},
+        lockedAccessPreset: true,
+      } as never,
+    });
+    const prior = connected.tools.find(({ name }) => name === 'send_message');
+    const guarded = connected.tools.find(
+      ({ name }) => name === 'memory_search',
+    );
+
+    await expect(guarded?.invoke({} as never)).resolves.toMatchObject({
+      isError: true,
+      error: {
+        category: 'permission',
+        isRetryable: false,
+        message: expect.stringContaining('announce before searching memory'),
+      },
+    });
+    expect(memorySearch).not.toHaveBeenCalled();
+    expect(onToolRuleDenial).toHaveBeenCalledOnce();
+
+    await prior?.invoke({} as never);
+    await expect(guarded?.invoke({} as never)).resolves.toMatchObject({
+      content: [{ type: 'text', text: 'results' }],
+    });
+    expect(memorySearch).toHaveBeenCalledOnce();
+    await connected.close();
   });
 });
 

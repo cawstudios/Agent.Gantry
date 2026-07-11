@@ -37,6 +37,20 @@ import type {
   RunnerSandboxSpawnInput,
 } from '../shared/runner-sandbox-provider.js';
 
+export type AgentToolRule =
+  | {
+      tool: string;
+      action: 'block';
+      reason: string;
+      when?: { arg: string; matches: string };
+    }
+  | {
+      tool: string;
+      action: 'require_prior';
+      prior: string;
+      reason: string;
+    };
+
 export interface AgentInput {
   prompt: string;
   appId?: string;
@@ -52,6 +66,7 @@ export interface AgentInput {
   persona?: AgentPersona;
   browserProfileName?: string;
   toolPolicyRules?: string[];
+  toolRules?: AgentToolRule[];
   toolAccessRequirements?: string[];
   attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];

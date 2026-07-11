@@ -835,6 +835,81 @@ describe('Claude Agent SDK boundary integration', () => {
     expect(systemPromptText).not.toContain('prior user preference');
   });
 
+  it('enforces require_prior through SDK Pre/PostToolUse hooks only when rules exist', async () => {
+    const env = prepareRuntimeEnv();
+    const { runQuery } = await importRunQuery();
+
+    await runQuery(
+      'guarded run',
+      env.mcpServerPath,
+      runnerInput({
+        toolRules: [
+          {
+            tool: 'deploy',
+            action: 'require_prior',
+            prior: 'test',
+            reason: 'tests must pass before deploy',
+          },
+        ],
+      }),
+      sdkProcessEnv(),
+      'sonnet',
+      undefined,
+      undefined,
+    );
+
+    const guardedCall = sdkState.calls[0];
+    const preToolUseHooks = guardedCall?.options.hooks.PreToolUse[0].hooks;
+    expect(preToolUseHooks).toHaveLength(2);
+    const declarativePreToolUse = preToolUseHooks[1];
+    const denied = await declarativePreToolUse({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'deploy',
+      tool_input: {},
+    });
+    expect(denied).toMatchObject({
+      continue: false,
+      decision: 'block',
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: expect.stringContaining(
+          'tests must pass before deploy',
+        ),
+      },
+    });
+    expect(JSON.parse(denied.reason)).toMatchObject({
+      category: 'permission',
+      isRetryable: false,
+      message: expect.stringContaining('tests must pass before deploy'),
+    });
+
+    const postToolUse = guardedCall?.options.hooks.PostToolUse[0].hooks[0];
+    await postToolUse({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'test',
+    });
+    await expect(
+      declarativePreToolUse({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'deploy',
+        tool_input: {},
+      }),
+    ).resolves.toEqual({ continue: true });
+
+    await runQuery(
+      'ordinary run',
+      env.mcpServerPath,
+      runnerInput(),
+      sdkProcessEnv(),
+      'sonnet',
+      undefined,
+      undefined,
+    );
+    const ordinaryCall = sdkState.calls[1];
+    expect(ordinaryCall?.options.hooks.PreToolUse[0].hooks).toHaveLength(1);
+    expect(ordinaryCall?.options.hooks.PostToolUse).toBeUndefined();
+  });
+
   it('passes an explicit empty SDK skills list when Gantry selected no skills', async () => {
     const env = prepareRuntimeEnv();
     vi.stubEnv(GANTRY_CLAUDE_SDK_SKILLS_ENV, JSON.stringify([]));

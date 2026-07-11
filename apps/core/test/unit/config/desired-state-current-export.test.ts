@@ -137,6 +137,10 @@ describe('exportCurrentDesiredState', () => {
     effort: high
     thinking: on
     max_output_tokens: 2048
+    tool_rules:
+      - tool: Bash
+        action: block
+        reason: no shell
 `);
     settings.conversations = {
       shared_channel: {
@@ -309,6 +313,7 @@ describe('exportCurrentDesiredState', () => {
       effort: 'high',
       thinking: { mode: 'on' },
       maxOutputTokens: 2048,
+      toolRules: [{ tool: 'Bash', action: 'block', reason: 'no shell' }],
     });
     const yaml = renderRuntimeSettingsYaml(exported as any);
     expect(yaml).toContain('installed_agents:');
@@ -445,6 +450,11 @@ describe('exportCurrentDesiredState', () => {
     effort: low
     thinking: off
     max_output_tokens: 1024
+    tool_rules:
+      - tool: Deploy
+        action: require_prior
+        prior: Test
+        reason: tests first
 `);
     settings.providerAccounts.slack_custom = {
       agentId: 'main_agent',
@@ -494,6 +504,14 @@ describe('exportCurrentDesiredState', () => {
       effort: 'low',
       thinking: { mode: 'off' },
       maxOutputTokens: 1024,
+      toolRules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests first',
+        },
+      ],
     });
   });
 

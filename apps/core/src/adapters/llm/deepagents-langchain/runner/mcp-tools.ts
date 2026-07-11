@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 import { MultiServerMCPClient } from '@langchain/mcp-adapters';
-import type { StructuredToolInterface } from '@langchain/core/tools';
+import { tool, type StructuredToolInterface } from '@langchain/core/tools';
 
 import { buildGantryMcpProjection } from './gantry-mcp-env.js';
 import {
@@ -18,6 +18,12 @@ import {
 } from './gantry-facade-tools.js';
 import { isHostPrivateBrowserMcpServerName } from '../../../../shared/agent-tool-references.js';
 import { isRunCommandToolRule } from '../../../../shared/gantry-tool-facades.js';
+import {
+  evaluateDeclarativeToolRules,
+  type DeclarativeToolRule,
+  type DeclarativeToolRuleDenial,
+  type RunScopedToolSuccessLedger,
+} from '../../../../runner/tool-gate-core.js';
 
 // Connects the DeepAgents runner to Gantry-owned MCP authority and converts it
 // to LangChain tools. DeepAgents has no autonomous MCP — we fully control the
@@ -57,6 +63,12 @@ export interface ConnectedMcpTools {
 
 export interface ConnectGantryMcpInput {
   configuredAllowedTools: readonly string[];
+  toolRules?: readonly DeclarativeToolRule[];
+  toolSuccessLedger?: RunScopedToolSuccessLedger;
+  onToolRuleDenial?: (
+    toolName: string,
+    denial: DeclarativeToolRuleDenial,
+  ) => void;
   toolNetworkEnv?: Record<string, string>;
   hideAuthorityTools: boolean;
   gate: Omit<ThirdPartyMcpGateConfig, 'configuredAllowedTools'>;
@@ -160,15 +172,69 @@ export async function connectGantryAndThirdPartyMcpTools(
 
   const shellTools = projectGantryShellTool(input);
 
+  const tools = [
+    ...gantryTools,
+    ...facadeTools,
+    ...gatedThirdPartyTools,
+    ...shellTools,
+  ];
   return {
-    tools: [
-      ...gantryTools,
-      ...facadeTools,
-      ...gatedThirdPartyTools,
-      ...shellTools,
-    ],
+    tools: wrapWithDeclarativeToolRules(
+      tools,
+      input.toolRules,
+      input.toolSuccessLedger,
+      input.onToolRuleDenial,
+    ),
     close: () => client.close(),
   };
+}
+
+function wrapWithDeclarativeToolRules(
+  tools: StructuredToolInterface[],
+  rules?: readonly DeclarativeToolRule[],
+  successLedger?: RunScopedToolSuccessLedger,
+  onDenial?: ConnectGantryMcpInput['onToolRuleDenial'],
+): StructuredToolInterface[] {
+  if (!rules?.length) return tools;
+  return tools.map(
+    (underlying) =>
+      tool(
+        async (input, config) => {
+          const denial = evaluateDeclarativeToolRules({
+            toolName: underlying.name,
+            toolInput: input,
+            rules,
+            successLedger,
+          });
+          if (denial) {
+            onDenial?.(underlying.name, denial);
+            return {
+              content: [{ type: 'text', text: denial.error.message }],
+              isError: true,
+              error: denial.error,
+            };
+          }
+          const result = await underlying.invoke(input as never, config);
+          if (!toolResultIsError(result)) {
+            successLedger?.recordSuccess(underlying.name);
+          }
+          return result;
+        },
+        {
+          name: underlying.name,
+          description: underlying.description,
+          schema: underlying.schema as never,
+        },
+      ) as unknown as StructuredToolInterface,
+  );
+}
+
+function toolResultIsError(result: unknown): boolean {
+  return Boolean(
+    result &&
+    typeof result === 'object' &&
+    (result as { isError?: unknown }).isError === true,
+  );
 }
 
 // A third-party server must not be able to shadow a Gantry authority tool

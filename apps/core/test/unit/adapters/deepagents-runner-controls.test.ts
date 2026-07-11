@@ -74,5 +74,66 @@ describe('DeepAgents worker model controls', () => {
         maxOutputTokens: 4096,
       }),
     );
+    expect(mcp.connect.mock.calls[0]?.[0]).not.toHaveProperty('toolRules');
+    expect(mcp.connect.mock.calls[0]?.[0]).not.toHaveProperty(
+      'toolSuccessLedger',
+    );
+    expect(mcp.connect.mock.calls[0]?.[0]).not.toHaveProperty(
+      'onToolRuleDenial',
+    );
+  });
+
+  it('threads declarative rules and emits the existing tool-activity denial event', async () => {
+    const emit = vi.fn();
+    const toolRules = [
+      { tool: 'send_message', action: 'block' as const, reason: 'quiet run' },
+    ];
+    await runDeepAgentTurn({
+      agentInput: {
+        prompt: 'hello',
+        workspaceFolder: '/tmp/workspace',
+        chatJid: 'conversation:test',
+        appId: 'default',
+        agentId: 'agent-1',
+        runId: 'run-1',
+        jobId: 'job-1',
+        isScheduledJob: true,
+        toolRules,
+        modelCredentialEnv: {
+          OPENAI_BASE_URL: 'http://127.0.0.1:4567/openai',
+          OPENAI_API_KEY: 'gtw_test',
+        },
+      },
+      provider: 'openai',
+      modelId: 'gpt-5.5',
+      newSessionId: 'session-1',
+      includeMemoryContext: true,
+      emit,
+    });
+
+    const gate = mcp.connect.mock.calls[0]?.[0];
+    expect(gate).toMatchObject({ toolRules });
+    gate?.onToolRuleDenial?.('send_message', {
+      decision: 'declarative_tool_rule',
+      reason: 'Denied by Gantry tool rule: quiet run',
+      error: {
+        category: 'permission',
+        isRetryable: false,
+        message: 'Denied by Gantry tool rule: quiet run',
+      },
+    });
+    expect(emit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runtimeEvents: [
+          expect.objectContaining({
+            eventType: 'job.tool_activity',
+            payload: expect.objectContaining({
+              phase: 'deny',
+              reason: 'Denied by Gantry tool rule: quiet run',
+            }),
+          }),
+        ],
+      }),
+    );
   });
 });

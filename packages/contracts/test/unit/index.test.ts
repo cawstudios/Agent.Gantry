@@ -165,6 +165,20 @@ describe('contracts package', () => {
         effort: 'xhigh',
         thinking: { mode: 'on', budgetTokens: 4096 },
         maxOutputTokens: 2048,
+        toolRules: [
+          {
+            tool: 'Bash',
+            action: 'block',
+            when: { arg: 'command', matches: '^rm\\s' },
+            reason: 'destructive command',
+          },
+          {
+            tool: 'Deploy',
+            action: 'require_prior',
+            prior: 'Test',
+            reason: 'tests must pass first',
+          },
+        ],
       }),
     ).toMatchObject({
       maxTurns: 12,
@@ -172,6 +186,10 @@ describe('contracts package', () => {
       effort: 'xhigh',
       thinking: { mode: 'on', budgetTokens: 4096 },
       maxOutputTokens: 2048,
+      toolRules: expect.arrayContaining([
+        expect.objectContaining({ action: 'block' }),
+        expect.objectContaining({ action: 'require_prior' }),
+      ]),
     });
     expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
       ...agent,
@@ -184,6 +202,17 @@ describe('contracts package', () => {
     expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
       ...agent,
       maxOutputTokens: 0,
+    });
+    expectInvalid(RuntimeSettingsConfiguredAgentSchema, {
+      ...agent,
+      toolRules: [
+        {
+          tool: 'Bash',
+          action: 'block',
+          when: { arg: 'command', matches: '[' },
+          reason: 'bad regex',
+        },
+      ],
     });
   });
 

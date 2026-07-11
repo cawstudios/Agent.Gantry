@@ -71,6 +71,11 @@ import {
 import { runnerStartupTimingRuntimeEvent } from './runner-startup-diagnostic.js';
 import { startRuntimeSignalPump } from '../../../../runner/runtime-signal-pump.js';
 import { taskRuntimeEvent } from './task-runtime-event.js';
+import {
+  evaluateDeclarativeToolRules,
+  RunScopedToolSuccessLedger,
+} from '../../../../runner/tool-gate-core.js';
+import { emitJobToolActivity } from './tool-permission-events.js';
 
 interface RunQueryOptions {
   enableIpcFollowups?: boolean;
@@ -108,6 +113,52 @@ export async function runQuery(
   const stream = new MessageStream();
   const queryRunId = randomUUID();
   const memoryBlock = readMemoryContextBlock(agentInput);
+  const toolSuccessLedger = agentInput.toolRules?.length
+    ? new RunScopedToolSuccessLedger()
+    : undefined;
+  const declarativePreToolUse = toolSuccessLedger
+    ? async (hookInput: {
+        hook_event_name: string;
+        tool_name?: string;
+        tool_input?: unknown;
+      }) => {
+        if (
+          hookInput.hook_event_name !== 'PreToolUse' ||
+          !hookInput.tool_name
+        ) {
+          return { continue: true as const };
+        }
+        const denial = evaluateDeclarativeToolRules({
+          toolName: hookInput.tool_name,
+          toolInput: hookInput.tool_input,
+          rules: agentInput.toolRules,
+          successLedger: toolSuccessLedger,
+        });
+        if (!denial) return { continue: true as const };
+        emitJobToolActivity(
+          agentInput,
+          () => newSessionId,
+          'deny',
+          hookInput.tool_name,
+          {
+            ok: false,
+            reason: denial.error.message,
+            decision: denial.decision,
+            error: denial.error,
+          },
+        );
+        return {
+          continue: false as const,
+          decision: 'block' as const,
+          reason: JSON.stringify(denial.error),
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse' as const,
+            permissionDecision: 'deny' as const,
+            permissionDecisionReason: denial.error.message,
+          },
+        };
+      }
+    : undefined;
   stream.pushInitialPrompt(prompt, memoryBlock);
   if (!enableIpcFollowups) {
     stream.end();
@@ -320,10 +371,33 @@ export async function runQuery(
                 memoryBlock,
                 agentInput.toolNetworkEnv ?? {},
               ),
+              ...(declarativePreToolUse ? [declarativePreToolUse] : []),
             ],
             timeout: 5,
           },
         ],
+        ...(toolSuccessLedger
+          ? {
+              PostToolUse: [
+                {
+                  hooks: [
+                    async (hookInput: {
+                      hook_event_name: string;
+                      tool_name?: string;
+                    }) => {
+                      if (
+                        hookInput.hook_event_name === 'PostToolUse' &&
+                        hookInput.tool_name
+                      ) {
+                        toolSuccessLedger.recordSuccess(hookInput.tool_name);
+                      }
+                      return { continue: true as const };
+                    },
+                  ],
+                },
+              ],
+            }
+          : {}),
       },
       canUseTool: createCanUseToolCallback({
         agentInput,

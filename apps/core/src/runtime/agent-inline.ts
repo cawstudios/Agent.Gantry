@@ -251,6 +251,7 @@ export async function runInlineAgent(
       input: {
         ...input,
         compiledSystemPrompt: hostContext.compiledSystemPrompt ?? '',
+        ...(hostContext.toolRules ? { toolRules: hostContext.toolRules } : {}),
       },
       onProcess,
       onOutput,

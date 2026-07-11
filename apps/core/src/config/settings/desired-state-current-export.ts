@@ -236,6 +236,7 @@ export async function exportCurrentDesiredState(input: {
       maxOutputTokens: existing?.maxOutputTokens,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
+      toolRules: existing?.toolRules,
       bindings: existing?.bindings ?? {},
       sources: activeSources(
         skillBindingsByAgent.get(agent.id) ?? [],
@@ -500,6 +501,7 @@ export async function exportCurrentDesiredState(input: {
       maxOutputTokens: existing?.maxOutputTokens,
       oneTimeJobDefaultModel: existing?.oneTimeJobDefaultModel,
       recurringJobDefaultModel: existing?.recurringJobDefaultModel,
+      toolRules: existing?.toolRules,
       bindings: {
         ...(existing?.bindings ?? {}),
         [bindingId]: {

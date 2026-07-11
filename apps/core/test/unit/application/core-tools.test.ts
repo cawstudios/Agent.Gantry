@@ -62,6 +62,67 @@ describe('core tool registry', () => {
     expect(Object.keys(registry.byName)).toEqual(CORE_TOOL_NAMES);
   });
 
+  it('enforces declarative rules and records only successful prior tools', async () => {
+    const successful = new Set<string>();
+    const backend = taskBackend();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    const registry = createCoreToolRegistry(
+      registryDeps({
+        context: {
+          sourceAgentFolder: 'main_agent',
+          conversationId: 'conversation:test',
+          appId: 'default',
+          agentId: 'agent-1',
+          runId: 'run-1',
+          jobId: 'job-1',
+          isScheduledJob: true,
+          toolRules: [
+            {
+              tool: 'task_get',
+              action: 'require_prior',
+              prior: 'task_list',
+              reason: 'list tasks first',
+            },
+          ],
+          toolSuccessLedger: {
+            recordSuccess: (name) => successful.add(name),
+            hasSuccess: (name) => successful.has(name),
+          },
+        },
+        taskLifecycleBackend: backend,
+        publishRuntimeEvent,
+      }),
+    );
+
+    await expect(
+      registry.execute('task_get', { taskId: 'task-1' }),
+    ).resolves.toMatchObject({
+      isError: true,
+      error: {
+        category: 'permission',
+        isRetryable: false,
+        message: expect.stringContaining('list tasks first'),
+      },
+    });
+    expect(backend.task_get).not.toHaveBeenCalled();
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: RUNTIME_EVENT_TYPES.JOB_TOOL_ACTIVITY,
+        payload: expect.objectContaining({
+          phase: 'deny',
+          reason: expect.stringContaining('list tasks first'),
+        }),
+      }),
+    );
+
+    expect((await registry.execute('task_list', {})).isError).not.toBe(true);
+    await expect(
+      registry.execute('task_get', { taskId: 'task-1' }),
+    ).resolves.toEqual({
+      content: [{ type: 'text', text: 'found' }],
+    });
+  });
+
   it('records a durable question before the interaction boundary and resolves it after the answer', async () => {
     const order: string[] = [];
     const record = vi.fn(async () => {

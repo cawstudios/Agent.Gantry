@@ -262,6 +262,26 @@ function renderConfiguredAgentsYaml(
         `    recurring_job_default_model: ${quoteYamlString(agent.recurringJobDefaultModel)}`,
       );
     }
+    if (agent.toolRules?.length) {
+      lines.push('    tool_rules:');
+      for (const rule of agent.toolRules) {
+        lines.push(
+          `      - tool: ${quoteYamlString(rule.tool)}`,
+          `        action: ${rule.action}`,
+        );
+        if (rule.action === 'block' && rule.when) {
+          lines.push(
+            '        when:',
+            `          arg: ${quoteYamlString(rule.when.arg)}`,
+            `          matches: ${quoteYamlString(rule.when.matches)}`,
+          );
+        }
+        if (rule.action === 'require_prior') {
+          lines.push(`        prior: ${quoteYamlString(rule.prior)}`);
+        }
+        lines.push(`        reason: ${quoteYamlString(rule.reason)}`);
+      }
+    }
     renderAgentAccessYaml(lines, agent);
   }
   lines.push('');

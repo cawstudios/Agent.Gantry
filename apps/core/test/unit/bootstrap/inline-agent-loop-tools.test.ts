@@ -101,6 +101,88 @@ beforeEach(() => {
 });
 
 describe('inline core tool bootstrap', () => {
+  it('returns the structured rule denial envelope on the inline lane', async () => {
+    wire();
+    const input = laneInput();
+    input.input.toolRules = [
+      { tool: 'task_list', action: 'block', reason: 'no task inventory' },
+    ];
+    const tools = createInlineCoreTools(input, support());
+
+    await expect(tools.execute('task_list', {})).resolves.toMatchObject({
+      isError: true,
+      error: {
+        category: 'permission',
+        isRetryable: false,
+        message: expect.stringContaining('no task inventory'),
+      },
+    });
+  });
+
+  it.each([
+    {
+      label: 'permission',
+      rule: {
+        tool: 'mcp__crm__read',
+        action: 'block' as const,
+        reason: 'CRM reads are blocked',
+      },
+      resultClass: 'denied',
+      category: 'permission',
+    },
+    {
+      label: 'validation',
+      rule: {
+        tool: 'mcp__crm__read',
+        action: 'block' as const,
+        reason: 'CRM id is required',
+        when: { arg: 'id', matches: '.+' },
+      },
+      resultClass: 'invalid_request',
+      category: 'validation',
+    },
+  ])(
+    'persists the $label remote MCP denial envelope in tool activity audit',
+    async ({ rule, resultClass, category }) => {
+      const appendAuditEvent = vi.fn(async () => undefined);
+      wire({
+        getMcpServerRepository: () => ({ appendAuditEvent }),
+      });
+      const input = laneInput();
+      input.input.toolRules = [rule];
+      input.mcpServers = [
+        {
+          name: 'crm',
+          allowedToolNames: ['mcp__crm__read'],
+        },
+      ] as never;
+      const tools = createInlineCoreTools(input, support());
+
+      const result = await tools.authorizeThirdPartyMcpTool(
+        'mcp__crm__read',
+        {},
+      );
+      expect(result.allowed).toBe(false);
+      expect(JSON.parse(result.reason ?? '{}')).toMatchObject({
+        category,
+        isRetryable: false,
+        message: expect.stringContaining(rule.reason),
+      });
+      expect(appendAuditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            resultClass,
+            error: expect.objectContaining({
+              category,
+              isRetryable: false,
+              message: expect.stringContaining(rule.reason),
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
   it('mounts the shared durable task lifecycle tools', async () => {
     const repository = wire();
     const tools = createInlineCoreTools(laneInput(), support());

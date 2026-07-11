@@ -1633,6 +1633,86 @@ agents:
     ).toThrow('agents.kai.agent_engine is not supported');
   });
 
+  it('parses and renders per-agent tool_rules', () => {
+    const parsed = parseRuntimeSettings(`agents:
+  kai:
+    name: Kai
+    tool_rules:
+      - tool: Bash
+        action: block
+        when:
+          arg: command.options.0
+          matches: ^rm\\s
+        reason: destructive command
+      - tool: Deploy
+        action: require_prior
+        prior: Test
+        reason: tests must pass first
+`);
+
+    expect(parsed.agents.kai.toolRules).toEqual([
+      {
+        tool: 'Bash',
+        action: 'block',
+        when: { arg: 'command.options.0', matches: '^rm\\s' },
+        reason: 'destructive command',
+      },
+      {
+        tool: 'Deploy',
+        action: 'require_prior',
+        prior: 'Test',
+        reason: 'tests must pass first',
+      },
+    ]);
+    expect(
+      parseRuntimeSettings(renderRuntimeSettingsYaml(parsed)).agents.kai
+        .toolRules,
+    ).toEqual(parsed.agents.kai.toolRules);
+  });
+
+  it('rejects malformed tool_rules with the failing field path', () => {
+    const invalidRules = [
+      ['tool_rules must be an array', 'tool_rules: blocked'],
+      [
+        'tool_rules[0].prior must be a non-empty string',
+        `tool_rules:
+      - tool: Deploy
+        action: require_prior
+        reason: missing prior`,
+      ],
+      [
+        'tool_rules[0].when.arg must be a dot path',
+        `tool_rules:
+      - tool: Bash
+        action: block
+        when:
+          arg: command..value
+          matches: x
+        reason: malformed arg`,
+      ],
+      [
+        'tool_rules[0].when.matches must be a valid regular expression',
+        `tool_rules:
+      - tool: Bash
+        action: block
+        when:
+          arg: command
+          matches: "["
+        reason: malformed regex`,
+      ],
+    ];
+
+    for (const [message, rules] of invalidRules) {
+      expect(() =>
+        parseRuntimeSettings(`agents:
+  kai:
+    name: Kai
+    ${rules}
+`),
+      ).toThrow(`agents.kai.${message}`);
+    }
+  });
+
   it('rejects the retired memory.engine key', () => {
     expect(() =>
       parseRuntimeSettings(`memory:

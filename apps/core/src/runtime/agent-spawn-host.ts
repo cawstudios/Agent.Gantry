@@ -112,13 +112,17 @@ export function withControls(
     effort?: AgentInput['effort'];
     thinking?: AgentInput['configuredThinking'];
     maxOutputTokens?: number;
+    toolRules?: AgentInput['toolRules'];
   },
 ): AgentInput {
+  const { toolRules: _untrustedToolRules, ...trustedInput } = input;
+  const toolRules = defaults?.toolRules;
   return {
-    ...input,
+    ...trustedInput,
     effort: input.effort ?? defaults?.effort,
     configuredThinking: input.configuredThinking ?? defaults?.thinking,
     maxOutputTokens: input.maxOutputTokens ?? defaults?.maxOutputTokens,
+    ...(toolRules?.length ? { toolRules } : {}),
   };
 }
 
@@ -170,6 +174,9 @@ export async function prepareInlineAgentHostContext(
     effort: effectiveInput.effort,
     configuredThinking: effectiveInput.configuredThinking,
     maxOutputTokens: effectiveInput.maxOutputTokens,
+    ...(effectiveInput.toolRules?.length
+      ? { toolRules: effectiveInput.toolRules }
+      : {}),
   };
 }
 

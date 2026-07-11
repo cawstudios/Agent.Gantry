@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentCredentialBroker } from '@core/domain/ports/agent-credential-broker.js';
-import { getHostRuntimeCredentialEnv } from '@core/runtime/agent-spawn-host.js';
+import {
+  getHostRuntimeCredentialEnv,
+  withControls,
+} from '@core/runtime/agent-spawn-host.js';
 
 vi.mock('@core/config/index.js', () => ({
   AGENT_TIMEOUT: 30_000,
@@ -99,5 +102,39 @@ describe('getHostRuntimeCredentialEnv', () => {
     expect(broker.revokeInjection).toHaveBeenCalledWith({
       binding: expect.objectContaining({ runId: 'run:job-1' }),
     });
+  });
+});
+
+describe('withControls', () => {
+  const input = {
+    prompt: 'hello',
+    workspaceFolder: 'main_agent',
+    chatJid: 'conversation:test',
+  };
+
+  it('uses only settings-owned tool rules', () => {
+    const configured = [
+      { tool: 'Bash', action: 'block' as const, reason: 'configured' },
+    ];
+    expect(
+      withControls(
+        {
+          ...input,
+          toolRules: [{ tool: 'Read', action: 'block', reason: 'untrusted' }],
+        },
+        { toolRules: configured },
+      ).toolRules,
+    ).toEqual(configured);
+  });
+
+  it('strips incoming tool rules when settings have none', () => {
+    const result = withControls(
+      {
+        ...input,
+        toolRules: [{ tool: 'Read', action: 'block', reason: 'untrusted' }],
+      },
+      { toolRules: [] },
+    );
+    expect(result).not.toHaveProperty('toolRules');
   });
 });

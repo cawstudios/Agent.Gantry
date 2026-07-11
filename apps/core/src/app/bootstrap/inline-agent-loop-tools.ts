@@ -7,6 +7,7 @@ import {
   classifyMcpToolAuditError,
   summarizeMcpToolArgumentPayload,
   summarizeMcpToolError,
+  type McpToolAuditResultClass,
 } from '../../application/mcp/mcp-tool-audit.js';
 import type { RuntimeEventPublishInput } from '../../domain/events/events.js';
 import type { RuntimeAgentSessionRepository } from '../../domain/repositories/ops-repo.js';
@@ -33,6 +34,7 @@ import {
 import {
   createCoreToolRegistry,
   type CoreToolRegistryDeps,
+  type McpCompatibleToolError,
 } from '../../runtime/core-tools/registry.js';
 import { createCoreToolSchemas } from '../../runtime/core-tools/schemas.js';
 import {
@@ -73,6 +75,14 @@ type InlineCoreToolSupport = Pick<
   | 'formatMemoryWriteResponse'
 > & { schemaFactory: Parameters<typeof createCoreToolSchemas>[0] };
 
+function createToolSuccessLedger() {
+  const successfulTools = new Set<string>();
+  return {
+    recordSuccess: (toolName: string) => successfulTools.add(toolName),
+    hasSuccess: (toolName: string) => successfulTools.has(toolName),
+  };
+}
+
 let inlineCoreToolHostDeps: InlineCoreToolHostDeps | undefined;
 
 export function createInlineCoreTools(
@@ -91,11 +101,16 @@ export function createInlineCoreTools(
     outcome: 'attempt' | 'success' | 'failure';
     latencyMs: number;
     error?: unknown;
+    resultClass?: McpToolAuditResultClass;
+    structuredError?: McpCompatibleToolError;
   }): Promise<void>;
 } {
   const deps = inlineCoreToolHostDeps;
   if (!deps) throw new Error('Inline core tool host is not configured.');
   const run = laneInput.input;
+  const toolSuccessLedger = run.toolRules?.length
+    ? createToolSuccessLedger()
+    : undefined;
   const registry = createCoreToolRegistry({
     context: {
       sourceAgentFolder: laneInput.group.folder,
@@ -113,6 +128,9 @@ export function createInlineCoreTools(
       memoryUserId: run.memoryUserId,
       memoryBlock: run.memoryContextBlock,
       allowedToolRules: run.toolPolicyRules,
+      ...(toolSuccessLedger
+        ? { toolRules: run.toolRules, toolSuccessLedger }
+        : {}),
       yoloMode: run.yoloMode ?? deps.getYoloMode(),
       accessPreset: deps.getAgentAccessPreset(laneInput.group.folder),
     },
@@ -140,10 +158,107 @@ export function createInlineCoreTools(
   });
   const classifier = new ToolExecutionClassifier();
   const policy = new ToolExecutionPolicyService();
+  const recordThirdPartyMcpToolActivity = async (activity: {
+    serverName: string;
+    toolName: string;
+    toolInput: unknown;
+    outcome: 'attempt' | 'success' | 'failure';
+    latencyMs: number;
+    error?: unknown;
+    resultClass?: McpToolAuditResultClass;
+    structuredError?: McpCompatibleToolError;
+  }) => {
+    const repository = deps.getMcpServerRepository();
+    const appId = run.appId;
+    if (!repository || !appId) {
+      throw new Error('Inline MCP audit repository is unavailable.');
+    }
+    const capability = laneInput.mcpServers.find(
+      ({ name }) => name === activity.serverName,
+    );
+    const resultClass =
+      activity.resultClass ??
+      (activity.outcome === 'failure'
+        ? classifyMcpToolAuditError(activity.error)
+        : activity.outcome);
+    const payload = {
+      serverName: activity.serverName,
+      toolName: activity.toolName,
+      requestedToolRule: `mcp__${activity.serverName}__${activity.toolName}`,
+      resultClass,
+      latencyMs: activity.latencyMs,
+      argumentSummary: summarizeMcpToolArgumentPayload(activity.toolInput),
+      ...(activity.structuredError
+        ? { error: activity.structuredError }
+        : activity.error
+          ? { error: summarizeMcpToolError(activity.error) }
+          : {}),
+    };
+    await repository.appendAuditEvent({
+      id: `mcp-audit:${randomUUID()}` as never,
+      appId: appId as never,
+      agentId: run.agentId as never,
+      serverId: capability?.serverId as never,
+      bindingId: capability?.bindingId as never,
+      eventType: 'tool_activity',
+      actorId: 'inline-agent',
+      metadata: payload,
+      createdAt: new Date().toISOString() as never,
+    });
+    if (activity.outcome === 'success') {
+      toolSuccessLedger?.recordSuccess(
+        `mcp__${activity.serverName}__${activity.toolName}`,
+      );
+    }
+    if (!deps.publishRuntimeEvent) return;
+    await deps
+      .publishRuntimeEvent({
+        appId: appId as never,
+        agentId: run.agentId as never,
+        runId: run.runId as never,
+        eventType: RUNTIME_EVENT_TYPES.MCP_TOOL_ACTIVITY,
+        actor: 'inline-agent',
+        responseMode: 'none',
+        payload,
+      })
+      .catch(() => undefined);
+  };
   return {
     ...registry,
     authorizeThirdPartyMcpTool: async (name, toolInput, context) => {
       context?.signal?.throwIfAborted();
+      const toolRuleDenial = toolSuccessLedger
+        ? support.evaluateToolPreChecks({
+            toolName: name,
+            toolInput,
+            memoryBlock: run.memoryContextBlock ?? '',
+            yoloMode: run.yoloMode ?? deps.getYoloMode(),
+            toolRules: run.toolRules,
+            successLedger: toolSuccessLedger,
+          })
+        : null;
+      if (toolRuleDenial) {
+        const error = toolRuleDenial.error ?? {
+          category: 'permission' as const,
+          isRetryable: false as const,
+          message: toolRuleDenial.reason,
+        };
+        const [, serverName = '', toolName = name] = name.split('__');
+        await recordThirdPartyMcpToolActivity({
+          serverName,
+          toolName,
+          toolInput,
+          outcome: 'failure',
+          latencyMs: 0,
+          resultClass:
+            error.category === 'validation' ? 'invalid_request' : 'denied',
+          structuredError: error,
+        });
+        return {
+          allowed: false,
+          reason: JSON.stringify(error),
+        };
+      }
       const precheck = support.evaluateToolPreChecks({
         toolName: name,
         toolInput,
@@ -269,54 +384,7 @@ export function createInlineCoreTools(
               'Remote MCP permission request was denied.',
           };
     },
-    recordThirdPartyMcpToolActivity: async (activity) => {
-      const repository = deps.getMcpServerRepository();
-      const appId = run.appId;
-      if (!repository || !appId) {
-        throw new Error('Inline MCP audit repository is unavailable.');
-      }
-      const capability = laneInput.mcpServers.find(
-        ({ name }) => name === activity.serverName,
-      );
-      const resultClass =
-        activity.outcome === 'failure'
-          ? classifyMcpToolAuditError(activity.error)
-          : activity.outcome;
-      const payload = {
-        serverName: activity.serverName,
-        toolName: activity.toolName,
-        requestedToolRule: `mcp__${activity.serverName}__${activity.toolName}`,
-        resultClass,
-        latencyMs: activity.latencyMs,
-        argumentSummary: summarizeMcpToolArgumentPayload(activity.toolInput),
-        ...(activity.error
-          ? { error: summarizeMcpToolError(activity.error) }
-          : {}),
-      };
-      await repository.appendAuditEvent({
-        id: `mcp-audit:${randomUUID()}` as never,
-        appId: appId as never,
-        agentId: run.agentId as never,
-        serverId: capability?.serverId as never,
-        bindingId: capability?.bindingId as never,
-        eventType: 'tool_activity',
-        actorId: 'inline-agent',
-        metadata: payload,
-        createdAt: new Date().toISOString() as never,
-      });
-      if (!deps.publishRuntimeEvent) return;
-      await deps
-        .publishRuntimeEvent({
-          appId: appId as never,
-          agentId: run.agentId as never,
-          runId: run.runId as never,
-          eventType: RUNTIME_EVENT_TYPES.MCP_TOOL_ACTIVITY,
-          actor: 'inline-agent',
-          responseMode: 'none',
-          payload,
-        })
-        .catch(() => undefined);
-    },
+    recordThirdPartyMcpToolActivity,
   };
 }
 

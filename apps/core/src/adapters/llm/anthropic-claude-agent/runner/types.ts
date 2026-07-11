@@ -8,6 +8,7 @@ import type { YoloModeSettings } from '../../../../shared/yolo-mode-policy.js';
 import type { CapabilityRuntimeAccess } from '../../../../shared/capability-runtime-access.js';
 import type { SemanticCapabilityDefinition } from '../../../../shared/semantic-capabilities.js';
 import type { GantryAgentPromptMode } from '../../../../runner/gantry-agent-system-prompt.js';
+import type { DeclarativeToolRule } from '../../../../runner/tool-gate-core.js';
 
 export interface AgentRunnerInput {
   prompt: string;
@@ -24,6 +25,7 @@ export interface AgentRunnerInput {
   persona?: AgentPersona;
   browserProfileName?: string;
   allowedTools?: string[];
+  toolRules?: DeclarativeToolRule[];
   toolAccessRequirements?: string[];
   attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];

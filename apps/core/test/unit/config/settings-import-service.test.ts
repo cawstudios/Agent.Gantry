@@ -649,7 +649,7 @@ describe('importFleetSettingsRevision', () => {
   });
 
   it('appends a revision stamped with the current reader version', async () => {
-    expect(CURRENT_SETTINGS_READER_VERSION).toBe(9);
+    expect(CURRENT_SETTINGS_READER_VERSION).toBe(10);
     capabilityErrors = [];
     const repo = new FakeRevisionRepo();
     const outcome = await importFleetSettingsRevision(
@@ -764,6 +764,14 @@ describe('importFleetSettingsRevision', () => {
       },
       capabilities: [{ id: 'browser.use', version: '1' }],
       accessPreset: 'locked',
+      toolRules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests must pass first',
+        },
+      ],
     };
     settings.agents.analyst = {
       name: 'Analyst',
@@ -833,6 +841,14 @@ describe('importFleetSettingsRevision', () => {
       max_run_tokens: 32_000,
       effort: 'medium',
       thinking: { mode: 'on', budget_tokens: 8192 },
+      tool_rules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests must pass first',
+        },
+      ],
     });
     expect(
       (document.agents as Record<string, Record<string, unknown>>).analyst,
@@ -885,6 +901,14 @@ describe('importFleetSettingsRevision', () => {
       maxRunTokens: 32_000,
       effort: 'medium',
       thinking: { mode: 'on', budgetTokens: 8192 },
+      toolRules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests must pass first',
+        },
+      ],
     });
     expect(restored.agents.analyst.maxOutputTokens).toBe(4096);
     expect(restored.agents.researcher.capabilities).toEqual([

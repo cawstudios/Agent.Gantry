@@ -178,6 +178,19 @@ export type AgentEffort = ModelEffortLevel;
 export type RuntimeAgentThinking =
   | { mode: 'off'; budgetTokens?: never }
   | { mode: 'on'; budgetTokens?: number };
+export type RuntimeConfiguredToolRule =
+  | {
+      tool: string;
+      when?: { arg: string; matches: string };
+      action: 'block';
+      reason: string;
+    }
+  | {
+      tool: string;
+      action: 'require_prior';
+      prior: string;
+      reason: string;
+    };
 export type { AgentRuntime };
 
 export interface RuntimeConfiguredAgent {
@@ -195,6 +208,7 @@ export interface RuntimeConfiguredAgent {
   agentHarness?: AgentHarness;
   oneTimeJobDefaultModel?: string;
   recurringJobDefaultModel?: string;
+  toolRules?: RuntimeConfiguredToolRule[];
   bindings: Record<string, RuntimeConfiguredAgentBinding>;
   sources: RuntimeConfiguredAgentSources;
   capabilities: RuntimeConfiguredAgentCapability[];
