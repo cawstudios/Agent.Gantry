@@ -1143,6 +1143,24 @@ const openai = new OpenAI({
 - Usage is attributed to the API key in the request log; the gateway credential
   is request-scoped and revoked when delivery ends.
 
+## Usage
+
+Aggregated token usage across live agent turns, scheduled jobs, and Direct LLM
+API calls, from one normalized event stream (recorded from deployment forward;
+streaming passthrough responses are not measured in v1):
+
+```ts
+client.usage.query({
+  from, // ISO timestamp, required
+  to,   // ISO timestamp, required
+  agentId?, apiKeyId?, runId?, jobId?, model?,
+  groupBy?, // 'agent' | 'api_key' | 'model' | 'day'
+})
+```
+
+Requires the `usage:read` scope; results are scoped to the API key's app
+access. Missing/invalid time range → `400`; missing scope → `403`.
+
 ## Webhooks
 
 ```ts
