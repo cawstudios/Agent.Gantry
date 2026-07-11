@@ -1124,10 +1124,11 @@ const openai = new OpenAI({
   valid key without the scope → `403`.
 - `model` must be a registered Gantry model alias for the endpoint's response
   family; raw provider model ids are rejected with `400`.
-- An API key may carry an optional `maxTokens` ceiling. Requests whose
-  `max_tokens` / `max_completion_tokens` exceed it are rejected with `400
-  MAX_TOKENS_EXCEEDED` naming the limit — never silently clamped. Keys without
-  the field are unlimited.
+- An API key may carry an optional `maxTokens` ceiling. Limited keys must send
+  an explicit `max_tokens` / `max_completion_tokens` at or below the limit
+  (`n` choices are multiplied in on chat completions); violations are rejected
+  with `400 MAX_TOKENS_EXCEEDED` naming the limit — never silently clamped.
+  Keys without the field are unlimited.
 - Client-side tools, structured outputs, `max_tokens`, and thinking/effort
   parameters pass through to the provider unchanged. Provider-hosted execution
   surfaces (Anthropic server tools, remote MCP, containers; OpenAI hosted
