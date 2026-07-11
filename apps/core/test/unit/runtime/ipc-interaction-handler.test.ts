@@ -618,6 +618,7 @@ describe('ipc-interaction-handler', () => {
     expect(
       publishRuntimeEvent.mock.calls.map((call) => call[0].eventType),
     ).toEqual([
+      'interaction.pending',
       'permission.requested',
       'permission.allowed',
       'permission.resumed',

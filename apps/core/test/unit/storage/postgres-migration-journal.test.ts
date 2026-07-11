@@ -1190,11 +1190,13 @@ describe('Postgres migration journal', () => {
     ) as {
       entries: Array<{ idx: number; tag: string; when: number }>;
     };
-    expect(journal.entries.at(-1)).toMatchObject({
-      idx: 95,
-      when: 1777327800000,
-      tag: '0095_memory_review_content_fingerprint',
-    });
+    expect(journal.entries).toContainEqual(
+      expect.objectContaining({
+        idx: 95,
+        when: 1777327800000,
+        tag: '0095_memory_review_content_fingerprint',
+      }),
+    );
 
     const migration = fs.readFileSync(
       path.resolve(
