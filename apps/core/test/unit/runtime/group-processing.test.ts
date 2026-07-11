@@ -1427,7 +1427,7 @@ describe('createGroupProcessor', () => {
             usage,
             usageEventId: 'usage-event-1',
             modelAlias: 'sonnet',
-            providerId: 'anthropic',
+            providerId: 'test-provider',
           },
         }),
       );
