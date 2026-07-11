@@ -1139,9 +1139,9 @@ const openai = new OpenAI({
 ## Webhooks
 
 ```ts
-client.webhooks.register({ name, url, secret?, enabled? })
+client.webhooks.register({ name, url, secret?, enabled?, eventTypes?, agentId?, sessionId?, jobId? })
 client.webhooks.list()
-client.webhooks.update(webhookId, { name?, url?, secret?, enabled? })
+client.webhooks.update(webhookId, { name?, url?, secret?, enabled?, eventTypes?, agentId?, sessionId?, jobId? })
 client.webhooks.delete(webhookId)
 client.webhooks.test(webhookId)
 client.webhooks.replayDeadLetter(webhookId)
