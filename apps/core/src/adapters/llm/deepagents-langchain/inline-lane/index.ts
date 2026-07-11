@@ -672,11 +672,11 @@ function responseFormatForSchema(
   schema: Record<string, unknown>,
   { profile: { structuredOutput } }: ResolvedRunnerModel['model'],
 ) {
-  if (structuredOutput === true) return ProviderStrategy.fromSchema(schema);
   const name = 'gantry_structured_output';
-  return ToolStrategy.fromSchema({ ...schema, name, title: name });
+  const normalized = { ...schema, name, title: name };
+  if (structuredOutput === true) return ProviderStrategy.fromSchema(normalized);
+  return ToolStrategy.fromSchema(normalized);
 }
-
 function structuredOutputError(
   error: unknown,
   newSessionId: string,
