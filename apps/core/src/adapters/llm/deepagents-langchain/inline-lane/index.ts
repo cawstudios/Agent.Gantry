@@ -260,9 +260,7 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
           if (signal.aborted && isAbortError(error)) break;
           if (isGraphRecursionLimitError(error)) {
             await emitChain;
-            const terminal = laneInput.input.responseSchema
-              ? structuredOutputError(error, sessionId)
-              : inlineAgentMaxTurnsError(maxTurns, sessionId);
+            const terminal = inlineAgentMaxTurnsError(maxTurns, sessionId);
             await laneInput.emitOutput(terminal);
             return terminal;
           }

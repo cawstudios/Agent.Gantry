@@ -255,7 +255,15 @@ describe('DeepAgents inline lane', () => {
         });
       },
     }));
-    const input = laneInput({ maxTurns: 2, mcpServers: [] });
+    const base = laneInput();
+    const input = laneInput({
+      maxTurns: 2,
+      input: {
+        ...base.input,
+        responseSchema: { type: 'object', required: ['answer'] },
+      },
+      mcpServers: [],
+    });
     const lane = createDeepAgentsInlineAgentLoopLane({
       databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
       schema: 'gantry_deepagents',
