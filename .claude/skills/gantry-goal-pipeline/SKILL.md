@@ -84,19 +84,20 @@ python3 .codex/scripts/verify.py
 python3 ~/.claude/skills/autoreview/scripts/autoreview --mode branch --base origin/main
 ```
 
-Codex handles review rounds too (user decision 2026-07-11), via the plugin's
-NATIVE review command — not by running the autoreview python helper inside a
-rescue sandbox (that fails structurally: no usable temp dir, and the helper's
-inner `codex exec` has no network there). Launch and poll as orchestrator:
+Review rounds use the autoreview skill with codex as its engine (user decision
+2026-07-11; the plugin's native `review` command is NOT used). The orchestrator
+launches the helper detached from its own shell — the helper itself spawns
+`codex exec` as the reviewer, so codex performs the review either way:
 
 ```bash
-COMPANION=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | tail -1)
-node "$COMPANION" review --background --base <base-ref> --scope branch
-node "$COMPANION" status <review-id>   # then result once terminal
+nohup python3 ~/.claude/skills/autoreview/scripts/autoreview \
+  --mode branch --base <base-ref> > <scratch>/autoreview-rN.log 2>&1 &
 ```
 
-The launch call may block past 2 minutes before detaching — check `status`
-for the running review job rather than treating a timeout as failure.
+Do NOT try to run the helper inside a codex rescue task — it is policy-blocked
+three ways (shell wrappers rejected by prefix rules; out-of-workspace script
+execution needs an approval headless mode can't grant; the inner `codex exec`
+child has no sandbox network).
 
 Autoreview contract: accept only concrete findings grounded in current code;
 fix accepted findings with the smallest diff (via a Codex handoff or directly
