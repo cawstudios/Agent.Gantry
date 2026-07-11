@@ -521,9 +521,14 @@ POST /v1/sessions/:sessionId/messages
 }
 ```
 
-`response_schema` must be a JSON Schema object; worker-runtime agents reject
-it. Direct LLM API callers use provider-native structured output in the
-provider-shaped payload instead (see Direct LLM API below).
+`response_schema` must be a compilable JSON Schema — it is compiled at
+admission and an invalid schema returns a shaped `400` before any model call.
+The lane output is validated against it; a structurally invalid response
+triggers one corrective retry with the validation error fed back to the model,
+and retry exhaustion returns a structured failure carrying the last candidate
+text. Worker-runtime agents reject the field. Direct LLM API callers use
+provider-native structured output in the provider-shaped payload instead (see
+Direct LLM API below).
 
 ### Per-request model controls
 
