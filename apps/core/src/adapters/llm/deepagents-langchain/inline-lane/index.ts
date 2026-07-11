@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { loadMcpTools } from '@langchain/mcp-adapters';
-import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import {
   tool as createLangChainTool,
   type StructuredToolInterface,
@@ -51,10 +51,7 @@ import {
   normalizeDeepAgentStream,
   type LangGraphStreamEvent,
 } from '../runner/stream-normalizer.js';
-import {
-  createGantryScopedMemoryMiddleware,
-  searchGantryScopedMemory,
-} from './gantry-memory-middleware.js';
+import * as memory from './gantry-memory-middleware.js';
 import { createInlineSkillsMiddleware } from './skills.js';
 
 const CHECKPOINT_POOL_MAX_CONNECTIONS = 1;
@@ -118,10 +115,10 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
     const signal = AbortSignal.any([laneInput.signal, stop.signal]);
     const toolActivity = createInlineToolActivity(laneInput);
     let currentMemoryQuery = '';
-    const memoryMiddleware = createGantryScopedMemoryMiddleware({
+    const memoryMiddleware = memory.createGantryScopedMemoryMiddleware({
       currentQuery: () => currentMemoryQuery,
       searchMemory: (query) =>
-        searchGantryScopedMemory(laneInput, query, signal),
+        memory.searchGantryScopedMemory(laneInput, query, signal),
     });
     let saver: PostgresSaver | undefined;
     let remoteMcp:
@@ -210,7 +207,10 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
           : queued.join('\n');
         if (!prompt) break;
         currentMemoryQuery = prompt;
-        const messages: BaseMessage[] = [new HumanMessage(prompt)];
+        const messages = memory.buildInlineTurnMessages(
+          prompt,
+          firstTurn ? laneInput.input.memoryContextBlock : undefined,
+        );
         firstTurn = false;
 
         let normalized: Awaited<ReturnType<typeof normalizeDeepAgentStream>>;
