@@ -641,6 +641,7 @@ describe('ipc-interaction-handler', () => {
 
     expect(classifierConsult).toHaveBeenCalledWith(
       expect.objectContaining({
+        attended: true,
         canonicalToolName: 'Bash',
         turnIntentSummary: 'Inspect the current worktree.',
         approvedCapabilityIds: ['google.drive.files.list'],
@@ -812,6 +813,11 @@ describe('ipc-interaction-handler', () => {
       });
 
       expect(classifierConsult).toHaveBeenCalledTimes(shouldConsult ? 1 : 0);
+      if (shouldConsult) {
+        expect(classifierConsult).toHaveBeenCalledWith(
+          expect.objectContaining({ attended: !unattended }),
+        );
+      }
       expect(publishRuntimeEvent).toHaveBeenCalledTimes(shouldConsult ? 1 : 0);
       expect(requestPermissionApproval).toHaveBeenCalledTimes(
         shouldConsult ? 0 : 1,

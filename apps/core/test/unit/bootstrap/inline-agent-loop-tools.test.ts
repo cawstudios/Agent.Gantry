@@ -414,6 +414,7 @@ describe('inline core tool bootstrap', () => {
     ).resolves.toEqual({ allowed: true });
     expect(classifierConsult).toHaveBeenCalledWith(
       expect.objectContaining({
+        attended: true,
         turnIntentSummary: 'hello',
         canonicalToolName: 'mcp__crm__read',
         approvedCapabilityIds: ['google.drive.files.list'],
@@ -513,6 +514,11 @@ describe('inline core tool bootstrap', () => {
       });
 
       expect(classifierConsult).toHaveBeenCalledTimes(shouldConsult ? 1 : 0);
+      if (shouldConsult) {
+        expect(classifierConsult).toHaveBeenCalledWith(
+          expect.objectContaining({ attended: true }),
+        );
+      }
       expect(
         publishRuntimeEvent.mock.calls.filter(
           ([event]) => event.eventType === 'permission.classifier_decision',

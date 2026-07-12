@@ -83,6 +83,7 @@ export async function resolvePermissionIpcDecision(input: {
     input.deps.publishRuntimeEvent && classifierConfig
       ? await consultPermissionClassifierBeforePrompt({
           permissionMode,
+          attended: input.request.unattended !== true,
           trustedRequester,
           requestFamily: input.request.requestFamily ?? 'tool',
           appId: input.request.appId,

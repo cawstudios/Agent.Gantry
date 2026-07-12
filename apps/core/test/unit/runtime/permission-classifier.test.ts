@@ -28,6 +28,7 @@ import { redactSensitiveToolInputString } from '@core/runtime/ipc-tool-input-san
 
 const baseInput = {
   appId: 'default' as never,
+  attended: true,
   agentIdentity: { id: 'agent-1', name: 'Researcher', folder: 'researcher' },
   turnIntentSummary: 'Inspect the repository state requested by the user.',
   canonicalToolName: 'mcp__github__search',
@@ -102,7 +103,7 @@ describe('permission classifier verdict client', () => {
           modelRoute: 'anthropic',
         }),
         systemPrompt: expect.stringContaining(
-          'The approvedCapabilityIds list is authoritative operator intent',
+          'The explicit instruction is the authorization; approvedCapabilityIds is supporting context, not a gate, for attended reads.',
         ),
         singleRequest: true,
         timeoutMs: 12_000,
@@ -110,6 +111,7 @@ describe('permission classifier verdict client', () => {
     );
     expect(JSON.parse(query.mock.calls[0]?.[0].prompt as string)).toMatchObject(
       {
+        attended: true,
         agentIdentity: baseInput.agentIdentity,
         turnIntentSummary: baseInput.turnIntentSummary,
         canonicalToolName: baseInput.canonicalToolName,
@@ -178,7 +180,10 @@ describe('permission classifier verdict client', () => {
 
     const request = query.mock.calls[0]?.[0];
     expect(request.systemPrompt).toContain(
-      'ALLOW is appropriate only when the action clearly matches',
+      'When attended is false (scheduled or no human), apply the strict rule',
+    );
+    expect(request.systemPrompt).toContain(
+      'In all cases, ASK remains mandatory for writes, mutations, deletes, outward sends',
     );
     expect(request.prompt).toContain(baseInput.agentIdentity.id);
     expect(request.prompt).toContain(baseInput.turnIntentSummary);
@@ -398,6 +403,7 @@ describe('permission classifier decision events', () => {
     await expect(
       consultPermissionClassifierBeforePrompt({
         permissionMode: 'auto',
+        attended: true,
         requestFamily: 'tool',
         agentFolder: 'researcher',
         correlationId: 'request:untrusted',
@@ -426,6 +432,7 @@ describe('permission classifier decision events', () => {
 
     await consultPermissionClassifierBeforePrompt({
       permissionMode: 'auto',
+      attended: false,
       trustedRequester: true,
       requestFamily: 'tool',
       appId: 'app:test',
@@ -461,7 +468,10 @@ describe('permission classifier decision events', () => {
     });
 
     expect(classifierConsult).toHaveBeenCalledWith(
-      expect.objectContaining({ recentlyDeniedExactToolShape: true }),
+      expect.objectContaining({
+        attended: false,
+        recentlyDeniedExactToolShape: true,
+      }),
     );
   });
 
@@ -483,6 +493,7 @@ describe('permission classifier decision events', () => {
     await expect(
       consultPermissionClassifierBeforePrompt({
         permissionMode: 'auto',
+        attended: true,
         trustedRequester: true,
         requestFamily: 'tool',
         appId: 'app:test',
