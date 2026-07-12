@@ -1116,7 +1116,7 @@ describe('validateIpcAuthRequest', () => {
 
   it('caps wide signed permission tool input during parsing', () => {
     const toolInput: Record<string, unknown> = {
-      command: 'npm test',
+      command: 'x'.repeat(600),
       apiToken: 'secret-token-value',
     };
     for (let index = 0; index < 100; index += 1) {
@@ -1140,11 +1140,12 @@ describe('validateIpcAuthRequest', () => {
     const parsed = parsePermissionIpcRequest(signedPayload(payload), 'team');
 
     expect(parsed.toolInput).toMatchObject({
-      command: 'npm test',
+      command: `${'x'.repeat(500)}...[truncated]`,
       apiToken: '[REDACTED]',
       __omitted_keys: 'more',
     });
     expect(parsed.toolInput).not.toHaveProperty('extra_99');
+    expect(parsed.toolInputSanitized).toBe(true);
   });
 
   it('rejects permission IPC approval target mismatches', () => {

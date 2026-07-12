@@ -639,15 +639,14 @@ describe('ipc-interaction-handler', () => {
     );
   });
 
-  it('publishes a failure-coded classifier ask before preserving the IPC prompt flow', async () => {
+  it('publishes an input-truncated ask before preserving the IPC prompt flow', async () => {
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-auto-ask.json');
     fs.writeFileSync(claimedPath, '{}');
     const classifierConsult = vi.fn(async () => ({
-      decision: 'ask' as const,
-      reason: 'Classifier unavailable (timeout); ask the user.',
-      latencyMs: 3_000,
-      failureCode: 'timeout' as const,
+      decision: 'allow' as const,
+      reason: 'Would allow if consulted.',
+      latencyMs: 1,
     }));
     const requestPermissionApproval = vi.fn(async () => ({
       approved: false,
@@ -667,6 +666,7 @@ describe('ipc-interaction-handler', () => {
         sourceAgentFolder: 'main_agent',
         targetJid: 'tg:auto',
         toolName: 'mcp__crm__read',
+        toolInputSanitized: true,
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -691,7 +691,7 @@ describe('ipc-interaction-handler', () => {
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     });
 
-    expect(classifierConsult).toHaveBeenCalledOnce();
+    expect(classifierConsult).not.toHaveBeenCalled();
     expect(requestPermissionApproval).toHaveBeenCalledWith(
       expect.objectContaining({
         suggestions: undefined,
@@ -702,22 +702,23 @@ describe('ipc-interaction-handler', () => {
         eventType: 'permission.classifier_decision',
         payload: expect.objectContaining({
           decision: 'ask',
-          failureCode: 'timeout',
+          failureCode: 'input_truncated',
         }),
       }),
     );
   });
 
-  it('turns an unattended auto-classifier ask into an immediate IPC denial', async () => {
+  it('turns unattended sanitized auto input into an immediate IPC denial', async () => {
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-unattended-ask.json');
     fs.writeFileSync(claimedPath, '{}');
     const classifierConsult = vi.fn(async () => ({
-      decision: 'ask' as const,
-      reason: 'Mutation scope requires a human.',
-      latencyMs: 8,
+      decision: 'allow' as const,
+      reason: 'Would allow if consulted.',
+      latencyMs: 1,
     }));
     const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
 
     await processPermissionInteractionIpc({
       request: {
@@ -730,6 +731,7 @@ describe('ipc-interaction-handler', () => {
         targetJid: 'tg:auto',
         toolName: 'RunCommand',
         unattended: true,
+        toolInputSanitized: true,
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -741,7 +743,7 @@ describe('ipc-interaction-handler', () => {
         }),
         requestPermissionApproval,
         classifierConsult,
-        publishRuntimeEvent: vi.fn(async () => undefined),
+        publishRuntimeEvent,
         getPermissionRuntimeSettings: () => ({
           agents: {},
           permissions: { autoMode: {} },
@@ -754,7 +756,7 @@ describe('ipc-interaction-handler', () => {
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     });
 
-    expect(classifierConsult).toHaveBeenCalledOnce();
+    expect(classifierConsult).not.toHaveBeenCalled();
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(
       JSON.parse(
@@ -772,9 +774,15 @@ describe('ipc-interaction-handler', () => {
       approved: false,
       mode: 'cancel',
       decidedBy: 'runtime',
-      reason: expect.stringContaining('Mutation scope requires a human.'),
+      reason: expect.stringContaining('input was sanitized'),
       decisionClassification: 'user_reject',
     });
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.classifier_decision',
+        payload: expect.objectContaining({ failureCode: 'input_truncated' }),
+      }),
+    );
   });
 
   it.each([

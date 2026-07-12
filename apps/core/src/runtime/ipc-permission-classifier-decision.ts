@@ -49,6 +49,7 @@ export async function resolvePermissionIpcDecision(input: {
             input.request.turnIntentSummary ?? input.request.description ?? '',
           canonicalToolName: input.request.toolName,
           toolInput: input.request.toolInput,
+          toolInputSanitized: input.request.toolInputSanitized,
           policyDecisionReason:
             input.request.decisionReason ?? 'Human approval is required.',
           suggestions: input.request.suggestions,

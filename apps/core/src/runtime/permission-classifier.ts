@@ -28,6 +28,7 @@ import {
 import { resolveModelSelectionForWorkload } from '../shared/model-catalog.js';
 import type { PermissionMode } from '../shared/permission-mode.js';
 import type { PermissionApprovalUpdate } from '../domain/types.js';
+import { SENSITIVE_TOOL_INPUT_KEY_PATTERN } from './ipc-tool-input-sanitization.js';
 
 export const PERMISSION_CLASSIFIER_TIMEOUT_MS = 3_000;
 export const PERMISSION_CLASSIFIER_MAX_TOOL_INPUT_CHARS = 4_000;
@@ -39,7 +40,8 @@ export type PermissionClassifierFailureCode =
   | 'model_resolution_failure'
   | 'query_error'
   | 'parse_failure'
-  | 'validation_failure';
+  | 'validation_failure'
+  | 'input_truncated';
 
 export interface PermissionClassifierInput {
   appId: AppId;
@@ -103,6 +105,7 @@ export interface PermissionClassifierPromptConsultInput {
   turnIntentSummary: string;
   canonicalToolName: string;
   toolInput: unknown;
+  toolInputSanitized?: boolean;
   policyDecisionReason: string;
   suggestions?: PermissionApprovalUpdate[];
   promotion?: Pick<PermissionPromotionInput, 'repository' | 'offer'>;
@@ -157,7 +160,6 @@ const CLASSIFIER_SYSTEM_PROMPT = [
   'Return strict JSON only: {"decision":"allow|ask","reason":"short reason"}.',
 ].join('\n');
 
-const SECRET_KEY_PATTERN = /(secret|token|password|authorization)/i;
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '...[TRUNCATED]';
 
@@ -242,25 +244,31 @@ export async function consultPermissionClassifierBeforePrompt(
   ) {
     return undefined;
   }
-  const result = await (input.classifierConsult ?? consultPermissionClassifier)(
-    {
-      appId: (input.appId ?? 'default') as AppId,
-      agentIdentity: {
-        id: input.agentId ?? input.agentFolder,
-        ...(input.agentName ? { name: input.agentName } : {}),
-        folder: input.agentFolder,
-      },
-      turnIntentSummary: input.turnIntentSummary,
-      canonicalToolName: input.canonicalToolName,
-      toolInput: input.toolInput,
-      policyDecisionReason: input.policyDecisionReason,
-      autoModeModel: input.classifierConfig.autoModeModel,
-      memoryModelConfig: {
-        extractor: input.classifierConfig.memoryExtractorModel,
-      },
-      signal: input.signal,
-    },
-  );
+  const result: PermissionClassifierResult = input.toolInputSanitized
+    ? {
+        decision: 'ask',
+        reason:
+          'Classifier skipped because IPC tool input was sanitized; ask the user.',
+        latencyMs: 0,
+        failureCode: 'input_truncated',
+      }
+    : await (input.classifierConsult ?? consultPermissionClassifier)({
+        appId: (input.appId ?? 'default') as AppId,
+        agentIdentity: {
+          id: input.agentId ?? input.agentFolder,
+          ...(input.agentName ? { name: input.agentName } : {}),
+          folder: input.agentFolder,
+        },
+        turnIntentSummary: input.turnIntentSummary,
+        canonicalToolName: input.canonicalToolName,
+        toolInput: input.toolInput,
+        policyDecisionReason: input.policyDecisionReason,
+        autoModeModel: input.classifierConfig.autoModeModel,
+        memoryModelConfig: {
+          extractor: input.classifierConfig.memoryExtractorModel,
+        },
+        signal: input.signal,
+      });
   const suggestions =
     input.suggestions ??
     synthesizeHostPermissionSuggestions(
@@ -415,7 +423,7 @@ function redactValue(
   seen.add(value);
   const output: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value).slice(0, 100)) {
-    output[key] = SECRET_KEY_PATTERN.test(key)
+    output[key] = SENSITIVE_TOOL_INPUT_KEY_PATTERN.test(key)
       ? REDACTED
       : redactValue(entry, seen, depth + 1);
   }

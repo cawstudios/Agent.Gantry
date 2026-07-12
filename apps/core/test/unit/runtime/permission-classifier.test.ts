@@ -143,6 +143,15 @@ describe('permission classifier verdict client', () => {
     const redacted = redactPermissionClassifierToolInput({
       nested: {
         apiToken: 'token-value',
+        apiKey: 'api-key-value',
+        api_key: 'api-underscore-key-value',
+        credential: 'credential-value',
+        credentials: 'credentials-value',
+        key: 'key-value',
+        passphrase: 'passphrase-value',
+        bearer: 'bearer-value',
+        cookie: 'cookie-value',
+        session: 'session-value',
         PASSWORD: 'password-value',
         authorizationHeader: 'Bearer secret',
       },
@@ -150,6 +159,15 @@ describe('permission classifier verdict client', () => {
     });
 
     expect(redacted).not.toContain('token-value');
+    expect(redacted).not.toContain('api-key-value');
+    expect(redacted).not.toContain('api-underscore-key-value');
+    expect(redacted).not.toContain('credential-value');
+    expect(redacted).not.toContain('credentials-value');
+    expect(redacted).not.toContain('key-value');
+    expect(redacted).not.toContain('passphrase-value');
+    expect(redacted).not.toContain('bearer-value');
+    expect(redacted).not.toContain('cookie-value');
+    expect(redacted).not.toContain('session-value');
     expect(redacted).not.toContain('password-value');
     expect(redacted).not.toContain('Bearer secret');
     expect(redacted).toContain('[REDACTED]');
