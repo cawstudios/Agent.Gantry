@@ -608,6 +608,7 @@ describe('ipc-interaction-handler', () => {
         toolInputSanitizedPaths: ['environment.HTTP_PROXY'],
         decisionReason: 'No allow rule matched.',
         turnIntentSummary: 'Inspect the current worktree.',
+        description: 'Create a spreadsheet.',
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -620,6 +621,22 @@ describe('ipc-interaction-handler', () => {
         }),
         requestPermissionApproval,
         isControlApproverAllowed: vi.fn(async () => true),
+        getPermissionMessageRepository: () => ({
+          getRecentTopLevelMessagesBefore: vi.fn(async () => [
+            {
+              content: 'Older request.',
+              is_from_me: false,
+              is_bot_message: false,
+            },
+            { content: 'Agent output.', is_from_me: true },
+            {
+              content: 'List the files in my Drive.'.repeat(100),
+              is_from_me: false,
+              is_bot_message: false,
+            },
+          ]),
+          getLatestThreadMessages: vi.fn(),
+        }),
         classifierConsult,
         publishRuntimeEvent,
         getPermissionRuntimeSettings: () => ({
@@ -643,7 +660,9 @@ describe('ipc-interaction-handler', () => {
       expect.objectContaining({
         attended: true,
         canonicalToolName: 'Bash',
-        turnIntentSummary: 'Inspect the current worktree.',
+        turnIntentSummary: 'List the files in my Drive.'
+          .repeat(100)
+          .slice(0, 1_500),
         approvedCapabilityIds: ['google.drive.files.list'],
       }),
     );
@@ -674,6 +693,7 @@ describe('ipc-interaction-handler', () => {
         eventType: 'permission.classifier_decision',
         payload: expect.objectContaining({
           decision: 'allow',
+          intentSource: 'operator_message',
           suggestionKey: 'main_agent|RunCommand(git status --short)',
         }),
       }),
@@ -687,6 +707,7 @@ describe('ipc-interaction-handler', () => {
       latencyMs: 5,
     }));
     const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
     const targetJid = 'tg:-1003798366047';
     const sourceAgentFolder = 'main_agent';
     const routeKey = makeAgentThreadQueueKey(
@@ -702,6 +723,8 @@ describe('ipc-interaction-handler', () => {
         senderId: 'approver-1',
         toolName: 'RunCommand',
         toolInput: { command: 'git status --short' },
+        turnIntentSummary: 'Inspect the worktree.',
+        description: 'Create a spreadsheet.',
       },
       sourceAgentFolder,
       deps: {
@@ -718,7 +741,7 @@ describe('ipc-interaction-handler', () => {
         requestPermissionApproval,
         isControlApproverAllowed: vi.fn(async () => true),
         classifierConsult,
-        publishRuntimeEvent: vi.fn(async () => undefined),
+        publishRuntimeEvent,
         getPermissionRuntimeSettings: () => ({
           agents: {},
           permissions: { autoMode: {} },
@@ -731,12 +754,87 @@ describe('ipc-interaction-handler', () => {
     expect(classifierConsult.mock.calls[0]?.[0].toolInput).toEqual({
       command: 'git status --short',
     });
+    expect(classifierConsult.mock.calls[0]?.[0].turnIntentSummary).toBe(
+      'Inspect the worktree.',
+    );
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ intentSource: 'runner_summary' }),
+      }),
+    );
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(decision).toMatchObject({
       approved: true,
       mode: 'allow_once',
       decidedBy: 'auto_classifier',
     });
+  });
+
+  it('uses empty intent when operator lookup fails and never falls back to description', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'ask' as const,
+      reason: 'The intent is unavailable.',
+      latencyMs: 1,
+    }));
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: false,
+      mode: 'cancel' as const,
+      decidedBy: 'owner',
+    }));
+
+    await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-no-intent',
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:no-intent',
+        senderId: 'approver-1',
+        toolName: 'RunCommand',
+        toolInput: { command: 'gog drive ls' },
+        description: 'Create a spreadsheet.',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:no-intent': {
+            name: 'Gantry',
+            folder: 'main_agent',
+            trigger: '@Gantry',
+            added_at: '2026-07-12T00:00:00.000Z',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'dm',
+          },
+        }),
+        requestPermissionApproval,
+        isControlApproverAllowed: vi.fn(async () => true),
+        getPermissionMessageRepository: () => ({
+          getRecentTopLevelMessagesBefore: vi.fn(async () => {
+            throw new Error('lookup failed');
+          }),
+          getLatestThreadMessages: vi.fn(),
+        }),
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {},
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+    });
+
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({ turnIntentSummary: '' }),
+    );
+    expect(
+      classifierConsult.mock.calls[0]?.[0].turnIntentSummary,
+    ).not.toContain('Create a spreadsheet.');
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ intentSource: 'none' }),
+      }),
+    );
+    expect(requestPermissionApproval).toHaveBeenCalledOnce();
   });
 
   it.each([

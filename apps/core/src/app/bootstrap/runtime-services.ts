@@ -468,6 +468,7 @@ export async function startRuntimeServices(
     getPermissionPromotionRepository: resolved.getPermissionPromotionRepository,
     publishRuntimeEvent: resolved.publishRuntimeEvent,
     getPermissionRuntimeSettings: getRuntimeSettingsForConfig,
+    getPermissionMessageRepository: () => resolved.opsRepository,
     subscribeRuntimeEvents: resolved.subscribeRuntimeEvents,
     getEgressSettings: () => getRuntimeSettingsForConfig().permissions.egress,
     mirrorAgentToolRulesToSettings,

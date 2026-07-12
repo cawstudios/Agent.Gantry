@@ -7,7 +7,10 @@ import {
   UserQuestionRequest,
   UserQuestionResponse,
 } from '../domain/types.js';
-import type { RuntimeJobRepository } from '../domain/repositories/ops-repo.js';
+import type {
+  RuntimeJobRepository,
+  RuntimeMessageRepository,
+} from '../domain/repositories/ops-repo.js';
 import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 import type {
   CapabilitySecretRepository,
@@ -121,6 +124,10 @@ export interface IpcDeps {
     permissions: { autoMode: { model?: string } };
     memory: { llm: { models: { extractor: string } } };
   };
+  getPermissionMessageRepository?: () => Pick<
+    RuntimeMessageRepository,
+    'getRecentTopLevelMessagesBefore' | 'getLatestThreadMessages'
+  >;
   subscribeRuntimeEvents?: RuntimeEventPublisherPort['subscribe'];
   getEgressSettings?: () => EgressSettings;
   getJobControl?: () => JobControlPort | undefined;

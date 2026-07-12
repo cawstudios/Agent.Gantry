@@ -79,8 +79,16 @@ export async function resolvePermissionIpcDecision(input: {
       }
     : undefined;
   const trustedRequester = await isTrustedRequester(input, route);
+  const shouldConsultClassifier =
+    input.deps.publishRuntimeEvent &&
+    classifierConfig &&
+    permissionMode === 'auto' &&
+    trustedRequester;
+  const intent = shouldConsultClassifier
+    ? await resolvePermissionIntent(input)
+    : undefined;
   const classifierDecision =
-    input.deps.publishRuntimeEvent && classifierConfig
+    shouldConsultClassifier && intent
       ? await consultPermissionClassifierBeforePrompt({
           permissionMode,
           attended: input.request.unattended !== true,
@@ -95,8 +103,8 @@ export async function resolvePermissionIpcDecision(input: {
           threadId: input.request.threadId,
           correlationId: input.request.requestId,
           actor: 'permission',
-          turnIntentSummary:
-            input.request.turnIntentSummary ?? input.request.description ?? '',
+          intentSource: intent.source,
+          turnIntentSummary: intent.summary,
           canonicalToolName: input.request.toolName,
           toolInput: input.request.toolInput,
           toolInputSanitized: input.request.toolInputSanitized,
@@ -106,8 +114,8 @@ export async function resolvePermissionIpcDecision(input: {
           approvedCapabilityIds,
           suggestions: input.request.suggestions,
           ...(promotion ? { promotion } : {}),
-          classifierConfig,
-          publishRuntimeEvent: input.deps.publishRuntimeEvent,
+          classifierConfig: classifierConfig!,
+          publishRuntimeEvent: input.deps.publishRuntimeEvent!,
           classifierConsult: input.deps.classifierConsult,
         })
       : undefined;
@@ -134,6 +142,71 @@ export async function resolvePermissionIpcDecision(input: {
       suggestions: input.request.suggestions,
     }));
   return input.deps.requestPermissionApproval(input.request);
+}
+
+async function resolvePermissionIntent(
+  input: Parameters<typeof resolvePermissionIpcDecision>[0],
+): Promise<{
+  summary: string;
+  source: 'operator_message' | 'runner_summary' | 'none';
+}> {
+  let operatorMessage: string | undefined;
+  if (
+    input.request.unattended !== true &&
+    input.request.targetJid &&
+    input.deps.getPermissionMessageRepository
+  ) {
+    try {
+      const repository = input.deps.getPermissionMessageRepository();
+      const upperBound = {
+        timestamp: '9999-12-31T23:59:59.999Z',
+        id: '\uffff',
+      };
+      const messages = input.request.threadId
+        ? await repository.getLatestThreadMessages(
+            input.request.targetJid,
+            input.request.threadId,
+            upperBound,
+            50,
+            { providerAccountId: input.request.providerAccountId },
+          )
+        : await repository.getRecentTopLevelMessagesBefore(
+            input.request.targetJid,
+            upperBound,
+            30,
+            { providerAccountId: input.request.providerAccountId },
+          );
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (
+          message &&
+          message.is_from_me !== true &&
+          message.is_bot_message !== true &&
+          message.content.trim()
+        ) {
+          operatorMessage = message.content;
+          break;
+        }
+      }
+    } catch {
+      operatorMessage = undefined;
+    }
+  }
+  const resolvedOperatorMessage = operatorMessage?.trim();
+  if (resolvedOperatorMessage) {
+    return {
+      summary: resolvedOperatorMessage.slice(0, 1_500),
+      source: 'operator_message',
+    };
+  }
+  const runnerSummary = input.request.turnIntentSummary?.trim();
+  if (runnerSummary) {
+    return {
+      summary: runnerSummary.slice(0, 1_500),
+      source: 'runner_summary',
+    };
+  }
+  return { summary: '', source: 'none' };
 }
 
 async function isTrustedRequester(

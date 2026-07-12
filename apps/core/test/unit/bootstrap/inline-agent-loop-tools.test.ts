@@ -427,6 +427,7 @@ describe('inline core tool bootstrap', () => {
         eventType: 'permission.classifier_decision',
         payload: expect.objectContaining({
           decision: 'allow',
+          intentSource: 'operator_message',
           toolName: 'mcp__crm__read',
         }),
       }),

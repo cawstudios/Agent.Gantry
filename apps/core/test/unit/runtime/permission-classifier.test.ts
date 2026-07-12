@@ -185,6 +185,12 @@ describe('permission classifier verdict client', () => {
     expect(request.systemPrompt).toContain(
       'In all cases, ASK remains mandatory for writes, mutations, deletes, outward sends',
     );
+    expect(request.systemPrompt).toContain(
+      'actual secret material appearing in the command (tokens, keys, passwords, bearer or authorization strings)',
+    );
+    expect(request.systemPrompt).toContain(
+      'Account selectors such as email addresses, usernames, account ids, and profile names are identifiers, not secret values.',
+    );
     expect(request.prompt).toContain(baseInput.agentIdentity.id);
     expect(request.prompt).toContain(baseInput.turnIntentSummary);
     expect(request.prompt).toContain(baseInput.canonicalToolName);
@@ -408,6 +414,7 @@ describe('permission classifier decision events', () => {
         agentFolder: 'researcher',
         correlationId: 'request:untrusted',
         actor: 'permission',
+        intentSource: 'operator_message',
         turnIntentSummary: 'Inspect the repository status.',
         canonicalToolName: 'RunCommand',
         toolInput: { command: 'git status' },
@@ -439,6 +446,7 @@ describe('permission classifier decision events', () => {
       agentFolder: 'researcher',
       correlationId: 'request:denied',
       actor: 'permission',
+      intentSource: 'operator_message',
       turnIntentSummary: 'Inspect the repository status.',
       canonicalToolName: 'RunCommand',
       toolInput: { command: 'git status' },
@@ -503,6 +511,7 @@ describe('permission classifier decision events', () => {
         conversationId: 'conversation:test',
         correlationId: 'request:test',
         actor: 'permission',
+        intentSource: 'operator_message',
         turnIntentSummary: 'Inspect the repository status.',
         canonicalToolName: 'RunCommand',
         toolInput: { command: 'git status' },
@@ -555,6 +564,7 @@ describe('permission classifier decision events', () => {
       agentId: 'agent:test' as never,
       runId: 'run:test' as never,
       actor: 'permission-classifier',
+      intentSource: 'operator_message',
       toolName: 'mcp__source__lookup',
       decision: 'allow',
       reason: 'Read-only lookup matches the turn intent.',
@@ -569,6 +579,7 @@ describe('permission classifier decision events', () => {
       actor: 'permission-classifier',
       payload: {
         toolName: 'mcp__source__lookup',
+        intentSource: 'operator_message',
         decision: 'allow',
         reason: 'Read-only lookup matches the turn intent.',
         latencyMs: 24,
@@ -589,6 +600,7 @@ describe('permission classifier decision events', () => {
       threadId: 'thread:test' as never,
       correlationId: 'request:test',
       actor: 'permission-classifier',
+      intentSource: 'runner_summary',
       toolName: 'RunCommand',
       decision: 'ask',
       reason: 'Classifier unavailable; ask the user.',
@@ -609,6 +621,7 @@ describe('permission classifier decision events', () => {
       actor: 'permission-classifier',
       payload: {
         toolName: 'RunCommand',
+        intentSource: 'runner_summary',
         decision: 'ask',
         reason: 'Classifier unavailable; ask the user.',
         latencyMs: 3_000,

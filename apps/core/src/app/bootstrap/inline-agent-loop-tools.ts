@@ -371,6 +371,7 @@ export function createInlineCoreTools(
           threadId: run.threadId,
           correlationId: permissionRequestId,
           actor: 'permission',
+          intentSource: 'operator_message',
           turnIntentSummary: run.prompt,
           canonicalToolName: name,
           toolInput,
