@@ -517,7 +517,7 @@ describe('inline core tool bootstrap', () => {
       expect(classifierConsult).toHaveBeenCalledTimes(shouldConsult ? 1 : 0);
       if (shouldConsult) {
         expect(classifierConsult).toHaveBeenCalledWith(
-          expect.objectContaining({ attended: true }),
+          expect.objectContaining({ attended: !isScheduledJob }),
         );
       }
       expect(

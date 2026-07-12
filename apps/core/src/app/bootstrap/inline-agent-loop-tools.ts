@@ -356,7 +356,7 @@ export function createInlineCoreTools(
       if (deps.publishRuntimeEvent) {
         classifierDecision = await consultPermissionClassifierBeforePrompt({
           permissionMode: run.permissionMode,
-          attended: true,
+          attended: run.isScheduledJob !== true,
           trustedRequester:
             (run.isScheduledJob === true && !run.memoryUserId) ||
             (Boolean(run.memoryUserId) &&

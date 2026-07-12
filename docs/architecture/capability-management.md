@@ -399,10 +399,16 @@ How a gray-zone call resolves:
    blanket-trusted. Everything else keeps today's behavior.
 3. One short LLM call judges the actual invocation against the turn intent
    (agent identity, triggering-message summary, canonical tool name,
-   secret-redacted input, policy reason, and the agent's approved capability
-   selection ids as authoritative operator intent — a read-only action whose
-   credential plainly belongs to an approved capability may be allowed;
-   writes, unmatched credentials, spend, and ambiguity still ask). `allow` resolves the request as an
+   secret-redacted input, and policy reason), and the verdict rules depend on
+   whether a human is present. Attended (a live operator instruction drove
+   the turn): the instruction itself is the authorization — read-only
+   actions plainly within its scope may be allowed, and the approved
+   capability list is deliberately withheld from the prompt so it cannot be
+   misread as an allowlist. Unattended (scheduled, no human): strict rule —
+   only read-only actions whose credential plainly belongs to an approved
+   capability selection may be allowed. In both modes writes, mutations,
+   outward sends, spend, secret material, intent mismatch, and ambiguity
+   still ask. `allow` resolves the request as an
    `allow_once` decision recorded with `decidedBy: auto_classifier`; `ask`
    falls through to the normal prompt. Timeouts, parse failures, or an
    unconfigured model all collapse to `ask` — the worst case is exactly

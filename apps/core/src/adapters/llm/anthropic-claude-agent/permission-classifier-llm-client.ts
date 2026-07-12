@@ -20,7 +20,12 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const CLASSIFIER_MAX_TOKENS = 256;
 
 interface MessagesResponse {
-  content?: Array<{ type?: string; text?: string }>;
+  content?: Array<{
+    type?: string;
+    text?: string;
+    name?: string;
+    input?: unknown;
+  }>;
 }
 
 export function createDirectAnthropicClassifierLlmClient(): MemoryLlmClient {
@@ -92,6 +97,22 @@ async function requestDirectAnthropicCompletion(
         max_tokens: CLASSIFIER_MAX_TOKENS,
         ...(opts.systemPrompt ? { system: opts.systemPrompt } : {}),
         messages: [{ role: 'user', content: opts.prompt }],
+        tools: [
+          {
+            name: 'permission_verdict',
+            description: 'Return the permission classifier verdict.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                decision: { type: 'string', enum: ['allow', 'ask'] },
+                reason: { type: 'string' },
+              },
+              required: ['decision', 'reason'],
+              additionalProperties: false,
+            },
+          },
+        ],
+        tool_choice: { type: 'tool', name: 'permission_verdict' },
       }),
       signal: opts.signal,
     });
@@ -103,6 +124,13 @@ async function requestDirectAnthropicCompletion(
     }
     const parsed = (await response.json()) as MessagesResponse;
     opts.signal?.throwIfAborted();
+    const verdict = (parsed.content ?? []).find(
+      (block) =>
+        block.type === 'tool_use' && block.name === 'permission_verdict',
+    );
+    if (verdict?.input !== undefined) {
+      return JSON.stringify(verdict.input);
+    }
     return (parsed.content ?? [])
       .filter((block) => block.type === 'text')
       .map((block) => block.text ?? '')

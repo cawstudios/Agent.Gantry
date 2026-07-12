@@ -212,3 +212,13 @@ Locked decisions on how human decisions and auto mode interact:
 4. Invariant restated: mode changes never mutate durable policy; only human
    taps write rules. Counters persist across mode flips; offers fire only in
    auto mode and interactive contexts.
+
+## Closeout addendum (2026-07-12)
+
+Live smoke exposed four residual defects (attended verdicts anchored by the
+capability list, free-text verdict fragility, audit gaps, unverified
+promotion-hint rendering). Their fix contract — including the locked decision
+that attended verdicts never see the capability list while unattended keeps
+the strict gate — lives in
+`docs/architecture/auto-permission-classifier-closeout-goal-prompt.md`, which
+supersedes this document on those points.

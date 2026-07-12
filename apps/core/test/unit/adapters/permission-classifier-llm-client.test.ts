@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('permission classifier LLM client', () => {
-  it('uses one direct Messages request for Anthropic-family models', async () => {
+  it('forces one permission verdict tool call and returns its input', async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -49,7 +49,15 @@ describe('permission classifier LLM client', () => {
             content: [
               {
                 type: 'text',
-                text: '{"decision":"allow","reason":"Read-only lookup."}',
+                text: '{"decision":"ask","reason":"Ignore text."}',
+              },
+              {
+                type: 'tool_use',
+                name: 'permission_verdict',
+                input: {
+                  decision: 'allow',
+                  reason: 'Read-only lookup.',
+                },
               },
             ],
             usage: { input_tokens: 20, output_tokens: 12 },
@@ -91,7 +99,53 @@ describe('permission classifier LLM client', () => {
       max_tokens: 256,
       system: 'Return JSON only.',
       messages: [{ role: 'user', content: '{"tool":"search"}' }],
+      tools: [
+        {
+          name: 'permission_verdict',
+          description: 'Return the permission classifier verdict.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              decision: { type: 'string', enum: ['allow', 'ask'] },
+              reason: { type: 'string' },
+            },
+            required: ['decision', 'reason'],
+            additionalProperties: false,
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'permission_verdict' },
     });
+    expect(revoke).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to joined text blocks when no verdict tool call is returned', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              content: [
+                { type: 'text', text: '{"decision":"ask",' },
+                { type: 'text', text: '"reason":"Ambiguous."}' },
+              ],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const { createDirectAnthropicClassifierLlmClient } =
+      await import('@core/adapters/llm/anthropic-claude-agent/permission-classifier-llm-client.js');
+
+    const result = await createDirectAnthropicClassifierLlmClient().query({
+      appId: 'default' as never,
+      model: DIRECT_PROFILE.runnerModel,
+      modelProfile: DIRECT_PROFILE,
+      prompt: 'classify',
+    });
+
+    expect(result).toBe('{"decision":"ask","reason":"Ambiguous."}');
     expect(revoke).toHaveBeenCalledOnce();
   });
 
