@@ -46,7 +46,8 @@
     "build:sdk": "npm run build --workspace @gantry/sdk",
     "build:examples": "npm run typecheck --workspace @gantry/example-nextjs-workflows && npm run build --workspace @gantry/example-nextjs-workflows",
     "clean": "rm -rf dist packages/contracts/dist packages/sdk/dist",
-    "build": "npm run clean && npm run build:contracts && npm run build:sdk && tsc && npm run copy:migrations && chmod +x dist/cli/index.js && npm run build:examples",
+    "build:runtime": "npm run clean && npm run build:contracts && npm run build:sdk && tsc && npm run copy:migrations && chmod +x dist/cli/index.js",
+    "build": "npm run build:runtime && npm run build:examples",
     "copy:migrations": "mkdir -p dist/adapters/storage/postgres/schema && cp -R apps/core/src/adapters/storage/postgres/schema/migrations dist/adapters/storage/postgres/schema/",
     "db:migrate": "node dist/postgres-migrate.js",
     "start": "npm run db:migrate && node dist/index.js",
@@ -136,6 +137,9 @@
     "form-data": "4.0.6",
     "hono": "4.12.26",
     "ws": "8.21.0",
-    "qs": "6.15.2"
+    "qs": "6.15.2",
+    "next": {
+      "postcss": "8.5.10"
+    }
   }
 }
