@@ -502,6 +502,42 @@ describe('permission classifier decision events', () => {
     );
   });
 
+  it('strips runtime environment assignments from the judged shell command', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Read-only help command.',
+      latencyMs: 1,
+    }));
+
+    await consultPermissionClassifierBeforePrompt({
+      permissionMode: 'auto',
+      attended: true,
+      trustedRequester: true,
+      requestFamily: 'tool',
+      agentFolder: 'researcher',
+      correlationId: 'request:runtime-env',
+      actor: 'permission',
+      intentSource: 'operator_message',
+      turnIntentSummary: 'Inspect authentication command help.',
+      canonicalToolName: 'RunCommand',
+      toolInput: {
+        command:
+          "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/' HTTPS_PROXY='http://127.0.0.1:18790/' gog auth --help",
+      },
+      policyDecisionReason: 'No durable rule matched.',
+      approvedCapabilityIds: [],
+      classifierConfig: { memoryExtractorModel: 'extractor-model' },
+      publishRuntimeEvent: vi.fn(async () => undefined),
+      classifierConsult,
+    });
+
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolInput: { command: 'gog auth --help' },
+      }),
+    );
+  });
+
   it('counts keyed auto-allows and emits the promotion prompt without blocking', async () => {
     const offer = vi.fn(async () => undefined);
     const incrementAndGet = vi.fn(async () => ({

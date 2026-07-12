@@ -29,6 +29,7 @@ import {
 } from '../shared/memory-dreaming-timeout.js';
 import { resolveModelSelectionForWorkload } from '../shared/model-catalog.js';
 import type { PermissionMode } from '../shared/permission-mode.js';
+import { stripRuntimeEnvPrefix } from '../shared/runtime-env-command.js';
 import type {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
@@ -318,12 +319,9 @@ export async function consultPermissionClassifierBeforePrompt(
     input.canonicalToolName === 'RunCommand';
   const classifierToolInput = shellRequest
     ? {
-        command:
-          input.toolInput &&
-          typeof input.toolInput === 'object' &&
-          !Array.isArray(input.toolInput)
-            ? (input.toolInput as Record<string, unknown>).command
-            : undefined,
+        command: stripClassifierRuntimeEnvPrefix(
+          (input.toolInput as { command?: unknown } | null)?.command,
+        ),
       }
     : input.toolInput;
   const inputTruncated = shellRequest
@@ -405,6 +403,11 @@ export async function consultPermissionClassifierBeforePrompt(
       ? { promotionHintCount: promotionCounter.allowCount }
       : {}),
   };
+}
+
+function stripClassifierRuntimeEnvPrefix(command: unknown): unknown {
+  if (typeof command !== 'string') return command;
+  return stripRuntimeEnvPrefix(command).command;
 }
 
 export async function permissionPromotionHintCount(input: {
