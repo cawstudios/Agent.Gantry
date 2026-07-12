@@ -381,7 +381,21 @@ describe('inline core tool bootstrap', () => {
       reason: 'Read-only lookup matches the turn intent.',
       latencyMs: 4,
     }));
-    wire({ classifierConsult });
+    wire({
+      classifierConsult,
+      getPermissionRuntimeSettings: () => ({
+        agents: {
+          main_agent: {
+            capabilities: [{ id: 'google.drive.files.list', version: '1' }],
+          },
+        },
+        permissions: {
+          autoMode: {},
+          yoloMode: { enabled: false },
+        },
+        memory: { llm: { models: { extractor: 'sonnet' } } },
+      }),
+    });
     const input = laneInput();
     input.input.permissionMode = 'auto';
     input.group.conversationKind = 'dm';
@@ -402,6 +416,7 @@ describe('inline core tool bootstrap', () => {
       expect.objectContaining({
         turnIntentSummary: 'hello',
         canonicalToolName: 'mcp__crm__read',
+        approvedCapabilityIds: ['google.drive.files.list'],
       }),
     );
     expect(requestPermissionApproval).not.toHaveBeenCalled();
@@ -441,7 +456,9 @@ describe('inline core tool bootstrap', () => {
     await expect(
       tools.authorizeThirdPartyMcpTool('mcp__crm__read', { id: 'crm-1' }),
     ).resolves.toEqual({ allowed: true });
-    expect(classifierConsult).toHaveBeenCalledOnce();
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({ approvedCapabilityIds: [] }),
+    );
     expect(requestPermissionApproval).toHaveBeenCalledOnce();
     expect(
       publishRuntimeEvent.mock.calls.map(([event]) => event.eventType),

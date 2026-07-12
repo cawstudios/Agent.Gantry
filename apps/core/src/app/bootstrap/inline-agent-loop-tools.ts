@@ -71,6 +71,10 @@ interface InlineCoreToolHostDeps extends CoreSendMessageDeps {
   classifierConsult?: PermissionClassifierPromptConsultInput['classifierConsult'];
   getAgentAccessPreset(folder: string): 'full' | 'locked';
   getPermissionRuntimeSettings(): {
+    agents?: Record<
+      string,
+      { capabilities?: Array<{ id: string }> } | null | undefined
+    >;
     permissions: {
       autoMode: { model?: string };
       yoloMode: YoloModeSettings;
@@ -131,6 +135,10 @@ export function createInlineCoreTools(
     ...(autoModeModel ? { autoModeModel } : {}),
     memoryExtractorModel: permissionSettings.memory.llm.models.extractor,
   };
+  const approvedCapabilityIds =
+    permissionSettings.agents?.[laneInput.group.folder]?.capabilities?.map(
+      ({ id }) => id,
+    ) ?? [];
   const yoloMode = run.yoloMode ?? permissionSettings.permissions.yoloMode;
   const toolSuccessLedger = run.toolRules?.length
     ? createToolSuccessLedger()
@@ -366,6 +374,7 @@ export function createInlineCoreTools(
           canonicalToolName: name,
           toolInput,
           policyDecisionReason: decision.reason,
+          approvedCapabilityIds,
           suggestions,
           ...(promotion ? { promotion } : {}),
           classifierConfig: permissionRuntimeConfig,
@@ -510,6 +519,10 @@ export function wireInlineAgentLoopTools(input: {
   interactionsEnabled: boolean;
   getAgentAccessPreset(folder: string): 'full' | 'locked';
   getPermissionRuntimeSettings(): {
+    agents?: Record<
+      string,
+      { capabilities?: Array<{ id: string }> } | null | undefined
+    >;
     permissions: {
       autoMode: { model?: string };
       yoloMode: YoloModeSettings;

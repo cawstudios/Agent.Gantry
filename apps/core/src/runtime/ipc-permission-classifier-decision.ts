@@ -36,6 +36,13 @@ export async function resolvePermissionIpcDecision(input: {
       )
     : undefined;
   const settings = input.deps.getPermissionRuntimeSettings?.();
+  const approvedCapabilityIds =
+    (
+      settings?.agents[input.sourceAgentFolder] as
+        | { capabilities?: Array<{ id: string }> }
+        | null
+        | undefined
+    )?.capabilities?.map(({ id }) => id) ?? [];
   const autoModeModel = settings?.permissions.autoMode.model;
   const classifierConfig = settings
     ? {
@@ -94,6 +101,7 @@ export async function resolvePermissionIpcDecision(input: {
           toolInputSanitized: input.request.toolInputSanitized,
           policyDecisionReason:
             input.request.decisionReason ?? 'Human approval is required.',
+          approvedCapabilityIds,
           suggestions: input.request.suggestions,
           ...(promotion ? { promotion } : {}),
           classifierConfig,

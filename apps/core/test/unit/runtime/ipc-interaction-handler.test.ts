@@ -616,7 +616,12 @@ describe('ipc-interaction-handler', () => {
         classifierConsult,
         publishRuntimeEvent,
         getPermissionRuntimeSettings: () => ({
-          agents: { main_agent: { permissionMode: 'auto' } },
+          agents: {
+            main_agent: {
+              permissionMode: 'auto',
+              capabilities: [{ id: 'google.drive.files.list', version: '1' }],
+            },
+          },
           permissions: { autoMode: {} },
           memory: { llm: { models: { extractor: 'sonnet' } } },
         }),
@@ -631,6 +636,7 @@ describe('ipc-interaction-handler', () => {
       expect.objectContaining({
         canonicalToolName: 'Bash',
         turnIntentSummary: 'Inspect the current worktree.',
+        approvedCapabilityIds: ['google.drive.files.list'],
       }),
     );
     expect(requestPermissionApproval).not.toHaveBeenCalled();

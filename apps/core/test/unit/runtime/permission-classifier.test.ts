@@ -33,6 +33,7 @@ const baseInput = {
   canonicalToolName: 'mcp__github__search',
   toolInput: { query: 'open pull requests' },
   policyDecisionReason: 'No durable rule matched this tool call.',
+  approvedCapabilityIds: [],
   memoryModelConfig: {
     extractor: 'extractor-model',
     modelProfiles: {
@@ -105,7 +106,9 @@ describe('permission classifier verdict client', () => {
       expect.objectContaining({
         model: 'extractor-model',
         modelProfile: baseInput.memoryModelConfig.modelProfiles.extractor,
-        systemPrompt: expect.stringContaining('Return allow only when'),
+        systemPrompt: expect.stringContaining(
+          'The approvedCapabilityIds list is authoritative operator intent',
+        ),
         timeoutMs: 12_000,
       }),
     );
@@ -115,6 +118,7 @@ describe('permission classifier verdict client', () => {
         turnIntentSummary: baseInput.turnIntentSummary,
         canonicalToolName: baseInput.canonicalToolName,
         policyDecisionReason: baseInput.policyDecisionReason,
+        approvedCapabilityIds: [],
       },
     );
   });
@@ -154,9 +158,14 @@ describe('permission classifier verdict client', () => {
     );
   });
 
-  it('sends the required intent and policy context with sensitive input redacted', async () => {
+  it('sends capped approved capability ids with sensitive input redacted', async () => {
+    const approvedCapabilityIds = Array.from(
+      { length: 45 },
+      (_, index) => `google.capability.${index}`,
+    );
     await consultPermissionClassifier({
       ...baseInput,
+      approvedCapabilityIds,
       toolInput: {
         query: 'open pull requests',
         authorization: 'Bearer private-value',
@@ -164,13 +173,18 @@ describe('permission classifier verdict client', () => {
     });
 
     const request = query.mock.calls[0]?.[0];
-    expect(request.systemPrompt).toContain('Return allow only');
+    expect(request.systemPrompt).toContain(
+      'ALLOW is appropriate only when the action clearly matches',
+    );
     expect(request.prompt).toContain(baseInput.agentIdentity.id);
     expect(request.prompt).toContain(baseInput.turnIntentSummary);
     expect(request.prompt).toContain(baseInput.canonicalToolName);
     expect(request.prompt).toContain(baseInput.policyDecisionReason);
     expect(request.prompt).toContain('[REDACTED]');
     expect(request.prompt).not.toContain('private-value');
+    expect(JSON.parse(request.prompt).approvedCapabilityIds).toEqual(
+      approvedCapabilityIds.slice(0, 40),
+    );
   });
 
   it('redacts secret values from command, intent, and policy strings', async () => {
@@ -386,6 +400,7 @@ describe('permission classifier decision events', () => {
         canonicalToolName: 'RunCommand',
         toolInput: { command: 'git status' },
         policyDecisionReason: 'No durable rule matched.',
+        approvedCapabilityIds: [],
         classifierConfig: { memoryExtractorModel: 'extractor-model' },
         publishRuntimeEvent,
         classifierConsult,
@@ -415,6 +430,7 @@ describe('permission classifier decision events', () => {
       canonicalToolName: 'RunCommand',
       toolInput: { command: 'git status' },
       policyDecisionReason: 'No durable rule matched.',
+      approvedCapabilityIds: [],
       classifierConfig: { memoryExtractorModel: 'extractor-model' },
       publishRuntimeEvent,
       classifierConsult,
@@ -474,6 +490,7 @@ describe('permission classifier decision events', () => {
         canonicalToolName: 'RunCommand',
         toolInput: { command: 'git status' },
         policyDecisionReason: 'No durable rule matched.',
+        approvedCapabilityIds: [],
         classifierConfig: { memoryExtractorModel: 'extractor-model' },
         publishRuntimeEvent,
         classifierConsult: async () => ({
