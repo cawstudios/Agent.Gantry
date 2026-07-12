@@ -14,6 +14,7 @@ import type { RunnerOutputFrame } from '../../runner/runner-frame.js';
 import type { AgentPersona } from '../../shared/agent-persona.js';
 import { DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
+import type { PermissionMode } from '../../shared/permission-mode.js';
 
 export const DEFAULT_INLINE_AGENT_MAX_TURNS = 50;
 const RESPONSE_SCHEMA_RETRY_LIMIT = 1;
@@ -58,6 +59,7 @@ export interface AdapterInlineAgentInput {
   attachedSkillSourceIds?: string[];
   toolPolicyRules?: string[];
   yoloMode?: YoloModeSettings;
+  permissionMode: PermissionMode;
   isScheduledJob?: boolean;
   jobId?: string;
   runId?: string;

@@ -121,6 +121,7 @@ export interface CoreToolRunContext {
   toolRules?: readonly CoreToolRule[];
   toolSuccessLedger?: CoreToolSuccessLedger;
   yoloMode?: YoloModeSettings;
+  permissionMode: import('../../shared/permission-mode.js').PermissionMode;
   accessPreset?: 'full' | 'locked';
 }
 

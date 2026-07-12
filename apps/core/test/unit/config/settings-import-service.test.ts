@@ -649,7 +649,7 @@ describe('importFleetSettingsRevision', () => {
   });
 
   it('appends a revision stamped with the current reader version', async () => {
-    expect(CURRENT_SETTINGS_READER_VERSION).toBe(10);
+    expect(CURRENT_SETTINGS_READER_VERSION).toBe(11);
     capabilityErrors = [];
     const repo = new FakeRevisionRepo();
     const outcome = await importFleetSettingsRevision(
@@ -731,6 +731,7 @@ describe('importFleetSettingsRevision', () => {
     settings.agent.name = 'Agent "quoted" \\ path';
     settings.agent.agentHarness = 'deepagents';
     settings.memory.llm.extractorMinConfidence = 0.73;
+    settings.permissions.autoMode.model = 'sonnet';
     settings.modelAliases['fast-job'] = {
       provider: 'groq',
       providerModelId: 'llama-3.1-8b-instant',
@@ -749,6 +750,7 @@ describe('importFleetSettingsRevision', () => {
       name: 'Researcher',
       folder: 'researcher',
       agentHarness: 'anthropic_sdk',
+      permissionMode: 'auto',
       maxTurns: 14,
       maxRunTokens: 32_000,
       effort: 'medium',
@@ -835,6 +837,10 @@ describe('importFleetSettingsRevision', () => {
         .agent_harness,
     ).toBe('anthropic_sdk');
     expect(
+      (document.agents as Record<string, Record<string, unknown>>).researcher
+        .permission_mode,
+    ).toBe('auto');
+    expect(
       (document.agents as Record<string, Record<string, unknown>>).researcher,
     ).toMatchObject({
       max_turns: 14,
@@ -861,6 +867,14 @@ describe('importFleetSettingsRevision', () => {
         >
       ).extractor_min_confidence,
     ).toBe(0.73);
+    expect(
+      (
+        (document.permissions as Record<string, unknown>).auto_mode as Record<
+          string,
+          unknown
+        >
+      ).model,
+    ).toBe('sonnet');
     expect(
       (
         (document.agents as Record<string, Record<string, unknown>>).researcher
@@ -896,6 +910,8 @@ describe('importFleetSettingsRevision', () => {
     expect(restored.runtime.deploymentMode).toBe('fleet');
     expect(restored.agents.researcher.accessPreset).toBe('locked');
     expect(restored.agents.researcher.agentHarness).toBe('anthropic_sdk');
+    expect(restored.agents.researcher.permissionMode).toBe('auto');
+    expect(restored.permissions.autoMode).toEqual({ model: 'sonnet' });
     expect(restored.agents.researcher).toMatchObject({
       maxTurns: 14,
       maxRunTokens: 32_000,

@@ -8,6 +8,7 @@ import {
 } from '../../shared/agent-engine.js';
 import { parseAgentPersona } from '../../shared/agent-persona.js';
 import { parseAgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
+import type { PermissionMode } from '../../shared/permission-mode.js';
 import type {
   AgentAccessPreset,
   RuntimeConfiguredAgent,
@@ -43,6 +44,17 @@ function parseOptionalAgentHarnessValue(
     throw new Error(
       `${pathPrefix} must be one of auto, anthropic_sdk, or deepagents`,
     );
+  }
+  return raw;
+}
+
+function parseOptionalPermissionModeValue(
+  raw: unknown,
+  pathPrefix: string,
+): PermissionMode | undefined {
+  if (raw === undefined) return undefined;
+  if (raw !== 'ask' && raw !== 'auto') {
+    throw new Error(`${pathPrefix} must be one of ask or auto`);
   }
   return raw;
 }
@@ -379,13 +391,14 @@ export function parseConfiguredAgents(
         key !== 'max_output_tokens' &&
         key !== 'model' &&
         key !== 'agent_harness' &&
+        key !== 'permission_mode' &&
         key !== 'one_time_job_default_model' &&
         key !== 'recurring_job_default_model' &&
         key !== 'tool_rules' &&
         key !== 'access'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, runtime, max_turns, max_run_tokens, effort, thinking, max_output_tokens, model, agent_harness, job model defaults, tool_rules, or access. Install agents under conversations.*.installed_agents.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, runtime, max_turns, max_run_tokens, effort, thinking, max_output_tokens, model, agent_harness, permission_mode, job model defaults, tool_rules, or access. Install agents under conversations.*.installed_agents.`,
         );
       }
     }
@@ -471,6 +484,10 @@ export function parseConfiguredAgents(
       agentHarness: parseOptionalAgentHarnessValue(
         map.agent_harness,
         `${pathPrefix}.agent_harness`,
+      ),
+      permissionMode: parseOptionalPermissionModeValue(
+        map.permission_mode,
+        `${pathPrefix}.permission_mode`,
       ),
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,

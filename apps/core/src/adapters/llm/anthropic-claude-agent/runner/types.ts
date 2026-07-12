@@ -5,6 +5,7 @@ import type {
 } from '../../../../shared/model-catalog.js';
 import type { AgentPersona } from '../../../../shared/agent-persona.js';
 import type { YoloModeSettings } from '../../../../shared/yolo-mode-policy.js';
+import type { PermissionMode } from '../../../../shared/permission-mode.js';
 import type { CapabilityRuntimeAccess } from '../../../../shared/capability-runtime-access.js';
 import type { SemanticCapabilityDefinition } from '../../../../shared/semantic-capabilities.js';
 import type { GantryAgentPromptMode } from '../../../../runner/gantry-agent-system-prompt.js';
@@ -43,6 +44,7 @@ export interface AgentRunnerInput {
   compiledSystemPrompt?: string;
   memoryContextBlock?: string;
   yoloMode?: YoloModeSettings;
+  permissionMode: PermissionMode;
   modelCredentialEnv?: Record<string, string>;
   toolNetworkEnv?: Record<string, string>;
   runtimeAccess?: CapabilityRuntimeAccess[];

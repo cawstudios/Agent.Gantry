@@ -22,6 +22,7 @@ import type {
 } from '../shared/model-catalog.js';
 import type { AgentPersona } from '../shared/agent-persona.js';
 import type { YoloModeSettings } from '../shared/yolo-mode-policy.js';
+import type { PermissionMode } from '../shared/permission-mode.js';
 import type { CapabilityRuntimeAccess } from '../shared/capability-runtime-access.js';
 import type { AgentRuntime } from '../shared/agent-runtime.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
@@ -90,6 +91,7 @@ export interface AgentInput {
   maxOutputTokens?: number;
   memoryContextBlock?: string;
   yoloMode?: YoloModeSettings;
+  permissionMode?: PermissionMode;
   runtimeAccess?: CapabilityRuntimeAccess[];
   runtime?: AgentRuntime;
   deepAgentSkills?: DeepAgentSkillProjection;

@@ -154,6 +154,7 @@ maybeDescribe('Postgres usage query', () => {
         saveState: async () => {},
         setGroupModelOverride: async () => {},
         setGroupThinkingOverride: async () => {},
+        setGroupPermissionModeOverride: async () => {},
         getAvailableGroups: () => [],
         getRegisteredJids: () => new Set(),
         runAgent: (async (_group, _input, _register, onOutput) => {

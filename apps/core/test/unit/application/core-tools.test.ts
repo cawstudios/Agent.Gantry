@@ -37,6 +37,7 @@ function registryDeps(
       conversationId: 'conversation:test',
       appId: 'default',
       agentId: 'agent-1',
+      permissionMode: 'ask',
     },
     sendMessage: vi.fn(async () => undefined),
     requestUserAnswer: vi.fn(async (request) => ({
@@ -76,6 +77,7 @@ describe('core tool registry', () => {
           runId: 'run-1',
           jobId: 'job-1',
           isScheduledJob: true,
+          permissionMode: 'ask',
           toolRules: [
             {
               tool: 'task_get',
@@ -132,6 +134,7 @@ describe('core tool registry', () => {
           context: {
             sourceAgentFolder: 'main_agent',
             conversationId: 'conversation:test',
+            permissionMode: 'ask',
             toolRules: [
               {
                 tool: 'AgentDelegation',
@@ -177,6 +180,7 @@ describe('core tool registry', () => {
         context: {
           sourceAgentFolder: 'main_agent',
           conversationId: 'conversation:test',
+          permissionMode: 'ask',
           allowedToolRules: ['AgentDelegation'],
           toolRules: [
             {

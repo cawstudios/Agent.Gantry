@@ -132,6 +132,7 @@ export function createInlineCoreTools(
         ? { toolRules: run.toolRules, toolSuccessLedger }
         : {}),
       yoloMode: run.yoloMode ?? deps.getYoloMode(),
+      permissionMode: run.permissionMode,
       accessPreset: deps.getAgentAccessPreset(laneInput.group.folder),
     },
     sendMessage: deps.sendMessage,

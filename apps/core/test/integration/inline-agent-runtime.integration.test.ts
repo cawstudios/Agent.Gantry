@@ -101,6 +101,7 @@ vi.mock('@core/runtime/agent-spawn-host.js', () => ({
       defaultTimeoutMs: 30_000,
       idleTimeoutMs: 30_000,
       sandboxProvider: 'direct',
+      permissionMode: 'ask',
       compiledSystemPrompt: 'integration system prompt',
       modelWorkload: 'chat',
       resolvedModel: {

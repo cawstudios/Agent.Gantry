@@ -9,6 +9,7 @@ import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
 import type { EgressSettings } from '../../shared/egress-policy.js';
 import type { AgentHarness } from '../../shared/agent-engine.js';
 import type { AgentRuntime } from '../../shared/agent-runtime.js';
+import type { PermissionMode } from '../../shared/permission-mode.js';
 import type { ModelWorkload } from '../../shared/model-catalog.js';
 import type { ModelEffortLevel } from '../../shared/model-catalog.js';
 
@@ -206,6 +207,7 @@ export interface RuntimeConfiguredAgent {
   relationshipMode?: AgentRelationshipMode;
   model?: string;
   agentHarness?: AgentHarness;
+  permissionMode?: PermissionMode;
   oneTimeJobDefaultModel?: string;
   recurringJobDefaultModel?: string;
   toolRules?: RuntimeConfiguredToolRule[];
@@ -298,6 +300,9 @@ export interface RuntimeBrowserSettings {
 export interface RuntimePermissionSettings {
   yoloMode: YoloModeSettings;
   egress: EgressSettings;
+  autoMode: {
+    model?: string;
+  };
 }
 
 // Optional in-memory per-provider request rate caps enforced at the model

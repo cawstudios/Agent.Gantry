@@ -1,5 +1,6 @@
 import type { AgentPersona } from '../../../../shared/agent-persona.js';
 import type { YoloModeSettings } from '../../../../shared/yolo-mode-policy.js';
+import type { PermissionMode } from '../../../../shared/permission-mode.js';
 import type { DeepAgentSkillProjection } from '../../../../application/agent-execution/agent-execution-adapter.js';
 import type { GantryAgentPromptMode } from '../../../../runner/gantry-agent-system-prompt.js';
 import type {
@@ -48,4 +49,5 @@ export interface DeepAgentRunnerInput {
   // Auto-approve safety valve settings; the neutral gate's denylist backstop
   // runs even though the deepagents lane has no auto-approve surface in v1.
   yoloMode?: YoloModeSettings;
+  permissionMode: PermissionMode;
 }

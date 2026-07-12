@@ -194,6 +194,12 @@ function renderPermissionSettingsYaml(
     '  egress:',
     `    denylist: ${JSON.stringify(permissions.egress.denylist)}`,
   );
+  if (permissions.autoMode.model) {
+    lines.push(
+      '  auto_mode:',
+      `    model: ${quoteYamlString(permissions.autoMode.model)}`,
+    );
+  }
   lines.push('');
 }
 
@@ -251,6 +257,11 @@ function renderConfiguredAgentsYaml(
     }
     if (agent.agentHarness) {
       lines.push(`    agent_harness: ${quoteYamlString(agent.agentHarness)}`);
+    }
+    if (agent.permissionMode) {
+      lines.push(
+        `    permission_mode: ${quoteYamlString(agent.permissionMode)}`,
+      );
     }
     if (agent.oneTimeJobDefaultModel) {
       lines.push(
@@ -577,7 +588,8 @@ function isDefaultPermissionSettings(
     permissions.yoloMode.enabled === true &&
     permissions.yoloMode.denylist.length === 0 &&
     permissions.yoloMode.denylistPaths.length === 0 &&
-    permissions.egress.denylist.length === 0
+    permissions.egress.denylist.length === 0 &&
+    permissions.autoMode.model === undefined
   );
 }
 

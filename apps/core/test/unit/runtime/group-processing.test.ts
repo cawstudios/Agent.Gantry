@@ -38,6 +38,9 @@ vi.mock('@core/config/index.js', () => ({
   getRuntimeSettingsForConfig: mockGetRuntimeSettingsForConfig,
   getDefaultModelConfig: () => ({ model: undefined }),
   getSelectedAgentHarness: () => 'auto',
+  getSelectedAgentPermissionMode: (folder?: string) =>
+    mockGetRuntimeSettingsForConfig().agents?.[folder ?? '']?.permissionMode ??
+    'ask',
   getTriggerPattern: (trigger?: string) =>
     trigger ? new RegExp(`^@${trigger}\\b`, 'i') : /^@Andy\b/i,
 }));
@@ -262,6 +265,7 @@ function makeDeps(
     saveState: vi.fn(),
     setGroupModelOverride: vi.fn(),
     setGroupThinkingOverride: vi.fn(),
+    setGroupPermissionModeOverride: vi.fn(),
     collectSessionMemory: vi.fn().mockResolvedValue({ saved: 0 }),
     executionAdapter: {
       id: 'anthropic:claude-agent-sdk',
@@ -6025,7 +6029,7 @@ describe('createGroupProcessor', () => {
       );
     });
 
-    it('model and thinking overrides use the selected agent route key', async () => {
+    it('model, thinking, and permission overrides use the selected agent route key', async () => {
       const routeKey = 'group1@g.us::agent:agent%3Atriage';
       const { capturedDeps, deps } = await captureSessionDeps({
         queueJid: routeKey,
@@ -6035,9 +6039,14 @@ describe('createGroupProcessor', () => {
       ) => Promise<void>;
       const setGroupThinkingOverride =
         capturedDeps.setGroupThinkingOverride as (v: unknown) => Promise<void>;
+      const setGroupPermissionModeOverride =
+        capturedDeps.setGroupPermissionModeOverride as (
+          v: 'ask' | 'auto' | undefined,
+        ) => Promise<void>;
 
       await setGroupModelOverride('sonnet');
       await setGroupThinkingOverride({ mode: 'disabled' });
+      await setGroupPermissionModeOverride('auto');
 
       expect(deps.setGroupModelOverride).toHaveBeenCalledWith(
         routeKey,
@@ -6046,6 +6055,10 @@ describe('createGroupProcessor', () => {
       expect(deps.setGroupThinkingOverride).toHaveBeenCalledWith(routeKey, {
         mode: 'disabled',
       });
+      expect(deps.setGroupPermissionModeOverride).toHaveBeenCalledWith(
+        routeKey,
+        'auto',
+      );
     });
 
     it('threaded override commands stay scoped to the selected route', async () => {
@@ -6072,7 +6085,7 @@ describe('createGroupProcessor', () => {
       });
     });
 
-    it('threaded /model and /thinking overrides update the whole-conversation agent route when matched by fallback', async () => {
+    it('threaded overrides update the whole-conversation agent route when matched by fallback', async () => {
       const wholeRouteKey = 'sl:C123::agent:agent%3Atriage';
       const threadedQueueKey = 'sl:C123::thread:1700.1::agent:agent%3Atriage';
       const { capturedDeps, deps } = await captureSessionDeps({
@@ -6091,9 +6104,14 @@ describe('createGroupProcessor', () => {
       ) => Promise<void>;
       const setGroupThinkingOverride =
         capturedDeps.setGroupThinkingOverride as (v: unknown) => Promise<void>;
+      const setGroupPermissionModeOverride =
+        capturedDeps.setGroupPermissionModeOverride as (
+          v: 'ask' | 'auto' | undefined,
+        ) => Promise<void>;
 
       await setGroupModelOverride('sonnet');
       await setGroupThinkingOverride({ mode: 'disabled' });
+      await setGroupPermissionModeOverride('ask');
 
       expect(deps.setGroupModelOverride).toHaveBeenCalledWith(
         wholeRouteKey,
@@ -6102,6 +6120,10 @@ describe('createGroupProcessor', () => {
       expect(deps.setGroupThinkingOverride).toHaveBeenCalledWith(
         wholeRouteKey,
         { mode: 'disabled' },
+      );
+      expect(deps.setGroupPermissionModeOverride).toHaveBeenCalledWith(
+        wholeRouteKey,
+        'ask',
       );
     });
 
@@ -6148,6 +6170,22 @@ describe('createGroupProcessor', () => {
         capturedDeps.getGroupThinkingOverride as () => unknown;
 
       expect(getGroupThinkingOverride()).toEqual({ mode: 'enabled' });
+    });
+
+    it('provides conversation and resolved default permission modes', async () => {
+      mockGetRuntimeSettingsForConfig.mockReturnValue({
+        memory: { enabled: true },
+        agents: { 'test-group': { permissionMode: 'auto' } },
+      });
+      const group = makeGroup({ agentConfig: { permissionMode: 'ask' } });
+      const { capturedDeps } = await captureSessionDeps({ group });
+
+      expect(
+        (capturedDeps.getGroupPermissionModeOverride as () => unknown)(),
+      ).toBe('ask');
+      expect((capturedDeps.getDefaultPermissionMode as () => unknown)()).toBe(
+        'auto',
+      );
     });
 
     it('setGroupThinkingOverride delegates to deps', async () => {

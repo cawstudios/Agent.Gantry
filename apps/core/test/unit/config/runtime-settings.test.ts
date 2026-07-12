@@ -909,6 +909,7 @@ provider_accounts:
     expect(settings.permissions.egress).toEqual({
       denylist: [],
     });
+    expect(settings.permissions.autoMode).toEqual({});
 
     settings.permissions.yoloMode = {
       enabled: true,
@@ -918,11 +919,14 @@ provider_accounts:
     settings.permissions.egress = {
       denylist: ['api.linkedin.com', '*.blocked.example.com'],
     };
+    settings.permissions.autoMode = { model: 'sonnet' };
 
     const yaml = renderRuntimeSettingsYaml(settings);
     expect(yaml).toContain('permissions:');
     expect(yaml).toContain('yolo_mode:');
     expect(yaml).toContain('egress:');
+    expect(yaml).toContain('auto_mode:');
+    expect(yaml).toContain('model: sonnet');
     expect(yaml).toContain('npm run nuke');
     expect(yaml).toContain('api.linkedin.com');
 
@@ -947,6 +951,21 @@ provider_accounts:
     allowlist: []
 `),
     ).toThrow('permissions.egress.allowlist is not supported');
+  });
+
+  it('rejects invalid auto-mode permission settings', () => {
+    expect(() =>
+      parseRuntimeSettings(`permissions:
+  auto_mode:
+    enabled: true
+`),
+    ).toThrow('permissions.auto_mode.enabled is not supported');
+    expect(() =>
+      parseRuntimeSettings(`permissions:
+  auto_mode:
+    model: ""
+`),
+    ).toThrow('permissions.auto_mode.model must be a non-empty string');
   });
 
   it('rejects invalid egress denylist hostname globs', () => {

@@ -121,6 +121,7 @@ export const RuntimeSettingsConfiguredAgentSchema = z
     relationshipMode: AgentRelationshipModeSchema.optional(),
     model: z.string().optional(),
     agentHarness: AgentHarnessSchema.optional(),
+    permissionMode: z.enum(['ask', 'auto']).optional(),
     runtime: z.enum(['worker', 'inline']).optional(),
     maxTurns: z.number().int().positive().optional(),
     maxRunTokens: z.number().int().positive().optional(),
@@ -338,6 +339,11 @@ export const RuntimeSettingsPublicSchema = z
         egress: z
           .object({
             denylist: z.array(EgressDenylistPatternSchema),
+          })
+          .strict(),
+        autoMode: z
+          .object({
+            model: z.string().trim().min(1).optional(),
           })
           .strict(),
       })

@@ -135,12 +135,16 @@ describe('exportCurrentDesiredState', () => {
     max_turns: 12
     max_run_tokens: 4096
     effort: high
+    permission_mode: auto
     thinking: on
     max_output_tokens: 2048
     tool_rules:
       - tool: Bash
         action: block
         reason: no shell
+permissions:
+  auto_mode:
+    model: sonnet
 `);
     settings.conversations = {
       shared_channel: {
@@ -311,12 +315,16 @@ describe('exportCurrentDesiredState', () => {
       maxTurns: 12,
       maxRunTokens: 4096,
       effort: 'high',
+      permissionMode: 'auto',
       thinking: { mode: 'on' },
       maxOutputTokens: 2048,
       toolRules: [{ tool: 'Bash', action: 'block', reason: 'no shell' }],
     });
+    expect(exported.permissions.autoMode).toEqual({ model: 'sonnet' });
     const yaml = renderRuntimeSettingsYaml(exported as any);
     expect(yaml).toContain('installed_agents:');
+    expect(yaml).toContain('permission_mode: auto');
+    expect(yaml).toContain('auto_mode:');
     expect(yaml).toContain('      main_agent:');
     expect(yaml).toContain('      "main_agent_171.222":');
     expect(yaml).toContain('        agent: main_agent');
@@ -327,6 +335,8 @@ describe('exportCurrentDesiredState', () => {
       parsed.conversations.shared_channel.installedAgents['main_agent_171.222']
         ?.agentId,
     ).toBe('main_agent');
+    expect(parsed.agents.main_agent.permissionMode).toBe('auto');
+    expect(parsed.permissions.autoMode).toEqual({ model: 'sonnet' });
   });
 
   it('keeps disabled provider accounts needed by exported conversations', async () => {

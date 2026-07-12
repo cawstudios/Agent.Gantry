@@ -93,6 +93,7 @@ describe('agent runtime settings', () => {
       name: 'Worker',
       folder: 'worker_agent',
       runtime: 'worker',
+      permissionMode: 'auto',
       bindings: {},
       sources: emptySources(),
       capabilities: [],
@@ -115,6 +116,7 @@ describe('agent runtime settings', () => {
       capabilities: [],
       accessPreset: 'full',
     };
+    settings.permissions.autoMode.model = 'sonnet';
     fs.writeFileSync(
       path.join(runtimeHome, 'settings.yaml'),
       renderRuntimeSettingsYaml(settings),
@@ -130,6 +132,12 @@ describe('agent runtime settings', () => {
       expect(config.getConfiguredAgentRuntime('default_agent')).toBe('worker');
       expect(config.getConfiguredAgentRuntime('missing_agent')).toBeUndefined();
       expect(config.getSelectedAgentRuntime('missing_agent')).toBe('worker');
+      expect(
+        config.getPublicRuntimeSettings().agents.worker_agent.permissionMode,
+      ).toBe('auto');
+      expect(config.getPublicRuntimeSettings().permissions.autoMode).toEqual({
+        model: 'sonnet',
+      });
     } finally {
       if (originalHome === undefined) delete process.env.GANTRY_HOME;
       else process.env.GANTRY_HOME = originalHome;
@@ -155,6 +163,7 @@ describe('agent runtime settings', () => {
     max_turns: 12
     max_run_tokens: 4096
     effort: xhigh
+    permission_mode: auto
     thinking: on
     max_output_tokens: 2048
 `);
@@ -167,6 +176,7 @@ describe('agent runtime settings', () => {
     expect(rendered).toContain('max_turns: 12');
     expect(rendered).toContain('max_run_tokens: 4096');
     expect(rendered).toContain('effort: xhigh');
+    expect(rendered).toContain('permission_mode: auto');
     expect(rendered).toContain('thinking: on');
     expect(rendered).toContain('max_output_tokens: 2048');
     const roundTripped = parseRuntimeSettings(rendered).agents.main_agent;
@@ -175,6 +185,7 @@ describe('agent runtime settings', () => {
       maxTurns: 12,
       maxRunTokens: 4096,
       effort: 'xhigh',
+      permissionMode: 'auto',
       thinking: { mode: 'on' },
       maxOutputTokens: 2048,
     });
@@ -194,6 +205,10 @@ describe('agent runtime settings', () => {
     [
       'max_output_tokens: 0',
       'agents.main_agent.max_output_tokens must be a positive integer',
+    ],
+    [
+      'permission_mode: always',
+      'agents.main_agent.permission_mode must be one of ask or auto',
     ],
     [
       'effort: extreme',

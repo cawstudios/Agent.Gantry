@@ -1,4 +1,5 @@
 import type { SemanticCapabilityDefinition } from '../shared/semantic-capabilities.js';
+import type { PermissionMode } from '../shared/permission-mode.js';
 
 export type {
   Job,
@@ -64,6 +65,7 @@ export interface AgentConfig {
   relationshipMode?: import('../shared/agent-relationship-mode.js').AgentRelationshipMode;
   model?: string; // Optional model alias/full name for this group
   thinking?: ThinkingOverride; // Optional thinking override for this group
+  permissionMode?: PermissionMode;
   timeout?: number; // Default: 300000 (5 minutes)
 }
 

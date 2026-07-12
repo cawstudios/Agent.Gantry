@@ -5,6 +5,7 @@ import {
   getHostRuntimeCredentialEnv,
   withControls,
 } from '@core/runtime/agent-spawn-host.js';
+import { resolveEffectivePermissionMode } from '@core/shared/permission-mode.js';
 
 vi.mock('@core/config/index.js', () => ({
   AGENT_TIMEOUT: 30_000,
@@ -137,4 +138,28 @@ describe('withControls', () => {
     );
     expect(result).not.toHaveProperty('toolRules');
   });
+
+  it('uses the host-resolved permission mode instead of incoming input', () => {
+    expect(
+      withControls(
+        { ...input, permissionMode: 'auto' },
+        { permissionMode: 'ask' },
+      ).permissionMode,
+    ).toBe('ask');
+  });
+});
+
+describe('resolveEffectivePermissionMode', () => {
+  it.each([
+    ['auto', 'ask', 'auto'],
+    [undefined, 'auto', 'auto'],
+    [undefined, undefined, 'ask'],
+  ] as const)(
+    'resolves conversation %s over agent %s to %s',
+    (conversationMode, agentMode, expected) => {
+      expect(resolveEffectivePermissionMode(conversationMode, agentMode)).toBe(
+        expected,
+      );
+    },
+  );
 });

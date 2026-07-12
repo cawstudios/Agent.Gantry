@@ -1602,6 +1602,41 @@ describe('agent-spawn timeout behavior', () => {
     });
   });
 
+  it('projects the host-resolved permission mode instead of trusting runner input', async () => {
+    vi.mocked(getRuntimeSettingsForConfig).mockReturnValue({
+      permissions: {
+        yoloMode: { enabled: true, denylist: [], denylistPaths: [] },
+        egress: { denylist: [] },
+      },
+      runtime: {
+        sandbox: {
+          provider: 'direct',
+          resourceLimits: { cpuSeconds: 0, memoryMb: 0, maxProcesses: 0 },
+        },
+      },
+      agents: { 'test-group': { permissionMode: 'ask' } },
+    } as never);
+    const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
+    const group = {
+      ...testGroup,
+      agentConfig: { permissionMode: 'auto' },
+    } as ConversationRoute;
+
+    const resultPromise = spawnTestAgent(
+      group,
+      { ...testInput, permissionMode: 'ask' },
+      () => {},
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(JSON.parse(String(writeSpy.mock.calls[0]?.[0]))).toMatchObject({
+      permissionMode: 'auto',
+    });
+  });
+
   it('passes memory context blocks through runner stdin only when input provides one', async () => {
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
     const resultPromise = spawnTestAgent(

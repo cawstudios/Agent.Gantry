@@ -29,6 +29,10 @@ import type {
 } from '../domain/models/credentials.js';
 import type { ModelRouteId } from '../shared/model-catalog.js';
 import {
+  resolveEffectivePermissionMode,
+  type PermissionMode,
+} from '../shared/permission-mode.js';
+import {
   resolveWorkspaceFolderPath,
   resolveWorkspaceIpcPath,
 } from '../platform/workspace-folder.js';
@@ -113,15 +117,25 @@ export function withControls(
     thinking?: AgentInput['configuredThinking'];
     maxOutputTokens?: number;
     toolRules?: AgentInput['toolRules'];
+    permissionMode?: AgentInput['permissionMode'];
   },
-): AgentInput {
-  const { toolRules: _untrustedToolRules, ...trustedInput } = input;
+  conversationPermissionMode?: AgentInput['permissionMode'],
+): AgentInput & { permissionMode: PermissionMode } {
+  const {
+    toolRules: _untrustedToolRules,
+    permissionMode: _untrustedPermissionMode,
+    ...trustedInput
+  } = input;
   const toolRules = defaults?.toolRules;
   return {
     ...trustedInput,
     effort: input.effort ?? defaults?.effort,
     configuredThinking: input.configuredThinking ?? defaults?.thinking,
     maxOutputTokens: input.maxOutputTokens ?? defaults?.maxOutputTokens,
+    permissionMode: resolveEffectivePermissionMode(
+      conversationPermissionMode,
+      defaults?.permissionMode,
+    ),
     ...(toolRules?.length ? { toolRules } : {}),
   };
 }
@@ -162,6 +176,7 @@ export async function prepareInlineAgentHostContext(
   const effectiveInput = withControls(
     input,
     runtimeSettings.agents?.[group.folder],
+    group.agentConfig?.permissionMode,
   );
   return {
     resolvedModel,
@@ -174,6 +189,7 @@ export async function prepareInlineAgentHostContext(
     effort: effectiveInput.effort,
     configuredThinking: effectiveInput.configuredThinking,
     maxOutputTokens: effectiveInput.maxOutputTokens,
+    permissionMode: effectiveInput.permissionMode,
     ...(effectiveInput.toolRules?.length
       ? { toolRules: effectiveInput.toolRules }
       : {}),
