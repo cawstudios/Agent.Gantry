@@ -481,6 +481,11 @@ function renderConversationsYaml(
         if (install.model) {
           lines.push(`        model: ${quoteYamlString(install.model)}`);
         }
+        if (install.permissionMode) {
+          lines.push(
+            `        permission_mode: ${quoteYamlString(install.permissionMode)}`,
+          );
+        }
       }
     }
   }

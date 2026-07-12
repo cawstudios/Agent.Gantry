@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exportCurrentDesiredState } from '@core/config/settings/desired-state-current-export.js';
+import { SettingsDesiredStateService } from '@core/config/settings/desired-state-service.js';
 import {
   createDefaultRuntimeSettings,
   parseRuntimeSettings,
@@ -486,7 +487,7 @@ permissions:
         trigger: '@main',
         added_at: '2026-06-02T00:00:00.000Z',
         requiresTrigger: true,
-        agentConfig: { model: 'opus' },
+        agentConfig: { model: 'opus', permissionMode: 'auto' },
       },
     });
 
@@ -506,6 +507,7 @@ permissions:
       trigger: '@main',
       requiresTrigger: true,
       model: 'opus',
+      permissionMode: 'auto',
     });
     expect(exported.agents.main_agent?.runtime).toBe('inline');
     expect(exported.agents.main_agent).toMatchObject({
@@ -523,6 +525,33 @@ permissions:
         },
       ],
     });
+    expect(exported.agents.main_agent?.permissionMode).toBeUndefined();
+
+    const roundTripped = parseRuntimeSettings(
+      renderRuntimeSettingsYaml(exported),
+    );
+    const setConversationRoute = vi.fn(async () => undefined);
+    const service = new SettingsDesiredStateService({
+      ops: {
+        getAllConversationRoutes: vi.fn(async () => ({})),
+        setConversationRoute,
+      },
+      repositories: {
+        agents: { saveAgent: vi.fn(async () => undefined) },
+        tools: deps.repositories.tools,
+        skills: deps.repositories.skills,
+        mcpServers: deps.repositories.mcpServers,
+      },
+    } as any);
+
+    await service.reconcile(roundTripped);
+
+    expect(setConversationRoute).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        agentConfig: expect.objectContaining({ permissionMode: 'auto' }),
+      }),
+    );
   });
 
   it('keeps route-less channel installs trigger gated on export', async () => {

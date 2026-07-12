@@ -24,6 +24,7 @@ import {
   redactPermissionClassifierToolInput,
   recordHumanPermissionPromotionSignal,
 } from '@core/runtime/permission-classifier.js';
+import { redactSensitiveToolInputString } from '@core/runtime/ipc-tool-input-sanitization.js';
 
 const baseInput = {
   appId: 'default' as never,
@@ -46,6 +47,37 @@ const baseInput = {
     },
   },
 };
+
+describe('permission classifier value redaction', () => {
+  it.each([
+    ['Bearer abcdefgh123456', '[REDACTED]'],
+    ['Basic dXNlcjpwYXNz', '[REDACTED]'],
+    ['sk-abcdefghijklmnop', '[REDACTED]'],
+    ['ghp_abcdefghijklmnop', '[REDACTED]'],
+    ['gho_abcdefghijklmnop', '[REDACTED]'],
+    ['github_pat_abcdefghijklmnop', '[REDACTED]'],
+    ['xoxb-abcdefghijklmnop', '[REDACTED]'],
+    ['xoxp-abcdefghijklmnop', '[REDACTED]'],
+    ['xoxa-abcdefghijklmnop', '[REDACTED]'],
+    ['AKIA1234567890ABCDEF', '[REDACTED]'],
+    ['AIza1234567890abcdefghij', '[REDACTED]'],
+    ['API_KEY=secret-value command', 'API_KEY=[REDACTED] command'],
+    ['password: secret-value', 'password: [REDACTED]'],
+    [
+      'https://user:pass@example.com/path',
+      'https://[REDACTED]@example.com/path',
+    ],
+  ])('redacts %s', (input, expected) => {
+    expect(redactSensitiveToolInputString(input)).toBe(expected);
+  });
+
+  it.each(['git status', 'ls -la', 'date'])(
+    'leaves benign command %s unchanged',
+    (command) => {
+      expect(redactSensitiveToolInputString(command)).toBe(command);
+    },
+  );
+});
 
 describe('permission classifier verdict client', () => {
   beforeEach(() => {
@@ -139,6 +171,24 @@ describe('permission classifier verdict client', () => {
     expect(request.prompt).toContain(baseInput.policyDecisionReason);
     expect(request.prompt).toContain('[REDACTED]');
     expect(request.prompt).not.toContain('private-value');
+  });
+
+  it('redacts secret values from command, intent, and policy strings', async () => {
+    await consultPermissionClassifier({
+      ...baseInput,
+      turnIntentSummary: 'Use API_KEY=intent-secret-value to inspect status.',
+      toolInput: {
+        command:
+          'curl -H "Authorization: Bearer command-secret-value" https://example.com',
+      },
+      policyDecisionReason: 'token: policy-secret-value was provided.',
+    });
+
+    const prompt = query.mock.calls[0]?.[0].prompt as string;
+    expect(prompt).toContain('[REDACTED]');
+    expect(prompt).not.toContain('intent-secret-value');
+    expect(prompt).not.toContain('command-secret-value');
+    expect(prompt).not.toContain('policy-secret-value');
   });
 
   it('adds recent exact-shape denial context to the classifier payload', async () => {

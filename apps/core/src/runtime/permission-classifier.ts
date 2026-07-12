@@ -34,7 +34,10 @@ import type {
   PermissionApprovalRequest,
   PermissionApprovalUpdate,
 } from '../domain/types.js';
-import { SENSITIVE_TOOL_INPUT_KEY_PATTERN } from './ipc-tool-input-sanitization.js';
+import {
+  redactSensitiveToolInputString,
+  SENSITIVE_TOOL_INPUT_KEY_PATTERN,
+} from './ipc-tool-input-sanitization.js';
 
 export const PERMISSION_CLASSIFIER_TIMEOUT_MS = 12_000;
 export const PERMISSION_CLASSIFIER_MAX_TOOL_INPUT_CHARS = 4_000;
@@ -530,11 +533,17 @@ export function redactPermissionClassifierToolInput(value: unknown): string {
 
 function classifierUserPayload(input: PermissionClassifierInput): string {
   return JSON.stringify({
-    agentIdentity: input.agentIdentity,
-    turnIntentSummary: truncate(input.turnIntentSummary, 1_500),
-    canonicalToolName: input.canonicalToolName,
+    agentIdentity: redactValue(input.agentIdentity, new WeakSet(), 0),
+    turnIntentSummary: truncate(
+      redactSensitiveToolInputString(input.turnIntentSummary),
+      1_500,
+    ),
+    canonicalToolName: redactSensitiveToolInputString(input.canonicalToolName),
     toolInput: redactPermissionClassifierToolInput(input.toolInput),
-    policyDecisionReason: truncate(input.policyDecisionReason, 1_000),
+    policyDecisionReason: truncate(
+      redactSensitiveToolInputString(input.policyDecisionReason),
+      1_000,
+    ),
     ...(input.recentlyDeniedExactToolShape
       ? {
           operatorContext: 'the operator recently denied this exact tool shape',
@@ -549,7 +558,9 @@ function redactValue(
   depth: number,
 ): unknown {
   if (depth > 8) return '[TRUNCATED_DEPTH]';
-  if (typeof value === 'string') return truncate(value, 1_000);
+  if (typeof value === 'string') {
+    return truncate(redactSensitiveToolInputString(value), 1_000);
+  }
   if (Array.isArray(value)) {
     return value
       .slice(0, 100)

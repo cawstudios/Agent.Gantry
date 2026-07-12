@@ -58,6 +58,7 @@ export interface RuntimeConfiguredConversationInstall {
   trigger?: string;
   requiresTrigger?: boolean;
   model?: string;
+  permissionMode?: PermissionMode;
 }
 
 export type EmbeddingProviderName = string;
@@ -138,6 +139,7 @@ export interface RuntimeConfiguredAgentBinding {
   addedAt: string;
   requiresTrigger: boolean;
   model?: string;
+  permissionMode?: PermissionMode;
 }
 
 export interface RuntimeConfiguredBinding {
@@ -150,6 +152,7 @@ export interface RuntimeConfiguredBinding {
   requiresTrigger: boolean;
   memoryScope: 'conversation' | 'user' | 'agent' | 'app';
   model?: string;
+  permissionMode?: PermissionMode;
 }
 
 export interface RuntimeConfiguredAgentSourceRef {
