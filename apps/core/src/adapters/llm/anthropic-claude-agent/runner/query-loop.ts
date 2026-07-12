@@ -1,6 +1,8 @@
 import {
   query,
   type EffortLevel,
+  type HookInput,
+  type PostToolUseHookInput,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
@@ -81,6 +83,35 @@ import { emitJobToolActivity } from './tool-permission-events.js';
 interface RunQueryOptions {
   enableIpcFollowups?: boolean;
   persistSdkSession?: boolean;
+}
+
+function toolResponseIsError(response: unknown): boolean {
+  if (Array.isArray(response)) return response.some(toolResponseIsError);
+  if (!response || typeof response !== 'object') return false;
+  const value = response as {
+    is_error?: unknown;
+    isError?: unknown;
+    status?: unknown;
+    error?: unknown;
+    content?: unknown;
+  };
+  return (
+    value.is_error === true ||
+    value.isError === true ||
+    value.status === 'error' ||
+    Boolean(value.error) ||
+    toolResponseIsError(value.content)
+  );
+}
+
+export function recordSuccessfulToolUse(
+  hookInput: Pick<PostToolUseHookInput, 'tool_name' | 'tool_response'>,
+  toolSuccessLedger: RunScopedToolSuccessLedger,
+): void {
+  if (toolResponseIsError(hookInput.tool_response)) return;
+  toolSuccessLedger.recordSuccess(
+    canonicalGantryToolRuleName(hookInput.tool_name),
+  );
 }
 
 function localCliCredentialDirectoriesFromRuntimeAccess(
@@ -382,17 +413,9 @@ export async function runQuery(
               PostToolUse: [
                 {
                   hooks: [
-                    async (hookInput: {
-                      hook_event_name: string;
-                      tool_name?: string;
-                    }) => {
-                      if (
-                        hookInput.hook_event_name === 'PostToolUse' &&
-                        hookInput.tool_name
-                      ) {
-                        toolSuccessLedger.recordSuccess(
-                          canonicalGantryToolRuleName(hookInput.tool_name),
-                        );
+                    async (hookInput: HookInput) => {
+                      if (hookInput.hook_event_name === 'PostToolUse') {
+                        recordSuccessfulToolUse(hookInput, toolSuccessLedger);
                       }
                       return { continue: true as const };
                     },

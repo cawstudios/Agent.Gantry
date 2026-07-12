@@ -136,9 +136,9 @@ async function isTrustedRequester(
     !input.request.senderId
   )
     return true;
-  if (route?.conversationKind === 'dm') return true;
   if (
-    route?.conversationKind !== 'channel' ||
+    (route?.conversationKind !== 'dm' &&
+      route?.conversationKind !== 'channel') ||
     !input.request.targetJid ||
     !input.request.senderId ||
     !input.deps.isControlApproverAllowed

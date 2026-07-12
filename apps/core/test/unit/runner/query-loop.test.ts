@@ -1,7 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.hoisted(() => {
+  process.env.GANTRY_WORKSPACE_GROUP_DIR ??= '/tmp';
+  process.env.GANTRY_WORKSPACE_EXTRA_DIR ??= '/tmp';
+  process.env.GANTRY_IPC_DIR ??= '/tmp';
+  process.env.GANTRY_IPC_INPUT_DIR ??= '/tmp';
+});
 
 import { usageEventIdForMessage } from '@core/adapters/llm/anthropic-claude-agent/runner/query-usage-event-id.js';
+import { recordSuccessfulToolUse } from '@core/adapters/llm/anthropic-claude-agent/runner/query-loop.js';
 import { canonicalGantryToolRuleName } from '@core/shared/gantry-tool-facades.js';
+import { RunScopedToolSuccessLedger } from '@core/runner/tool-gate-core.js';
 
 describe('Claude query loop usage event IDs', () => {
   it('uses stable provider IDs when present', () => {
@@ -44,5 +53,39 @@ describe('Claude query loop declarative tool names', () => {
 
   it('keeps native tool names unchanged', () => {
     expect(canonicalGantryToolRuleName('Bash')).toBe('Bash');
+  });
+});
+
+describe('Claude query loop declarative tool success ledger', () => {
+  it.each([
+    ['is_error', { is_error: true }],
+    ['isError', { isError: true }],
+    ['structured error envelope', { error: { category: 'business' } }],
+  ])(
+    'does not record %s tool responses as successes',
+    (_label, toolResponse) => {
+      const ledger = new RunScopedToolSuccessLedger();
+
+      recordSuccessfulToolUse(
+        { tool_name: 'mcp__gantry__send_message', tool_response: toolResponse },
+        ledger,
+      );
+
+      expect(ledger.hasSuccess('send_message')).toBe(false);
+    },
+  );
+
+  it('records successful tool responses', () => {
+    const ledger = new RunScopedToolSuccessLedger();
+
+    recordSuccessfulToolUse(
+      {
+        tool_name: 'mcp__gantry__send_message',
+        tool_response: { content: [{ type: 'text', text: 'sent' }] },
+      },
+      ledger,
+    );
+
+    expect(ledger.hasSuccess('send_message')).toBe(true);
   });
 });

@@ -385,6 +385,8 @@ describe('inline core tool bootstrap', () => {
     const input = laneInput();
     input.input.permissionMode = 'auto';
     input.group.conversationKind = 'dm';
+    input.input.memoryUserId = 'approver-1';
+    input.input.memoryReviewerIsControlApprover = true;
     const tools = createInlineCoreTools(
       input,
       support((() => ({
@@ -426,6 +428,8 @@ describe('inline core tool bootstrap', () => {
     const input = laneInput();
     input.input.permissionMode = 'auto';
     input.group.conversationKind = 'dm';
+    input.input.memoryUserId = 'approver-1';
+    input.input.memoryReviewerIsControlApprover = true;
     const tools = createInlineCoreTools(
       input,
       support((() => ({
@@ -451,7 +455,9 @@ describe('inline core tool bootstrap', () => {
   });
 
   it.each([
-    ['DM', 'dm', undefined, false, false, true],
+    ['DM approver', 'dm', 'approver-1', true, false, true],
+    ['DM non-approver', 'dm', 'member-1', false, false, false],
+    ['DM missing approver config', 'dm', 'member-1', undefined, false, false],
     ['group approver', 'channel', 'approver-1', true, false, true],
     ['group non-approver', 'channel', 'member-1', false, false, false],
     ['unattended', 'channel', undefined, false, true, true],

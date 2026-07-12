@@ -596,6 +596,7 @@ describe('ipc-interaction-handler', () => {
         responseKeyId: envelope.responseKeyId,
         sourceAgentFolder: 'main_agent',
         targetJid: 'tg:auto',
+        senderId: 'approver-1',
         toolName: 'Bash',
         toolInput: { command: 'git status --short' },
         decisionReason: 'No allow rule matched.',
@@ -611,6 +612,7 @@ describe('ipc-interaction-handler', () => {
           },
         }),
         requestPermissionApproval,
+        isControlApproverAllowed: vi.fn(async () => true),
         classifierConsult,
         publishRuntimeEvent,
         getPermissionRuntimeSettings: () => ({
@@ -680,6 +682,7 @@ describe('ipc-interaction-handler', () => {
         requestId: 'perm-live-route-override',
         sourceAgentFolder,
         targetJid,
+        senderId: 'approver-1',
         toolName: 'RunCommand',
         toolInput: { command: 'git status --short' },
       },
@@ -696,6 +699,7 @@ describe('ipc-interaction-handler', () => {
           },
         }),
         requestPermissionApproval,
+        isControlApproverAllowed: vi.fn(async () => true),
         classifierConsult,
         publishRuntimeEvent: vi.fn(async () => undefined),
         getPermissionRuntimeSettings: () => ({
@@ -716,7 +720,9 @@ describe('ipc-interaction-handler', () => {
   });
 
   it.each([
-    ['DM', 'dm', 'member-1', false, false, true],
+    ['DM approver', 'dm', 'approver-1', true, false, true],
+    ['DM non-approver', 'dm', 'member-1', false, false, false],
+    ['DM missing approver config', 'dm', 'member-1', undefined, false, false],
     ['group approver', 'channel', 'approver-1', true, false, true],
     ['group non-approver', 'channel', 'member-1', false, false, false],
     ['unattended', 'channel', undefined, false, true, true],
@@ -747,7 +753,10 @@ describe('ipc-interaction-handler', () => {
         mode: 'cancel' as const,
         decidedBy: 'owner',
       }));
-      const isControlApproverAllowed = vi.fn(async () => approverAllowed);
+      const isControlApproverAllowed =
+        approverAllowed === undefined
+          ? undefined
+          : vi.fn(async () => approverAllowed);
 
       await resolvePermissionIpcDecision({
         request: {
@@ -865,6 +874,7 @@ describe('ipc-interaction-handler', () => {
         responseKeyId: envelope.responseKeyId,
         sourceAgentFolder: 'main_agent',
         targetJid: 'tg:auto',
+        senderId: 'approver-1',
         toolName: 'mcp__crm__read',
         toolInputSanitized: true,
       },
@@ -878,6 +888,7 @@ describe('ipc-interaction-handler', () => {
           },
         }),
         requestPermissionApproval,
+        isControlApproverAllowed: vi.fn(async () => true),
         classifierConsult,
         publishRuntimeEvent,
         getPermissionRuntimeSettings: () => ({

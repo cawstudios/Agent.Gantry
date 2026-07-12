@@ -350,7 +350,6 @@ export function createInlineCoreTools(
           permissionMode: run.permissionMode,
           trustedRequester:
             (run.isScheduledJob === true && !run.memoryUserId) ||
-            laneInput.group.conversationKind === 'dm' ||
             (Boolean(run.memoryUserId) &&
               run.memoryReviewerIsControlApprover === true),
           requestFamily: 'tool',
