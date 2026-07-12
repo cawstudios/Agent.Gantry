@@ -85,11 +85,12 @@ python3 ~/.claude/skills/autoreview/scripts/autoreview --mode branch --base orig
 ```
 
 Review rounds run the autoreview skill THROUGH a codex rescue handoff (user
-decision 2026-07-11, confirmed working end-to-end). Prerequisites already in
-repo config: `.codex/config.toml` has `[sandbox_workspace_write]
-network_access = true` (the helper's inner `codex exec` engine needs it) and
-`.codex/rules/default.rules` has an allow prefix_rule for
-`python3 <autoreview script path>`. The handoff prompt must demand ONE plain
+decision 2026-07-11, confirmed working end-to-end). Prerequisites: the
+OPERATOR's `~/.codex/config.toml` has `[sandbox_workspace_write]
+network_access = true` (the helper's inner `codex exec` engine needs it;
+kept user-level on purpose — the repo config must NOT relax egress, per
+autoreview r10 2026-07-12) and repo `.codex/rules/default.rules` has an
+allow prefix_rule for `python3 <autoreview script path>`. The handoff prompt must demand ONE plain
 command — no shell wrapper (forbidden rule), no `env` prefix (prompt rule that
 dies under headless approval), no `&&` chaining:
 
