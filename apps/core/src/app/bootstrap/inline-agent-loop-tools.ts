@@ -51,6 +51,7 @@ import {
   permissionDecisionName,
   permissionTelemetryContext,
 } from '../../runtime/ipc-permission-telemetry.js';
+import { sanitizeIpcToolInput } from '../../runtime/ipc-tool-input-sanitization.js';
 import {
   ToolExecutionClassifier,
   ToolExecutionPolicyService,
@@ -353,10 +354,13 @@ export function createInlineCoreTools(
       let classifierDecision:
         | Awaited<ReturnType<typeof consultPermissionClassifierBeforePrompt>>
         | undefined;
+      const classifierToolInput = sanitizeIpcToolInput(toolInput);
       if (deps.publishRuntimeEvent) {
         classifierDecision = await consultPermissionClassifierBeforePrompt({
           permissionMode: run.permissionMode,
           attended: run.isScheduledJob !== true,
+          // Keep equivalent to isTrustedRequester() in ipc-permission-classifier-decision.ts:
+          // scheduled without a sender, or sender is a conversation control approver.
           trustedRequester:
             (run.isScheduledJob === true && !run.memoryUserId) ||
             (Boolean(run.memoryUserId) &&
@@ -374,7 +378,9 @@ export function createInlineCoreTools(
           intentSource: 'operator_message',
           turnIntentSummary: run.prompt,
           canonicalToolName: name,
-          toolInput,
+          toolInput: classifierToolInput.toolInput,
+          toolInputSanitized: classifierToolInput.altered,
+          toolInputSanitizedPaths: classifierToolInput.alteredPaths,
           policyDecisionReason: decision.reason,
           approvedCapabilityIds,
           suggestions,
@@ -385,6 +391,14 @@ export function createInlineCoreTools(
           classifierConsult: deps.classifierConsult,
         });
         if (classifierDecision?.decision === 'allow') return { allowed: true };
+      }
+      if (run.permissionMode === 'auto' && run.isScheduledJob === true) {
+        return {
+          allowed: false,
+          reason: classifierDecision
+            ? `Classifier requested human approval: ${classifierDecision.reason}`
+            : 'This tool is not eligible for unattended auto-permission.',
+        };
       }
       const promotionHintCount =
         classifierDecision?.promotionHintCount ??
@@ -418,6 +432,8 @@ export function createInlineCoreTools(
         decisionReason: decision.reason,
         closestRule: decision.closestRule,
         toolInput: toolInput as Record<string, unknown>,
+        toolInputSanitized: classifierToolInput.altered,
+        toolInputSanitizedPaths: classifierToolInput.alteredPaths,
         suggestions,
         ...(promotionHintCount ? { promotionHintCount } : {}),
         decisionOptions: suggestions

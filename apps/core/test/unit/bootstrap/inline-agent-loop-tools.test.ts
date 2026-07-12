@@ -473,6 +473,72 @@ describe('inline core tool bootstrap', () => {
     );
   });
 
+  it('marks sanitized inline input before classifier consult and approval', async () => {
+    const classifierConsult = vi.fn();
+    wire({ classifierConsult });
+    const input = laneInput();
+    input.input.permissionMode = 'auto';
+    input.input.memoryUserId = 'approver-1';
+    input.input.memoryReviewerIsControlApprover = true;
+    const tools = createInlineCoreTools(
+      input,
+      support((() => ({
+        status: 'prompt',
+        reason: 'Approval required.',
+      })) as never),
+    );
+
+    await expect(
+      tools.authorizeThirdPartyMcpTool('mcp__crm__read', {
+        id: 'crm-1',
+        password: 'do-not-classify',
+      }),
+    ).resolves.toEqual({ allowed: true });
+
+    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolInputSanitized: true,
+        toolInputSanitizedPaths: ['password'],
+      }),
+    );
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.classifier_decision',
+        payload: expect.objectContaining({ failureCode: 'input_truncated' }),
+      }),
+    );
+  });
+
+  it('denies an unattended classifier ask without prompting', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'ask' as const,
+      reason: 'The requested scope needs human approval.',
+      latencyMs: 2,
+    }));
+    wire({ classifierConsult });
+    const input = laneInput();
+    input.input.permissionMode = 'auto';
+    input.input.isScheduledJob = true;
+    const tools = createInlineCoreTools(
+      input,
+      support((() => ({
+        status: 'prompt',
+        reason: 'Approval required.',
+      })) as never),
+    );
+
+    await expect(
+      tools.authorizeThirdPartyMcpTool('mcp__crm__read', { id: 'crm-1' }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason:
+        'Classifier requested human approval: The requested scope needs human approval.',
+    });
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(input.emitOutput).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['DM approver', 'dm', 'approver-1', true, false, true],
     ['DM non-approver', 'dm', 'member-1', false, false, false],
