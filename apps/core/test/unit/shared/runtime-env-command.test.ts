@@ -9,10 +9,10 @@ describe('stripRuntimeEnvPrefix', () => {
   it('strips the recognized runtime environment prefix', () => {
     expect(
       stripRuntimeEnvPrefix(
-        "GODEBUG='http2client=0' HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 NO_PROXY=localhost NODE_USE_ENV_PROXY=1 gog auth --help",
+        "GODEBUG='http2client=0' HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 NO_PROXY=localhost NODE_USE_ENV_PROXY=1 /opt/tools/fake-cli records get --help",
       ),
     ).toEqual({
-      command: 'gog auth --help',
+      command: '/opt/tools/fake-cli records get --help',
       envAssignments: [
         "GODEBUG='http2client=0'",
         'HTTP_PROXY=http://127.0.0.1:8080',
@@ -24,8 +24,8 @@ describe('stripRuntimeEnvPrefix', () => {
   });
 
   it('leaves commands without a recognized runtime prefix unchanged', () => {
-    expect(stripRuntimeEnvPrefix('gog auth list')).toEqual({
-      command: 'gog auth list',
+    expect(stripRuntimeEnvPrefix('/opt/tools/fake-cli records list')).toEqual({
+      command: '/opt/tools/fake-cli records list',
       envAssignments: [],
     });
   });
@@ -49,9 +49,11 @@ describe('stripHostInjectedEnvPrefix', () => {
     ];
 
     expect(
-      stripHostInjectedEnvPrefix(`${assignments.join(' ')} gog auth --help`),
+      stripHostInjectedEnvPrefix(
+        `${assignments.join(' ')} /opt/tools/fake-cli records get --help`,
+      ),
     ).toEqual({
-      command: 'gog auth --help',
+      command: '/opt/tools/fake-cli records get --help',
       strippedAssignments: assignments,
     });
   });
@@ -91,13 +93,14 @@ describe('stripHostInjectedEnvPrefix', () => {
 
     expect(
       stripHostInjectedEnvPrefix(
-        "SSL_CERT_FILE='/tmp/known-ca.pem' gog auth --help",
+        "SSL_CERT_FILE='/tmp/known-ca.pem' /opt/tools/fake-cli records get --help",
       ),
     ).toEqual({
-      command: 'gog auth --help',
+      command: '/opt/tools/fake-cli records get --help',
       strippedAssignments: ["SSL_CERT_FILE='/tmp/known-ca.pem'"],
     });
-    const command = "SSL_CERT_FILE='/tmp/untrusted-ca.pem' gog auth --help";
+    const command =
+      "SSL_CERT_FILE='/tmp/untrusted-ca.pem' /opt/tools/fake-cli records get --help";
     expect(stripHostInjectedEnvPrefix(command)).toEqual({
       command,
       strippedAssignments: [],
