@@ -1,19 +1,11 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs';
-import {
-  ASSISTANT_NAME,
-  getEffectiveModelConfig,
-  getRuntimeSettingsForConfig,
-  getSelectedAgentHarness,
-} from '../config/index.js';
+// prettier-ignore
+import { ASSISTANT_NAME, getEffectiveModelConfig, getRuntimeSettingsForConfig, getSelectedAgentHarness } from '../config/index.js';
 import type { Job } from '../domain/types.js';
 import { logger } from '../infrastructure/logging/logger.js';
-import {
-  getRuntimeControlRepository,
-  getRuntimeEventExchange,
-  getConfiguredModelProvidersForApp,
-  getWorkerCoordinationRepository,
-} from '../adapters/storage/postgres/runtime-store.js';
+// prettier-ignore
+import { getRuntimeControlRepository, getRuntimeEventExchange, getConfiguredModelProvidersForApp, getWorkerCoordinationRepository } from '../adapters/storage/postgres/runtime-store.js';
 import { DEFAULT_JOB_RUNTIME_APP_ID } from '../application/jobs/job-access.js';
 import { splitAccessRequirements } from '../application/jobs/job-access-requirements.js';
 import * as jobToolPolicy from '../application/jobs/job-tool-policy.js';
@@ -38,10 +30,8 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from '../runtime/group-run-context.js';
-import {
-  collectCompactBoundaryMemory,
-  collectJobCompletionMemory,
-} from './compact-memory.js';
+// prettier-ignore
+import { collectCompactBoundaryMemory, collectJobCompletionMemory } from './compact-memory.js';
 import { normalizeCleanupAfterMs } from './cleanup.js';
 import {
   buildExecutionTurnContextInput,
@@ -69,16 +59,8 @@ import {
   resolveJobExecutionProviderId,
   resolveJobModel,
 } from './model-resolution.js';
-import {
-  createJobRunDiagnostics,
-  createStreamingEventFlusher,
-  filterUnforwardedRunnerRuntimeEvents,
-  formatTerminalToolDenial,
-  forwardRunnerRuntimeEvents,
-  runnerRuntimeEventKey,
-  terminalDiagnosticsPayload,
-  toolDenialEventPayload,
-} from './execution-diagnostics.js';
+// prettier-ignore
+import { createJobRunDiagnostics, createStreamingEventFlusher, filterUnforwardedRunnerRuntimeEvents, formatTerminalToolDenial, forwardRunnerRuntimeEvents, runnerRuntimeEventKey, terminalDiagnosticsPayload, toolDenialEventPayload } from './execution-diagnostics.js';
 import { pauseJobForSetupIfNeeded } from './execution-readiness.js';
 import {
   bindSchedulerRunEventState,
@@ -442,6 +424,24 @@ export async function runJob(
                   cause: 'job',
                 })
               : undefined;
+            try {
+              await deps.getRunPermissionOriginRepository?.()?.upsertRunOrigin({
+                runId,
+                appId: executionAppId,
+                agentFolder: execution.group.folder,
+                targetJid: execution.executionJid,
+                providerAccountId: execution.group.providerAccountId,
+                threadId: execution.threadId || undefined,
+                senderIsApprover: false,
+                isScheduled: true,
+                createdAt: nowIso(),
+              });
+            } catch (err) {
+              logger.warn(
+                { err, jobId: currentJob.id, runId },
+                'Failed to record scheduled permission run origin',
+              );
+            }
             const output = await runJobAgentWithFailover({
               group: execution.group,
               candidates: jobFailoverCandidates,

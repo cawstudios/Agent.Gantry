@@ -39,6 +39,7 @@ import type { PatternCandidateRepository } from '../domain/ports/pattern-candida
 import type { AgentTodoRender } from '../domain/ports/task-lifecycle.js';
 import type { AgentLockStatus } from './proactive-surfacing-gate.js';
 import type { GroupAgentRunResult } from './group-agent-runner.js';
+import type { RunPermissionOriginRepository } from '../domain/ports/run-permission-origin.js';
 
 export type {
   ConversationContextHydrationRequest,
@@ -196,6 +197,9 @@ export interface GroupProcessingDeps {
   getCredentialBroker?: () => Promise<AgentCredentialBroker | undefined>;
   getToolRepository?: () => ToolCatalogRepository | undefined;
   getAsyncTaskRepository?: () => AsyncTaskRepository | undefined;
+  getRunPermissionOriginRepository?: () =>
+    | RunPermissionOriginRepository
+    | undefined;
   getPatternCandidateRepository?: () => PatternCandidateRepository | undefined;
   getProactiveSurfacingRepository?: () =>
     | ProactiveSurfacingConsentReader

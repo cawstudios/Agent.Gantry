@@ -1,7 +1,5 @@
-import type {
-  AgentControlOverrides,
-  ConversationRoute,
-} from '../domain/types.js';
+// prettier-ignore
+import type { AgentControlOverrides, ConversationRoute } from '../domain/types.js';
 import { collectCompactBoundaryMemory } from '../jobs/compact-memory.js';
 import { defaultModelStatusSelection } from '../session/session-model-status.js';
 import type { AgentOutput } from './agent-spawn.js';
@@ -60,9 +58,8 @@ import { maintenanceCompactionPromptForExecutionProvider } from './group-agent-r
 import { hasAsyncTaskRepository } from './group-agent-runner-async-task-repository.js';
 import { resolveInitialGroupExecutionProviderId } from './group-initial-execution-provider.js';
 import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
+import { nowIso } from '../shared/time/datetime.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
-const DEFAULT_MODEL_ALIAS = 'opus';
-const DEFAULT_TURN_APP_ID = 'default';
 const WORKSPACE_FOLDER_INPUT_KEY = `workspace${'Folder'}`;
 export type GroupAgentRunResult = 'success' | 'error' | 'stopped';
 function redactRuntimeError(error: string | undefined): string | undefined {
@@ -74,7 +71,6 @@ function isStoppedByRequest(output: AgentOutput): boolean {
     /\bstopped by request\b/i.test(output.error ?? '')
   );
 }
-
 export function createGroupAgentRunner(input: {
   deps: GroupProcessingDeps;
   ops: () => GroupProcessingRepository;
@@ -97,8 +93,10 @@ export function createGroupAgentRunner(input: {
         recallQuery?: string;
       };
       turnMessages?: readonly {
+        id?: string;
         content?: string | null;
         sender?: string | null;
+        timestamp?: string;
         is_from_me?: boolean | null;
       }[];
       existingRunId?: string;
@@ -116,9 +114,9 @@ export function createGroupAgentRunner(input: {
     },
   ): Promise<GroupAgentRunResult> {
     const agentHarness = deps.getSelectedAgentHarness(group.folder);
-    const turnAppId = appIdFromConversationJid(chatJid) ?? DEFAULT_TURN_APP_ID;
+    const turnAppId = appIdFromConversationJid(chatJid) ?? 'default';
     const defaultInteractiveModel =
-      deps.getDefaultInteractiveModel?.(group.folder) ?? DEFAULT_MODEL_ALIAS;
+      deps.getDefaultInteractiveModel?.(group.folder) ?? 'opus';
     const initialProvider = await resolveInitialGroupExecutionProviderId({
       group,
       appId: turnAppId,
@@ -476,6 +474,37 @@ export function createGroupAgentRunner(input: {
                 : 'message',
           })
         : undefined;
+    if (runState.runId) {
+      // prettier-ignore
+      const triggeringMessage = [...(options?.turnMessages ?? [])]
+        .reverse()
+        .find(
+          (message) =>
+            !message.is_from_me &&
+            Boolean(memoryReviewerUserId) && message.sender?.trim() === memoryReviewerUserId,
+        );
+      try {
+        await deps.getRunPermissionOriginRepository?.()?.upsertRunOrigin({
+          runId: runState.runId,
+          appId: runtimeAppId,
+          agentFolder: group.folder,
+          targetJid: chatJid,
+          providerAccountId: group.providerAccountId,
+          threadId: sessionThreadId ?? undefined,
+          triggeringSenderId: memoryReviewerUserId,
+          senderIsApprover: memoryReviewerIsControlApprover === true,
+          triggeringMessageTimestamp: triggeringMessage?.timestamp,
+          triggeringMessageId: triggeringMessage?.id,
+          isScheduled: false,
+          createdAt: nowIso(),
+        });
+      } catch (err) {
+        logger.warn(
+          { err, group: group.name, runId: runState.runId },
+          'Failed to record permission run origin',
+        );
+      }
+    }
     try {
       const credentialBroker = await deps.getCredentialBroker?.();
       const runOptions = buildRuntimeRunOptions({

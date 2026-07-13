@@ -2538,10 +2538,37 @@ describe('createGroupProcessor', () => {
         requiresTrigger: false,
         conversationKind: 'dm',
       });
-      const messages = [makeMessage({ sender: 'sl:UADMIN', content: 'hello' })];
+      const messages = [
+        makeMessage({
+          id: 'msg-old',
+          sender: 'sl:UADMIN',
+          content: 'hello',
+          timestamp: '1700000001',
+        }),
+        makeMessage({
+          id: 'msg-trigger',
+          sender: 'sl:UADMIN',
+          content: 'list files',
+          timestamp: '1700000002',
+        }),
+      ];
       const isControlApproverAllowed = vi.fn(async () => true);
+      const upsertRunOrigin = vi.fn(async () => undefined);
       const { deps } = setupHappyPath({ group, messages });
       deps.channelRuntime.isControlApproverAllowed = isControlApproverAllowed;
+      deps.getRunPermissionOriginRepository = () => ({
+        upsertRunOrigin,
+        getRunOrigin: vi.fn(async () => null),
+      });
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentSessionId: 'agent-session:review',
+        });
+      (deps.opsRepository as any).createSessionAgentRun = vi
+        .fn()
+        .mockResolvedValue('agent-run:review');
       mockSpawnAgent.mockImplementation(
         async (
           _group: ConversationRoute,
@@ -2569,6 +2596,19 @@ describe('createGroupProcessor', () => {
       expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
         memoryReviewerIsControlApprover: true,
       });
+      expect(upsertRunOrigin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: 'agent-run:review',
+          appId: 'app:test',
+          agentFolder: group.folder,
+          targetJid: 'sl:D123',
+          triggeringSenderId: 'sl:UADMIN',
+          senderIsApprover: true,
+          triggeringMessageTimestamp: '1700000002',
+          triggeringMessageId: 'msg-trigger',
+          isScheduled: false,
+        }),
+      );
       expect(deps.queue.registerProcess).toHaveBeenCalledWith(
         'sl:D123',
         expect.anything(),
