@@ -87,6 +87,57 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
+  it('accepts markdown-fenced JSON without a closing fence from agent task final output', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () =>
+          [
+            '```json',
+            JSON.stringify({ action: 'final', output: { status: 'ok' } }),
+          ].join('\n'),
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.open-fenced-json',
+      instructions: 'Return raw JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'ok' },
+    });
+  });
+
+  it('accepts opening-fenced JSON with trailing text from agent task final output', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () =>
+          [
+            '```json',
+            JSON.stringify({ action: 'final', output: { status: 'ok' } }),
+            'Done.',
+          ].join('\n'),
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.open-fenced-json-trailing-text',
+      instructions: 'Return raw JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'ok' },
+    });
+  });
+
   it('returns aggregate model usage from multi-step generic agent tasks', async () => {
     let callCount = 0;
     const runner = createStructuredModelTaskRunner({
