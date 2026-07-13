@@ -163,6 +163,7 @@ export function writeUserQuestionInteractionFailure(input: {
 
 export async function processPermissionInteractionIpc(input: {
   request: PermissionApprovalRequest;
+  trustedRunId?: string;
   sourceAgentFolder: string;
   deps: IpcDeps;
   ipcBaseDir: string;
@@ -231,7 +232,12 @@ export async function processPermissionInteractionIpc(input: {
       payload: requestedContext,
     });
     await assertActiveScheduledPermissionLease(input);
-    const decision = await resolvePermissionIpcDecision(input);
+    const decision = await resolvePermissionIpcDecision({
+      request: input.request,
+      trustedRunId: input.trustedRunId,
+      sourceAgentFolder: input.sourceAgentFolder,
+      deps: input.deps,
+    });
     await assertActiveScheduledPermissionLease(input);
     const decisionContext = permissionTelemetryContext(input.request, {
       sourceAgentFolder: input.sourceAgentFolder,

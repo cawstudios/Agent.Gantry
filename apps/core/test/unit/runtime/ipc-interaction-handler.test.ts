@@ -23,6 +23,7 @@ import {
   processUserQuestionInteractionIpc,
 } from '@core/runtime/ipc-interaction-processing.js';
 import { resolvePermissionIpcDecision } from '@core/runtime/ipc-permission-classifier-decision.js';
+import * as permissionClassifierDecision from '@core/runtime/ipc-permission-classifier-decision.js';
 import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
 
 function fileMode(filePath: string): number {
@@ -48,6 +49,7 @@ describe('ipc-interaction-handler', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
     configurePendingInteractionDurability(null);
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('delegates permission decisions through the domain handler', async () => {
@@ -72,6 +74,39 @@ describe('ipc-interaction-handler', () => {
       reason: 'safe',
     });
     expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('threads the host-derived trusted run id into the permission decision input', async () => {
+    const claimedPath = path.join(tempDir, 'claimed-trusted-run.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const resolveDecision = vi
+      .spyOn(permissionClassifierDecision, 'resolvePermissionIpcDecision')
+      .mockResolvedValue({
+        approved: false,
+        mode: 'cancel',
+        decidedBy: 'runtime',
+      });
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-trusted-run-threading',
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+      },
+      trustedRunId: 'run:host',
+      sourceAgentFolder: 'main_agent',
+      deps: { requestPermissionApproval: vi.fn() },
+      ipcBaseDir: tempDir,
+      file: 'claimed-trusted-run.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn() },
+    });
+
+    expect(resolveDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trustedRunId: 'run:host',
+      }),
+    );
   });
 
   it('delegates user questions through the domain handler', async () => {
@@ -801,12 +836,14 @@ describe('ipc-interaction-handler', () => {
       request: {
         requestId: 'perm-repo-fallback',
         sourceAgentFolder: 'main_agent',
+        runId: 'run:runner-supplied',
         targetJid: 'tg:repo-fallback',
         senderId: 'forged-runner-sender',
         turnIntentSummary: 'Forged benign runner intent.',
         toolName: 'RunCommand',
         toolInput: { command: 'git status --short' },
       },
+      trustedRunId: 'run:host-derived',
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
@@ -850,6 +887,7 @@ describe('ipc-interaction-handler', () => {
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
+        runId: 'run:host-derived',
         payload: expect.objectContaining({ intentSource: 'operator_message' }),
       }),
     );
@@ -874,6 +912,7 @@ describe('ipc-interaction-handler', () => {
       request: {
         requestId: 'perm-live-route-override',
         sourceAgentFolder,
+        runId: 'run:runner-supplied',
         targetJid,
         senderId: 'approver-1',
         toolName: 'RunCommand',
@@ -925,6 +964,7 @@ describe('ipc-interaction-handler', () => {
     );
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
+        runId: undefined,
         payload: expect.objectContaining({ intentSource: 'operator_message' }),
       }),
     );

@@ -25,6 +25,7 @@ const FUTURE_MESSAGE_CURSOR = {
 
 export async function resolvePermissionIpcDecision(input: {
   request: PermissionApprovalRequest;
+  trustedRunId?: string;
   sourceAgentFolder: string;
   deps: IpcDeps;
 }): Promise<PermissionApprovalDecision> {
@@ -100,7 +101,7 @@ export async function resolvePermissionIpcDecision(input: {
           appId: input.request.appId,
           agentId: input.request.agentId,
           agentFolder: input.sourceAgentFolder,
-          runId: input.request.runId,
+          runId: input.trustedRunId,
           jobId: input.request.jobId,
           conversationId: input.request.targetJid,
           threadId: input.request.threadId,
