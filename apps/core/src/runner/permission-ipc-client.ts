@@ -7,6 +7,7 @@ import { formatDuration } from '../shared/human-format.js';
 import { isPlainObject } from '../shared/object.js';
 import { persistentPermissionUpdates } from '../shared/permission-tool-rules.js';
 import { canonicalJson } from '../shared/canonical-json.js';
+import { AUTO_PERMISSION_CLASSIFIER_WAIT_MS } from '../shared/permission-mode.js';
 import type { SemanticCapabilityDefinition } from '../shared/semantic-capabilities.js';
 import { waitForIpcResponseFile } from './ipc-response-wait.js';
 
@@ -38,6 +39,10 @@ export interface PermissionIpcRuntimeEnv {
   ipcResponseKeyId: string;
   agentRunHandle?: string;
   permissionRequestTimeoutMs: number;
+  permissionMode?: 'ask' | 'auto';
+  senderId?: string;
+  senderIsControlApprover?: boolean;
+  turnIntentSummary?: string;
   resolveWorkspaceIpcDir: (agentFolder: string) => string;
 }
 
@@ -143,6 +148,13 @@ export async function requestPermissionApprovalViaIpc(
           }
         : {}),
       ...(options.threadId ? { threadId: options.threadId } : {}),
+      ...(env.senderId && env.senderIsControlApprover
+        ? { senderId: env.senderId }
+        : {}),
+      ...(env.turnIntentSummary
+        ? { turnIntentSummary: env.turnIntentSummary.slice(0, 1_500) }
+        : {}),
+      unattended: env.permissionRequestTimeoutMs <= 0,
       context: {
         appId,
         ...(agentId ? { agentId } : {}),
@@ -170,7 +182,9 @@ export async function requestPermissionApprovalViaIpc(
     fs.writeFileSync(requestTmpPath, JSON.stringify(envelope, null, 2));
     fs.renameSync(requestTmpPath, requestPath);
 
-    if (env.permissionRequestTimeoutMs <= 0) {
+    const autoClassifierWait =
+      env.permissionRequestTimeoutMs <= 0 && env.permissionMode === 'auto';
+    if (env.permissionRequestTimeoutMs <= 0 && !autoClassifierWait) {
       return {
         approved: false,
         reason:
@@ -180,7 +194,10 @@ export async function requestPermissionApprovalViaIpc(
     }
 
     const responsePath = path.join(permissionResponsesDir, `${requestId}.json`);
-    const deadline = nowMs() + env.permissionRequestTimeoutMs;
+    const waitMs = autoClassifierWait
+      ? AUTO_PERMISSION_CLASSIFIER_WAIT_MS
+      : env.permissionRequestTimeoutMs;
+    const deadline = nowMs() + waitMs;
     if (await waitForIpcResponseFile({ responsePath, deadlineMs: deadline })) {
       return readPermissionResponse({
         responsePath,
@@ -191,7 +208,7 @@ export async function requestPermissionApprovalViaIpc(
     }
     return {
       approved: false,
-      reason: `Timed out waiting ${formatDuration(env.permissionRequestTimeoutMs)} for host permission approval. The host watchdog denied this tool call; retry only if the channel is healthy or request a persistent capability rule.`,
+      reason: `Timed out waiting ${formatDuration(waitMs)} for host permission approval. The host watchdog denied this tool call; retry only if the channel is healthy or request a persistent capability rule.`,
       decisionClassification: 'user_reject',
     };
   } catch (err) {

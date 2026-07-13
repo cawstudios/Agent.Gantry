@@ -28,6 +28,7 @@ export function durablePermissionRequestSnapshot(
   | 'appId'
   | 'agentId'
   | 'sourceAgentFolder'
+  | 'requestFamily'
   | 'runHandle'
   | 'jobId'
   | 'runId'
@@ -43,6 +44,7 @@ export function durablePermissionRequestSnapshot(
     ...(request.appId ? { appId: request.appId } : {}),
     ...(request.agentId ? { agentId: request.agentId } : {}),
     sourceAgentFolder: request.sourceAgentFolder,
+    ...(request.requestFamily ? { requestFamily: request.requestFamily } : {}),
     ...(request.runHandle ? { runHandle: request.runHandle } : {}),
     ...(request.jobId ? { jobId: request.jobId } : {}),
     ...(request.runId ? { runId: request.runId } : {}),

@@ -22,6 +22,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
+COPY examples/nextjs-workflows/package.json examples/nextjs-workflows/package.json
 
 # Full install (dev deps included) — needed for tsc + workspace builds.
 # `--ignore-scripts` keeps install hermetic; the prepare hook (husky) is a no-op
@@ -30,9 +31,11 @@ RUN npm ci --ignore-scripts
 
 # ---------------------------------------------------------------------------
 # Stage 2: build — compile contracts, SDK, core, and copy migrations into dist.
-# `npm run build` runs: clean → build:contracts → build:sdk → tsc →
+# `npm run build:runtime` runs: clean → build:contracts → build:sdk → tsc →
 # copy:migrations → chmod cli. Migrations land in dist/.../migrations so the
-# runtime image can migrate without the source tree.
+# runtime image can migrate without the source tree. The examples workspace
+# (`build:examples`) is deliberately NOT built here — examples are dev/docs
+# surface, never shipped in the runtime image, and their source is not copied.
 # ---------------------------------------------------------------------------
 FROM deps AS build
 WORKDIR /app
@@ -41,7 +44,7 @@ COPY tsconfig.json ./
 COPY packages ./packages
 COPY apps ./apps
 
-RUN npm run build
+RUN npm run build:runtime
 
 # Prune to production dependencies for the runtime stage. The workspace
 # file: links (@gantry/contracts, @gantry/sdk) resolve to packages/*/dist,
