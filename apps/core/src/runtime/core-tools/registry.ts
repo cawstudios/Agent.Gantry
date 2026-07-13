@@ -500,9 +500,7 @@ async function gateCoreTool(
         destination: 'session',
       },
     ],
-    decisionOptions: deps.context.isScheduledJob
-      ? ['allow_once', 'allow_persistent_rule', 'cancel']
-      : ['allow_once', 'allow_timed_grant', 'allow_persistent_rule', 'cancel'],
+    decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
   };
   const interaction = await runDurablePermissionInteraction({
     request,

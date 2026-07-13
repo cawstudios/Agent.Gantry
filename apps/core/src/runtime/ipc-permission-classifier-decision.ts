@@ -18,6 +18,7 @@ import {
 import { runDurablePermissionInteraction } from '../application/interactions/durable-interaction-handler.js';
 import { resolveAgentToolRuntimePolicy } from '../application/agents/agent-tool-runtime-rules.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
+import type { YoloModeSettings } from '../shared/yolo-mode-policy.js';
 
 export async function resolvePermissionIpcDecision(input: {
   request: PermissionApprovalRequest;
@@ -45,6 +46,9 @@ export async function resolvePermissionIpcDecision(input: {
         | undefined
     )?.capabilities?.map(({ id }) => id) ?? [];
   const autoModeModel = settings?.permissions.autoMode.model;
+  const yoloMode = (
+    settings?.permissions as { yoloMode?: YoloModeSettings } | undefined
+  )?.yoloMode;
   const classifierConfig = settings
     ? {
         ...(autoModeModel ? { autoModeModel } : {}),
@@ -129,6 +133,7 @@ export async function resolvePermissionIpcDecision(input: {
         approvedCapabilityIds,
         workspaceRoot: resolveWorkspaceFolderPath(input.sourceAgentFolder),
         reviewedMcpReadBindings,
+        yoloMode,
         suggestions: input.request.suggestions,
         ...(promotion ? { promotion } : {}),
         classifierConfig: classifierConfig!,
@@ -147,6 +152,13 @@ export async function resolvePermissionIpcDecision(input: {
         ? `Classifier requested human approval: ${classifierDecision.reason}`
         : 'This tool is not eligible for unattended auto-permission.',
     };
+  }
+  if (classifierDecision?.denylistHit) {
+    // Denylist-forced prompts are allow-once/cancel only: a persisted rule
+    // would never be honored while the denylist blocks rule-based auto-allows.
+    input.request.suggestions = undefined;
+    input.request.decisionOptions = ['allow_once', 'cancel'];
+    return input.deps.requestPermissionApproval(input.request);
   }
   input.request.promotionHintCount =
     classifierDecision?.promotionHintCount ??

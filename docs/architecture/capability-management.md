@@ -152,9 +152,9 @@ is selected for the agent.
 
 Permission prompts use the trusted manifest display name, for example
 `Allow Publisher publish?`, while buttons remain short: `Allow once`,
-`Allow 5 min`, `Allow for future`, and `Cancel`. Raw free-form request text cannot
-create a trusted action label; raw command fallback remains visible as exact
-command access.
+`Allow for future` when a persistent suggestion exists, and `Cancel`. Raw
+free-form request text cannot create a trusted action label; raw command fallback
+remains visible as exact command access.
 
 ## Local CLI Capabilities
 
@@ -680,9 +680,9 @@ tools are not job-local authority.
 
 Conversation threads and provider topics are routing details, not separate
 permission boundaries. Permission prompts may be delivered in a Slack thread,
-Teams reply chain, or Telegram topic, but `Allow 5 min` and `Allow for future`
-scope to the parent conversation and selected agent capability set. Thread or
-topic ids may appear in audit/routing metadata only.
+Teams reply chain, or Telegram topic, but decisions scope to the parent
+conversation and selected agent capability set. Thread or topic ids may appear
+in audit/routing metadata only.
 
 Direct writes to `settings.json`, `settings.local.json`, `.mcp.json`,
 generated provider MCP directories, and skill capability files are protected
@@ -720,7 +720,7 @@ not durable Gantry truth.
    Gantry Credential refs, sandbox profile, tool patterns, and provider metadata.
 3. Review: same-channel review renders the request, but authority still comes
    from configured admin/control policy.
-4. Decide: setup, scheduler, admin, and capability flows show `Allow once`, `Allow for future`, or `Cancel`; live interactive SDK prompts may also show `Allow 5 min`. Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact Gantry file/web facade, exact `mcp__gantry__<admin_tool>`, or scoped `RunCommand(<pattern>)`.
+4. Decide: permission prompts show `Allow once`, `Allow for future` when a persistent suggestion exists, or `Cancel`. Details and audit records carry the durable authority shape, such as a semantic capability, canonical `Browser`, exact Gantry file/web facade, exact `mcp__gantry__<admin_tool>`, or scoped `RunCommand(<pattern>)`.
 5. Bind: approval creates or updates the agent binding and a new config version.
 6. Same-session handoff: installed skill packages are returned to the running
    agent as reviewed skill files; connected MCP servers are reachable through the

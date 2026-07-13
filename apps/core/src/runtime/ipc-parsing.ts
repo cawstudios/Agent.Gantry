@@ -83,7 +83,6 @@ const PERMISSION_DESTINATIONS = new Set<
 const PERMISSION_DECISION_MODES = new Set<PermissionApprovalDecisionMode>([
   'allow_once',
   'allow_persistent_rule',
-  'allow_timed_grant',
   'cancel',
 ]);
 function toPositiveInteger(value: unknown): number | undefined {

@@ -58,8 +58,10 @@ allow-or-deny-with-reason.
    `PermissionManagementService.applyPersistentToolRuleGrant` path (template
    caller: `apps/core/src/jobs/request-permission-review.ts`). Offer at most
    once per key (last_offered_at set ⇒ never re-offer in v1).
-8. **`allow_timed_grant` is untouched.** No new trust scopes in v1. No memory
-   input to the classifier in v1. Weekly digest is v2.
+8. **Permission choices stay bounded.** This plan introduces no permission
+   decision modes. Prompts offer `allow_once`, `allow_persistent_rule` when a
+   persistent suggestion exists, and `cancel`. No memory input to the classifier
+   in v1. Weekly digest is v2.
 
 ## Architecture contract (validated against code)
 

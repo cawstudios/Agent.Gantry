@@ -379,12 +379,6 @@ describe('jobs/execution-notifications', () => {
           jobId: 'job-1',
           runId: 'run-1',
         },
-        {
-          kind: 'scheduler_open',
-          label: 'Open in scheduler',
-          jobId: 'job-1',
-          runId: 'run-1',
-        },
       ],
     });
   });
@@ -474,12 +468,6 @@ describe('jobs/execution-notifications', () => {
         {
           kind: 'scheduler_pause_job',
           label: 'Pause job',
-          jobId: 'job-1',
-          runId: 'run-1',
-        },
-        {
-          kind: 'scheduler_open',
-          label: 'Open in scheduler',
           jobId: 'job-1',
           runId: 'run-1',
         },

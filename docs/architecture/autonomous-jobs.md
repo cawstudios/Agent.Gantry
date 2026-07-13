@@ -62,10 +62,8 @@ browser_login_may_be_required
 mcp_missing_credential
 ```
 
-`Allow once` can resume the current blocked tool call in live interactive
-permission prompts. `Allow 5 min` is also live-only; setup and scheduler
-readiness prompts do not show it because timed grants are not durable readiness
-for future recurring runs. Recurring activation requires a persistent
+`Allow once` can resume the current blocked tool call in permission prompts.
+Recurring activation requires a persistent
 target-agent capability binding such as `Browser`, `capability:<id>`, an exact
 Gantry file/web facade, an approved Gantry admin tool, a scoped
 `RunCommand(...)` rule, or a connected MCP server binding. Browser auth remains
@@ -81,7 +79,7 @@ before autonomous allowance. If a tool is outside the effective job allowlist,
 the runner uses the same permission IPC path as interactive agent runs: it sends
 the approval prompt to the job's source conversation/thread or topic and waits
 at the tool boundary. `Allow once` resumes that tool call in the current job
-run. `Always allow` stores a semantic
+run. `Allow for future`, when offered, stores a semantic
 `capability:<id>` grant when the request names one; otherwise it may apply
 canonical `Browser`, an exact Gantry file/web facade, an exact Gantry admin
 tool, or a scoped `RunCommand(...)` rule to the target agent. Broad exact

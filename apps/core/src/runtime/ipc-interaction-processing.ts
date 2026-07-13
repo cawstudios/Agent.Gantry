@@ -398,7 +398,6 @@ export async function processPermissionInteractionIpc(input: {
         reason: decision.reason,
         updatedPermissions: responsePermissionUpdates,
         decisionClassification: decision.decisionClassification,
-        timedGrantExpiresAtMs: decision.timedGrantExpiresAtMs,
       },
       getIpcResponseSigningPrivateKey(
         input.sourceAgentFolder,

@@ -1069,7 +1069,6 @@ describe('validateIpcAuthRequest', () => {
         'allow_once',
         'allow_persistent_rule',
         'cancel',
-        'allow_timed_grant',
         'not_real',
         'allow_once',
       ],
@@ -1103,12 +1102,7 @@ describe('validateIpcAuthRequest', () => {
         appId: 'app:one',
         agentId: 'agent:team',
         providerAccountId: 'provider-account:slack:a',
-        decisionOptions: [
-          'allow_once',
-          'allow_persistent_rule',
-          'cancel',
-          'allow_timed_grant',
-        ],
+        decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
         closestRule: {
           rule: 'RunCommand(npm run build)',
           reason: 'Bash leaf npm test did not match any scoped rule.',

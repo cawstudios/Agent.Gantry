@@ -32,6 +32,7 @@ import {
 import { resolveModelSelectionForWorkload } from '../shared/model-catalog.js';
 import type { PermissionMode } from '../shared/permission-mode.js';
 import { stripHostInjectedEnvPrefix } from '../shared/runtime-env-command.js';
+import * as yolo from '../shared/yolo-mode-policy.js';
 import type {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
@@ -135,6 +136,7 @@ export interface PermissionClassifierPromptConsultInput {
   approvedCapabilityIds: string[];
   workspaceRoot?: string;
   reviewedMcpReadBindings?: McpReadBinding[];
+  yoloMode?: yolo.YoloModeSettings;
   suggestions?: PermissionApprovalUpdate[];
   promotion?: Pick<PermissionPromotionInput, 'repository' | 'offer'>;
   classifierConfig: PermissionClassifierRuntimeConfig;
@@ -146,6 +148,9 @@ export interface PermissionClassifierPromptConsultResult extends PermissionClass
   suggestions?: PermissionApprovalUpdate[];
   suggestionKey?: string;
   promotionHintCount?: number;
+  /** Set when the YOLO denylist forced this ask — callers must not offer
+   * persistent grants the denylist would never honor. */
+  denylistHit?: true;
 }
 
 export interface PermissionClassifierRuntimeConfig {
@@ -299,35 +304,41 @@ export async function consultPermissionClassifierBeforePrompt(
       input.toolInput,
     );
   const suggestionKey = permissionSuggestionKey(input.agentFolder, suggestions);
-  const promotionCounter = await readPromotionCounter({
-    promotion: input.promotion,
-    appId: input.appId ?? 'default',
-    agentFolder: input.agentFolder,
-    suggestionKey,
-  });
-  const shellRequest =
-    input.canonicalToolName === 'Bash' ||
-    input.canonicalToolName === 'RunCommand';
+  // prettier-ignore
+  const promotionCounter = await readPromotionCounter({ promotion: input.promotion, appId: input.appId ?? 'default', agentFolder: input.agentFolder, suggestionKey });
+  // prettier-ignore
+  const shellRequest = input.canonicalToolName === 'Bash' || input.canonicalToolName === 'RunCommand';
+  const shellInput = input.toolInput as {
+    command?: unknown;
+    cmd?: unknown;
+  } | null;
+  // Prefer whichever command field is a usable string — a non-string
+  // `command` must not mask a real `cmd` alias.
+  const shellCommandField =
+    typeof shellInput?.command === 'string'
+      ? shellInput.command
+      : shellInput?.cmd;
   const classifierToolInput = shellRequest
     ? {
-        command: stripClassifierHostInjectedEnvPrefix(
-          (input.toolInput as { command?: unknown } | null)?.command,
-        ),
+        command: stripClassifierHostInjectedEnvPrefix(shellCommandField),
       }
     : input.toolInput;
-  const inputTruncated = shellRequest
-    ? input.toolInputSanitizedPaths?.includes('command') === true
-    : input.toolInputSanitized === true ||
-      (input.toolInputSanitizedPaths?.length ?? 0) > 0;
-  const deterministicGate = inputTruncated
-    ? undefined
-    : evaluateAutoPermissionReadOnlyGate({
-        canonicalToolName: input.canonicalToolName,
-        toolInput: classifierToolInput,
-        approvedCapabilityIds: input.approvedCapabilityIds,
-        workspaceRoot: input.workspaceRoot,
-        reviewedMcpReadBindings: input.reviewedMcpReadBindings,
-      });
+  // prettier-ignore
+  const inputTruncated = shellRequest ? input.toolInputSanitizedPaths?.some((path) => path === 'command' || path === 'cmd') === true : input.toolInputSanitized === true || (input.toolInputSanitizedPaths?.length ?? 0) > 0;
+  // The denylist must judge the same normalized command the gate and
+  // classifier see — host-injected env prefixes must not mask a match.
+  // prettier-ignore
+  const yoloDenylistMatch = yolo.evaluateYoloModeDenylist({ settings: input.yoloMode, toolName: input.canonicalToolName, toolInput: classifierToolInput });
+  const deterministicGate =
+    inputTruncated || yoloDenylistMatch
+      ? undefined
+      : evaluateAutoPermissionReadOnlyGate({
+          canonicalToolName: input.canonicalToolName,
+          toolInput: classifierToolInput,
+          approvedCapabilityIds: input.approvedCapabilityIds,
+          workspaceRoot: input.workspaceRoot,
+          reviewedMcpReadBindings: input.reviewedMcpReadBindings,
+        });
   const result: PermissionClassifierResult = inputTruncated
     ? {
         decision: 'ask',
@@ -336,33 +347,64 @@ export async function consultPermissionClassifierBeforePrompt(
         latencyMs: 0,
         failureCode: 'input_truncated',
       }
-    : !deterministicGate?.allowed
-      ? {
-          decision: 'ask',
-          reason:
-            deterministicGate?.reason ??
-            'Deterministic read-only proof was unavailable; ask the user.',
-          latencyMs: 0,
-        }
-      : await (input.classifierConsult ?? consultPermissionClassifier)({
-          appId: (input.appId ?? 'default') as AppId,
-          agentIdentity: {
-            id: input.agentId ?? input.agentFolder,
-            ...(input.agentName ? { name: input.agentName } : {}),
-            folder: input.agentFolder,
-          },
-          turnIntentSummary: input.turnIntentSummary,
-          canonicalToolName: input.canonicalToolName,
-          toolInput: classifierToolInput,
-          policyDecisionReason: input.policyDecisionReason,
-          approvedCapabilityIds: input.approvedCapabilityIds,
-          recentlyDeniedExactToolShape: wasRecentlyDenied(promotionCounter),
-          autoModeModel: input.classifierConfig.autoModeModel,
-          memoryModelConfig: {
-            extractor: input.classifierConfig.memoryExtractorModel,
-          },
-          signal: input.signal,
-        });
+    : // prettier-ignore
+      yoloDenylistMatch ? { decision: 'ask', reason: `YOLO-mode denylist backstop matched "${yoloDenylistMatch.pattern}"; ask the user for explicit approval.`, latencyMs: 0 }
+      : !deterministicGate?.allowed
+        ? {
+            decision: 'ask',
+            reason:
+              deterministicGate?.reason ??
+              'Deterministic read-only proof was unavailable; ask the user.',
+            latencyMs: 0,
+          }
+        : await (input.classifierConsult ?? consultPermissionClassifier)({
+            appId: (input.appId ?? 'default') as AppId,
+            agentIdentity: {
+              id: input.agentId ?? input.agentFolder,
+              ...(input.agentName ? { name: input.agentName } : {}),
+              folder: input.agentFolder,
+            },
+            turnIntentSummary: input.turnIntentSummary,
+            canonicalToolName: input.canonicalToolName,
+            toolInput: classifierToolInput,
+            policyDecisionReason: input.policyDecisionReason,
+            approvedCapabilityIds: input.approvedCapabilityIds,
+            recentlyDeniedExactToolShape: wasRecentlyDenied(promotionCounter),
+            autoModeModel: input.classifierConfig.autoModeModel,
+            memoryModelConfig: {
+              extractor: input.classifierConfig.memoryExtractorModel,
+            },
+            signal: input.signal,
+          });
+  if (yoloDenylistMatch && !inputTruncated) {
+    // Contract: every denylist backstop match emits the dedicated audit
+    // event, matching the SDK gate's emitYoloDenylistHit payload shape.
+    await input
+      .publishRuntimeEvent({
+        appId: (input.appId ?? 'default') as never,
+        agentId: input.agentId as never,
+        runId: input.runId as never,
+        jobId: input.jobId as never,
+        conversationId: input.conversationId as never,
+        threadId: input.threadId as never,
+        correlationId: input.correlationId as never,
+        eventType: RUNTIME_EVENT_TYPES.PERMISSION_YOLO_DENYLIST_HIT,
+        actor: input.actor,
+        payload: {
+          decision: 'yolo_denylist_hit',
+          matchedPattern: yoloDenylistMatch.pattern,
+          matchKind: yoloDenylistMatch.kind,
+          tool: yoloDenylistMatch.toolName,
+          reason: result.reason,
+        },
+      })
+      .catch((error) => {
+        logger.warn(
+          { err: error, toolName: input.canonicalToolName },
+          'Failed to publish YOLO denylist hit event',
+        );
+      });
+  }
   await publishPermissionClassifierDecision({
     publishRuntimeEvent: input.publishRuntimeEvent,
     appId: (input.appId ?? 'default') as never,
@@ -400,11 +442,16 @@ export async function consultPermissionClassifierBeforePrompt(
       (context, message) => logger.warn(context, message),
     );
   }
+  // A denylist hit must not carry persistent suggestions: a saved rule would
+  // never be honored while the denylist keeps blocking rule-based auto-allows.
+  const denylistHit = Boolean(yoloDenylistMatch) && !inputTruncated;
   return {
     ...result,
-    ...(suggestions ? { suggestions } : {}),
+    ...(denylistHit ? { denylistHit: true as const } : {}),
+    ...(suggestions && !denylistHit ? { suggestions } : {}),
     ...(suggestionKey ? { suggestionKey } : {}),
     ...(promotionCounter &&
+    !denylistHit &&
     promotionCounter.allowCount >= PERMISSION_PROMOTION_ALLOW_THRESHOLD
       ? { promotionHintCount: promotionCounter.allowCount }
       : {}),

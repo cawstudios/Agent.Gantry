@@ -48,16 +48,11 @@ export interface PermissionIpcRuntimeEnv {
 
 export interface PermissionDecisionResult {
   approved: boolean;
-  mode?:
-    | 'allow_once'
-    | 'allow_persistent_rule'
-    | 'allow_timed_grant'
-    | 'cancel';
+  mode?: 'allow_once' | 'allow_persistent_rule' | 'cancel';
   decidedBy?: string;
   reason?: string;
   updatedPermissions?: unknown[];
   decisionClassification?: 'user_temporary' | 'user_permanent' | 'user_reject';
-  timedGrantExpiresAtMs?: number;
 }
 
 export interface PermissionApprovalRequestOptions {
@@ -266,13 +261,6 @@ function readPermissionResponse(input: {
               .decisionClassification,
           }
         : {}),
-      ...(typeof (raw as { timedGrantExpiresAtMs?: unknown })
-        .timedGrantExpiresAtMs === 'number'
-        ? {
-            timedGrantExpiresAtMs: (raw as { timedGrantExpiresAtMs: number })
-              .timedGrantExpiresAtMs,
-          }
-        : {}),
     };
     if (
       (raw as { responseNonce?: unknown }).responseNonce !== input.responseNonce
@@ -294,10 +282,12 @@ function readPermissionResponse(input: {
     const mode =
       responsePayload.mode === 'allow_once' ||
       responsePayload.mode === 'allow_persistent_rule' ||
-      responsePayload.mode === 'allow_timed_grant' ||
       responsePayload.mode === 'cancel'
         ? responsePayload.mode
         : undefined;
+    if (responsePayload.approved === true && !mode) {
+      return { approved: false, reason: 'Malformed permission response' };
+    }
     const decisionClassification =
       responsePayload.decisionClassification === 'user_temporary' ||
       responsePayload.decisionClassification === 'user_permanent' ||
@@ -327,10 +317,6 @@ function readPermissionResponse(input: {
         sanitizedDecision,
       ) as never,
       decisionClassification,
-      timedGrantExpiresAtMs:
-        typeof responsePayload.timedGrantExpiresAtMs === 'number'
-          ? (responsePayload.timedGrantExpiresAtMs as number)
-          : undefined,
     };
   } catch (err) {
     return {

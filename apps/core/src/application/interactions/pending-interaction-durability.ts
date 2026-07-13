@@ -16,7 +16,7 @@ import type {
   LiveTurnCommandRepository,
   LiveTurnRepository,
 } from '../../domain/ports/live-turns.js';
-import { nowMs, parseIso, toIso } from '../../shared/time/datetime.js';
+import { nowMs, toIso } from '../../shared/time/datetime.js';
 import { enqueueResolvedInteractionCommand } from './pending-interaction-live-turn-delivery.js';
 import {
   applyPendingInteractionGrantDecision,
@@ -381,7 +381,6 @@ export async function resolveDurablePermissionInteractionByRequestId(input: {
         reason: decision.reason ?? input.reason ?? null,
         updatedPermissions: decision.updatedPermissions ?? null,
         decisionClassification: decision.decisionClassification ?? null,
-        timedGrantExpiresAtMs: decision.timedGrantExpiresAtMs ?? null,
       },
       approverRef: decision.decidedBy ?? input.approverRef ?? null,
     });
@@ -668,7 +667,6 @@ export async function recordRunScopedTransientGrant(input: {
   runLeaseToken?: string | null;
   runLeaseFencingVersion?: number | null;
   grant: Record<string, unknown>;
-  expiresAtMs?: number;
 }): Promise<void> {
   const active = backend;
   if (!active) return;
@@ -677,19 +675,13 @@ export async function recordRunScopedTransientGrant(input: {
     if (!lease) return;
     const leaseToken = input.runLeaseToken;
     if (!leaseToken) return;
-    const leaseExpiryMs =
-      parseIso(lease.expiresAt)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-    const expiresAtMs = Math.min(
-      input.expiresAtMs ?? leaseExpiryMs,
-      leaseExpiryMs,
-    );
     await active.repository.createTransientGrant({
       id: globalThis.crypto.randomUUID(),
       appId: input.appId || DEFAULT_APP_ID,
       runId: input.runId,
       leaseToken,
       grant: input.grant,
-      expiresAt: toIso(expiresAtMs),
+      expiresAt: lease.expiresAt,
     });
   } catch (err) {
     active.warn?.(

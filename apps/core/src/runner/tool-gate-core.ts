@@ -194,9 +194,9 @@ export interface NeutralToolGateContext {
   threadId?: string;
   conversationId: string;
   // Auto-approve (yolo) settings inherited from the host (settings.permissions
-  // .yolo_mode). Threaded so the neutral gate carries the same denylist backstop
-  // the SDK gate applies on its timed-grant/always-allow paths. The lane has no
-  // auto-approve surface today, but the denylist must exist before one ships.
+  // .yolo_mode). The neutral gate enforces the settings-owned denylist before
+  // policy evaluation. The lane has no auto-approve surface today, but the
+  // backstop exists before one ships.
   yoloMode?: YoloModeSettings;
 }
 
@@ -208,10 +208,9 @@ export interface NeutralPreCheckInput {
   // tools reach the gate with bare names (no `mcp__` prefix), so the
   // memory-boundary guard needs this signal to scan them as mcp-equivalent.
   isThirdPartyMcpTool?: boolean;
-  // Host-inherited auto-approve settings; when present and enabled, a denylist
-  // match is a hard deny in the same ordered position the SDK gate checks it
-  // (after protected-capability and memory-boundary, before policy eval /
-  // permission prompt).
+  // Host-inherited auto-approve settings; when present and enabled, the neutral
+  // gate enforces the denylist after protected-capability and memory-boundary
+  // checks and before policy evaluation.
   yoloMode?: YoloModeSettings;
   toolRules?: readonly DeclarativeToolRule[];
   successLedger?: ToolSuccessLedger;

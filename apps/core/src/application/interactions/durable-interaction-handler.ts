@@ -124,7 +124,6 @@ export function resolveDurablePermissionInteraction(input: {
       reason: input.decision.reason ?? null,
       updatedPermissions: input.updatedPermissions ?? null,
       decisionClassification: input.decision.decisionClassification ?? null,
-      timedGrantExpiresAtMs: input.decision.timedGrantExpiresAtMs ?? null,
     },
     approverRef: input.decision.decidedBy ?? null,
   });

@@ -2016,11 +2016,6 @@ describe('TelegramChannel', () => {
         actionAffordances: [
           { kind: 'scheduler_run_now', label: 'Retry now', jobId: 'job-1' },
           { kind: 'scheduler_pause_job', label: 'Pause job', jobId: 'job-1' },
-          {
-            kind: 'scheduler_open',
-            label: 'Open in scheduler',
-            jobId: 'job-1',
-          },
         ],
       });
 
@@ -2035,7 +2030,6 @@ describe('TelegramChannel', () => {
                 { text: 'Retry now', callback_data: 'r:job-1' },
                 { text: 'Pause job', callback_data: 'dl:pause' },
               ],
-              [{ text: 'Open in scheduler', callback_data: 'dl:open' }],
             ],
           },
         }),
@@ -3385,6 +3379,48 @@ describe('TelegramChannel', () => {
   });
 
   describe('permission approvals', () => {
+    it('fails closed for stale timed-grant callbacks', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+      const decisionPromise = channel.requestPermissionApproval(
+        'tg:100200300',
+        {
+          requestId: 'perm-stale',
+          sourceAgentFolder: 'whatsapp_main',
+          toolName: 'Bash',
+        },
+      );
+      let settled = false;
+      void decisionPromise.then(() => {
+        settled = true;
+      });
+      const staleCtx = {
+        callbackQuery: { data: 'perm:allow_timed_grant:perm-stale' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await triggerCallbackQuery(staleCtx);
+
+      expect(staleCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'Permission request is no longer active.',
+        show_alert: true,
+      });
+      expect(settled).toBe(false);
+
+      await triggerCallbackQuery({
+        callbackQuery: { data: 'perm:cancel:perm-stale' },
+        chat: { id: 100200300 },
+        from: { id: 12345, first_name: 'Ravi' },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      });
+      await expect(decisionPromise).resolves.toMatchObject({
+        approved: false,
+        mode: 'cancel',
+      });
+    });
+
     it('renders Bash command summary when permission request includes toolInput', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);

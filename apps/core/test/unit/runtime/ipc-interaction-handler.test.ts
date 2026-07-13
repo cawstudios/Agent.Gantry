@@ -933,6 +933,65 @@ describe('ipc-interaction-handler', () => {
     );
   });
 
+  it('denies an unattended read-only command matched by the YOLO denylist backstop', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Read-only workspace file.',
+      latencyMs: 1,
+    }));
+    const requestPermissionApproval = vi.fn();
+
+    const decision = await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-unattended-yolo-denylist',
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:unattended',
+        unattended: true,
+        jobId: 'job-1',
+        toolName: 'Bash',
+        toolInput: { command: 'cat README.md' },
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:unattended': {
+            folder: 'main_agent',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'channel',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent: vi.fn(async () => undefined),
+        getPermissionRuntimeSettings: () => ({
+          agents: {
+            main_agent: {
+              capabilities: [{ id: 'filesystem.read', version: '1' }],
+            },
+          },
+          permissions: {
+            autoMode: {},
+            yoloMode: {
+              enabled: true,
+              denylist: ['cat README.md'],
+              denylistPaths: [],
+            },
+          },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+    });
+
+    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({
+      approved: false,
+      mode: 'cancel',
+      decidedBy: 'runtime',
+      reason: expect.stringContaining('YOLO-mode denylist backstop'),
+    });
+  });
+
   it('adds the repeated allow hint to an IPC ask prompt', async () => {
     const requestPermissionApproval = vi.fn(async () => ({
       approved: false,

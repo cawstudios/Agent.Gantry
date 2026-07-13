@@ -505,6 +505,162 @@ describe('permission classifier decision events', () => {
     );
   });
 
+  it('asks without an LLM call when the YOLO denylist backstop matches a read-only command', async () => {
+    const classifierConsult = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    await expect(
+      consultPermissionClassifierBeforePrompt({
+        permissionMode: 'auto',
+        requestFamily: 'tool',
+        agentFolder: 'researcher',
+        correlationId: 'request:yolo-denylist',
+        actor: 'permission',
+        intentSource: 'operator_message',
+        turnIntentSummary: 'Read the repository overview.',
+        canonicalToolName: 'Bash',
+        toolInput: { command: 'cat README.md' },
+        policyDecisionReason: 'No durable rule matched.',
+        approvedCapabilityIds: ['filesystem.read'],
+        workspaceRoot,
+        yoloMode: {
+          enabled: true,
+          denylist: ['cat README.md'],
+          denylistPaths: [],
+        },
+        classifierConfig: { memoryExtractorModel: 'extractor-model' },
+        publishRuntimeEvent,
+        classifierConsult,
+      }),
+    ).resolves.toMatchObject({
+      decision: 'ask',
+      reason: expect.stringContaining('YOLO-mode denylist backstop'),
+      latencyMs: 0,
+      denylistHit: true,
+    });
+    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.yolo_denylist_hit',
+        payload: expect.objectContaining({
+          decision: 'yolo_denylist_hit',
+          matchedPattern: 'cat README.md',
+          matchKind: 'command',
+        }),
+      }),
+    );
+  });
+
+  it('matches the YOLO denylist through host-injected env prefixes', async () => {
+    const classifierConsult = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    await expect(
+      consultPermissionClassifierBeforePrompt({
+        permissionMode: 'auto',
+        requestFamily: 'tool',
+        agentFolder: 'researcher',
+        correlationId: 'request:yolo-denylist-env-prefix',
+        actor: 'permission',
+        intentSource: 'operator_message',
+        turnIntentSummary: 'Read the repository overview.',
+        canonicalToolName: 'RunCommand',
+        toolInput: {
+          command:
+            "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/' HTTPS_PROXY='http://127.0.0.1:18790/' cat README.md",
+        },
+        policyDecisionReason: 'No durable rule matched.',
+        approvedCapabilityIds: ['filesystem.read'],
+        workspaceRoot,
+        yoloMode: {
+          enabled: true,
+          denylist: ['cat README.md'],
+          denylistPaths: [],
+        },
+        classifierConfig: { memoryExtractorModel: 'extractor-model' },
+        publishRuntimeEvent,
+        classifierConsult,
+      }),
+    ).resolves.toMatchObject({
+      decision: 'ask',
+      reason: expect.stringContaining('YOLO-mode denylist backstop'),
+    });
+    expect(classifierConsult).not.toHaveBeenCalled();
+  });
+
+  it('matches the YOLO command denylist for RunCommand tool names too', async () => {
+    const classifierConsult = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    await expect(
+      consultPermissionClassifierBeforePrompt({
+        permissionMode: 'auto',
+        requestFamily: 'tool',
+        agentFolder: 'researcher',
+        correlationId: 'request:yolo-denylist-runcommand',
+        actor: 'permission',
+        intentSource: 'operator_message',
+        turnIntentSummary: 'Read the repository overview.',
+        canonicalToolName: 'RunCommand',
+        toolInput: { command: 'cat README.md' },
+        policyDecisionReason: 'No durable rule matched.',
+        approvedCapabilityIds: ['filesystem.read'],
+        workspaceRoot,
+        yoloMode: {
+          enabled: true,
+          denylist: ['cat README.md'],
+          denylistPaths: [],
+        },
+        classifierConfig: { memoryExtractorModel: 'extractor-model' },
+        publishRuntimeEvent,
+        classifierConsult,
+      }),
+    ).resolves.toMatchObject({
+      decision: 'ask',
+      reason: expect.stringContaining('YOLO-mode denylist backstop'),
+    });
+    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.yolo_denylist_hit',
+      }),
+    );
+  });
+
+  it('still consults for an equivalent read-only command outside the YOLO denylist', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Read-only workspace file.',
+      latencyMs: 1,
+    }));
+
+    await expect(
+      consultPermissionClassifierBeforePrompt({
+        permissionMode: 'auto',
+        requestFamily: 'tool',
+        agentFolder: 'researcher',
+        correlationId: 'request:yolo-no-match',
+        actor: 'permission',
+        intentSource: 'operator_message',
+        turnIntentSummary: 'Read the repository overview.',
+        canonicalToolName: 'Bash',
+        toolInput: { command: 'cat README.md' },
+        policyDecisionReason: 'No durable rule matched.',
+        approvedCapabilityIds: ['filesystem.read'],
+        workspaceRoot,
+        yoloMode: {
+          enabled: true,
+          denylist: ['cat SECURITY.md'],
+          denylistPaths: [],
+        },
+        classifierConfig: { memoryExtractorModel: 'extractor-model' },
+        publishRuntimeEvent: vi.fn(async () => undefined),
+        classifierConsult,
+      }),
+    ).resolves.toMatchObject({ decision: 'allow' });
+    expect(classifierConsult).toHaveBeenCalledOnce();
+  });
+
   it('passes recent repository denial context into a consultation', async () => {
     const classifierConsult = vi.fn(async () => ({
       decision: 'ask' as const,

@@ -5,7 +5,6 @@ import { nowIso, nowMs, sleep } from '../../../../shared/time/datetime.js';
 import { formatDuration } from '../../../../shared/human-format.js';
 import { isPlainObject } from '../../../../shared/object.js';
 import { persistentPermissionUpdates } from '../../../../shared/permission-tool-rules.js';
-import { stableSha256Json } from '../../../../shared/stable-hash.js';
 import { AUTO_PERMISSION_CLASSIFIER_WAIT_MS } from '../../../../shared/permission-mode.js';
 import { hasValidIpcResponseSignature } from './ipc-signing.js';
 import { createSignedIpcRequestEnvelope } from './ipc-signing.js';
@@ -35,60 +34,6 @@ import { WORKSPACE_FOLDER_OPTION_KEY } from './types.js';
 const DEFAULT_RUNNER_APP_ID = 'default';
 const AGENT_FOLDER_OPTION_KEY = WORKSPACE_FOLDER_OPTION_KEY;
 
-const inFlightTimedGrantRequests = new Map<
-  string,
-  Promise<PermissionDecision>
->();
-
-function timedGrantBatchKey(input: {
-  appId: string;
-  agentId?: string;
-  targetJid?: string;
-  agentFolder: string;
-  requestFingerprint: string;
-}): string {
-  // Topic/thread ids route the prompt; approval authority is the parent chat.
-  return JSON.stringify([
-    input.appId,
-    input.agentId ?? '',
-    input.targetJid ?? '',
-    input.agentFolder,
-    JOB_ID,
-    JOB_RUN_ID,
-    input.requestFingerprint,
-  ]);
-}
-
-function permissionRequestFingerprint(options: {
-  toolName: string;
-  toolInput?: unknown;
-  blockedPath?: string;
-  closestRule?: unknown;
-  suggestions?: unknown[];
-  decisionOptions?: readonly string[];
-  semanticCapabilityDefinitions?: Record<string, SemanticCapabilityDefinition>;
-}): string {
-  return stableSha256Json({
-    toolName: options.toolName,
-    ...(isPlainObject(options.toolInput)
-      ? { toolInput: options.toolInput }
-      : {}),
-    ...(options.blockedPath ? { blockedPath: options.blockedPath } : {}),
-    ...(options.closestRule ? { closestRule: options.closestRule } : {}),
-    ...(options.suggestions ? { suggestions: options.suggestions } : {}),
-    ...(options.decisionOptions
-      ? { decisionOptions: options.decisionOptions }
-      : {}),
-    ...(options.semanticCapabilityDefinitions
-      ? { semanticCapabilityDefinitions: options.semanticCapabilityDefinitions }
-      : {}),
-  });
-}
-
-function canSharePermissionDecision(decision: PermissionDecision): boolean {
-  return decision.mode === 'allow_timed_grant';
-}
-
 export async function requestPermissionApproval(options: {
   appId?: string;
   agentId?: string;
@@ -112,49 +57,12 @@ export async function requestPermissionApproval(options: {
   targetJid?: string;
   threadId?: string;
 }): Promise<PermissionDecision> {
-  try {
-    const appId = options.appId?.trim() || APP_ID || DEFAULT_RUNNER_APP_ID;
-    const agentId = options.agentId?.trim() || AGENT_ID;
-    const targetJid = options.targetJid?.trim() || CHAT_JID;
-    const agentFolder = options[AGENT_FOLDER_OPTION_KEY];
-    const requestFingerprint = permissionRequestFingerprint(options);
-    const batchKey = timedGrantBatchKey({
-      appId,
-      agentId,
-      targetJid,
-      agentFolder,
-      requestFingerprint,
-    });
-    const existingRequest = inFlightTimedGrantRequests.get(batchKey);
-    if (existingRequest) {
-      const sharedDecision = await existingRequest;
-      if (canSharePermissionDecision(sharedDecision)) {
-        return sharedDecision;
-      }
-    }
-    const currentRequest = requestPermissionApprovalInner({
-      ...options,
-      appId,
-      agentId,
-      targetJid,
-    });
-    inFlightTimedGrantRequests.set(batchKey, currentRequest);
-    try {
-      return await currentRequest;
-    } finally {
-      if (inFlightTimedGrantRequests.get(batchKey) === currentRequest) {
-        inFlightTimedGrantRequests.delete(batchKey);
-      }
-    }
-  } catch (err) {
-    return {
-      approved: false,
-      reason:
-        err instanceof Error
-          ? `Permission request failed: ${err.message}`
-          : 'Permission request failed',
-    };
-  }
+  return requestPermissionApprovalInner({
+    ...options,
+    appId: options.appId?.trim() || APP_ID || DEFAULT_RUNNER_APP_ID,
+    agentId: options.agentId?.trim() || AGENT_ID,
+    targetJid: options.targetJid?.trim() || CHAT_JID,
+  });
 }
 
 async function requestPermissionApprovalInner(options: {
@@ -328,14 +236,6 @@ async function requestPermissionApprovalInner(options: {
                     ).decisionClassification,
                   }
                 : {}),
-              ...(typeof (raw as { timedGrantExpiresAtMs?: unknown })
-                .timedGrantExpiresAtMs === 'number'
-                ? {
-                    timedGrantExpiresAtMs: (
-                      raw as { timedGrantExpiresAtMs: number }
-                    ).timedGrantExpiresAtMs,
-                  }
-                : {}),
             };
             if (
               (raw as { responseNonce?: unknown }).responseNonce !==
@@ -360,10 +260,15 @@ async function requestPermissionApprovalInner(options: {
             const mode =
               responsePayload.mode === 'allow_once' ||
               responsePayload.mode === 'allow_persistent_rule' ||
-              responsePayload.mode === 'allow_timed_grant' ||
               responsePayload.mode === 'cancel'
                 ? responsePayload.mode
                 : undefined;
+            if (typeof responsePayload.mode === 'string' && !mode) {
+              return {
+                approved: false,
+                reason: 'Malformed permission response',
+              };
+            }
             const decisionClassification =
               responsePayload.decisionClassification === 'user_temporary' ||
               responsePayload.decisionClassification === 'user_permanent' ||
@@ -395,10 +300,6 @@ async function requestPermissionApprovalInner(options: {
                 sanitizedDecision,
               ) as never,
               decisionClassification,
-              timedGrantExpiresAtMs:
-                typeof responsePayload.timedGrantExpiresAtMs === 'number'
-                  ? (responsePayload.timedGrantExpiresAtMs as number)
-                  : undefined,
             };
           }
           return { approved: false, reason: 'Malformed permission response' };

@@ -385,6 +385,7 @@ export function createInlineCoreTools(
           approvedCapabilityIds,
           workspaceRoot: resolveWorkspaceFolderPath(laneInput.group.folder),
           reviewedMcpReadBindings,
+          yoloMode: permissionSettings.permissions.yoloMode,
           suggestions,
           ...(promotion ? { promotion } : {}),
           classifierConfig: permissionRuntimeConfig,
@@ -402,16 +403,22 @@ export function createInlineCoreTools(
             : 'This tool is not eligible for unattended auto-permission.',
         };
       }
-      const promotionHintCount =
-        classifierDecision?.promotionHintCount ??
-        (await permissionPromotionHintCount({
-          promotion,
-          appId: run.appId,
-          agentFolder: laneInput.group.folder,
-          canonicalToolName: name,
-          toolInput,
-          suggestions,
-        }));
+      // Denylist-forced prompts must not offer a future grant the denylist
+      // would never honor.
+      const effectiveSuggestions = classifierDecision?.denylistHit
+        ? undefined
+        : suggestions;
+      const promotionHintCount = classifierDecision?.denylistHit
+        ? undefined
+        : (classifierDecision?.promotionHintCount ??
+          (await permissionPromotionHintCount({
+            promotion,
+            appId: run.appId,
+            agentFolder: laneInput.group.folder,
+            canonicalToolName: name,
+            toolInput,
+            suggestions,
+          })));
       const request: PermissionApprovalRequest = {
         requestId: permissionRequestId,
         requestFamily: 'tool',
@@ -436,9 +443,9 @@ export function createInlineCoreTools(
         toolInput: toolInput as Record<string, unknown>,
         toolInputSanitized: classifierToolInput.altered,
         toolInputSanitizedPaths: classifierToolInput.alteredPaths,
-        suggestions,
+        suggestions: effectiveSuggestions,
         ...(promotionHintCount ? { promotionHintCount } : {}),
-        decisionOptions: suggestions
+        decisionOptions: effectiveSuggestions
           ? ['allow_once', 'allow_persistent_rule', 'cancel']
           : ['allow_once', 'cancel'],
       };

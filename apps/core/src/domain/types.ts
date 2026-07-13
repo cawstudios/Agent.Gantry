@@ -168,7 +168,6 @@ export interface PermissionApprovalRequest {
 export type PermissionApprovalDecisionMode =
   | 'allow_once'
   | 'allow_persistent_rule'
-  | 'allow_timed_grant'
   | 'cancel';
 
 export interface PermissionApprovalRuleValue {
@@ -203,7 +202,6 @@ export interface PermissionApprovalDecision {
   reason?: string;
   updatedPermissions?: PermissionApprovalUpdate[];
   decisionClassification?: 'user_temporary' | 'user_permanent' | 'user_reject';
-  timedGrantExpiresAtMs?: number;
 }
 
 export interface UserQuestionOption {
@@ -389,12 +387,11 @@ export interface ProgressUpdateOptions {
 export type MessageActionAffordanceKind =
   | 'scheduler_run_now'
   | 'scheduler_pause_job'
-  | 'scheduler_open'
   | 'live_turn_stop';
 
 export type MessageActionAffordance =
   | {
-      kind: 'scheduler_run_now' | 'scheduler_pause_job' | 'scheduler_open';
+      kind: 'scheduler_run_now' | 'scheduler_pause_job';
       label: string;
       jobId: string;
       runId?: string | null;

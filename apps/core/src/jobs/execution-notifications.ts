@@ -39,12 +39,6 @@ function recoveryActionAffordances(input: {
       jobId: input.job.id,
       runId: input.runId,
     },
-    {
-      kind: 'scheduler_open',
-      label: 'Open in scheduler',
-      jobId: input.job.id,
-      runId: input.runId,
-    },
   ];
 }
 
@@ -112,13 +106,6 @@ export async function notifySchedulerSetupRequired(input: {
     ].join('\n'),
     phase: 'summary',
     runId: `setup:${input.setupState.fingerprint}`,
-    actionAffordances: [
-      {
-        kind: 'scheduler_open',
-        label: 'Open in scheduler',
-        jobId: input.job.id,
-      },
-    ],
     sendMessage: input.sendMessage,
   });
 }
