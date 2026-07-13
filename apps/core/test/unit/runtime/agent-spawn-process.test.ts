@@ -1093,13 +1093,13 @@ describe('executeRunnerProcess', () => {
           appId: 'default',
           agentId: 'agent:test',
           runId: 'agent-run:test-visible',
-          conversationId: 'test@g.us',
           eventType: 'run.startup_diagnostic',
           actor: 'runtime',
           responseMode: 'none',
           payload: expect.objectContaining({
             provider: 'host',
             diagnostic: 'runner_process_timing',
+            conversationJid: 'test@g.us',
             sandbox: {
               provider: 'direct',
               enforcing: false,
@@ -1124,6 +1124,12 @@ describe('executeRunnerProcess', () => {
       );
       expect(publishRuntimeEvent.mock.calls[0]?.[0]).not.toHaveProperty(
         'sessionId',
+      );
+      expect(publishRuntimeEvent.mock.calls[0]?.[0]).not.toHaveProperty(
+        'conversationId',
+      );
+      expect(publishRuntimeEvent.mock.calls[0]?.[0]).not.toHaveProperty(
+        'threadId',
       );
       expect(JSON.stringify(publishRuntimeEvent.mock.calls)).not.toContain(
         'provider-resume-id',
