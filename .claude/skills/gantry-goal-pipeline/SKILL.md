@@ -29,10 +29,12 @@ size is bounded by packet separability (see §1), not serial run length —
 Codex fans packets out to its subagents. For each stage, spawn an Agent with
 `subagent_type: codex:codex-rescue` whose prompt contains:
 
-- `--model gpt-5.6-sol --effort xhigh --fresh` on the first line (`--resume`
-  instead of `--fresh` to continue an unfinished stage). `gpt-5.6-sol` is the
-  current implementation model; it needs codex CLI >= 0.144.0 (npm
-  `@openai/codex`, not homebrew). If a newer model ships, update this line.
+- `--model gpt-5.6-sol --effort high --fresh` on the first line (`--resume`
+  instead of `--fresh` to continue an unfinished stage). **Effort policy: `high`
+  for all code implementation AND code exploration; reserve `xhigh` for the
+  autoreview pass only (§4).** `gpt-5.6-sol` is the current implementation model;
+  it needs codex CLI >= 0.144.0 (npm `@openai/codex`, not homebrew). If a newer
+  model ships, update this line.
 - The stage scope, referencing the goal prompt file as the contract.
 - The exact bounded write scope ("Nothing else").
 - Repo gate notes: import from source modules in tests, no provider-name
@@ -71,8 +73,9 @@ until node "$COMPANION" status <task-id> | grep -qE '\| (completed|failed|error|
 2. Run the smallest relevant checks: focused vitest files, `npm run build`,
    `python3 .codex/scripts/check_task_completion.py`.
 3. **Autoreview the stage's LOCAL diff BEFORE committing** (not the whole branch
-   after). Run `autoreview --mode local` (reviews the uncommitted working tree) via a
-   codex plain-command handoff (§4 closeout handoff shape, `--mode local`, no `--base`).
+   after). Run `autoreview --mode local --thinking xhigh` (reviews the uncommitted
+   working tree) via a codex plain-command handoff (§4 closeout handoff shape,
+   `--mode local`, no `--base`).
    Fix accepted findings while still uncommitted — via a `--resume`/follow-up handoff, or
    directly if trivial — then re-review until clean. This is faster (just this stage's
    diff, not the growing branch), keeps defects out of history, and avoids re-reviewing
@@ -88,8 +91,11 @@ python3 .codex/scripts/check_architecture.py
 python3 .codex/scripts/check_task_completion.py
 python3 .codex/scripts/validate_artifacts.py --allow-missing-run
 python3 .codex/scripts/verify.py
-python3 ~/.claude/skills/autoreview/scripts/autoreview --mode branch --base origin/main
+python3 ~/.claude/skills/autoreview/scripts/autoreview --mode branch --base origin/main --thinking xhigh
 ```
+
+Effort: autoreview runs at `--thinking xhigh` (the review pass is the one place xhigh
+is used; implementation/exploration handoffs use `high`, §2).
 
 The `--mode branch` autoreview here is the FINAL integration pass — it catches
 cross-stage issues that per-stage local reviews (§3.3) cannot see (e.g. a trust or
@@ -111,7 +117,7 @@ dies under headless approval), no `&&` chaining:
 ```
 Run the autoreview skill in <repo>. Execute this exact command directly — a
 single plain command, no shell wrapper, no env prefix, no chaining:
-python3 ~/.claude/skills/autoreview/scripts/autoreview --mode branch --base <base-ref>
+python3 ~/.claude/skills/autoreview/scripts/autoreview --mode branch --base <base-ref> --thinking xhigh
 Return its complete output verbatim. Make no edits, no commits. No commentary.
 ```
 
