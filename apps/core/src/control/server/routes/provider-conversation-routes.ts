@@ -503,8 +503,8 @@ export async function handleProviderConversationRoutes(
         conversationId: installRoute.conversationId as ConversationId,
         patch,
       });
-      await projectConversationInstallToRuntime(ctx, install);
       await ctx.syncSettingsFromProjection(auth.appId as AppId);
+      await projectConversationInstallToRuntime(ctx, install);
       sendJson(res, 200, conversationInstallToResponse(install));
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;
@@ -539,8 +539,8 @@ export async function handleProviderConversationRoutes(
         conversationId: installRoute.conversationId as ConversationId,
         patch,
       });
-      await projectConversationInstallToRuntime(ctx, install);
       await ctx.syncSettingsFromProjection(auth.appId as AppId);
+      await projectConversationInstallToRuntime(ctx, install);
       sendJson(res, 200, conversationInstallToResponse(install));
     } catch (error) {
       if (!sendApplicationError(res, error)) throw error;

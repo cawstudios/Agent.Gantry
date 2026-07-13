@@ -31,7 +31,6 @@ import { createModelsClient } from './models.js';
 import type {
   CreateJobInput,
   CreateJobResponse,
-  JobEventRecord,
   JobRecord,
   JobTriggerWaitResult,
   ListJobEventsInput,
