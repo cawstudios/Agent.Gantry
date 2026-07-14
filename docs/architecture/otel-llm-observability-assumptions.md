@@ -88,6 +88,8 @@ _(Backfilled by the orchestrator — stage launched before the ledger rule; rows
 | E.22 | Turn-failure errors must honor `capture_content` | Branch autoreview r10 (P1): `AgentOutput.error` can echo prompt/result text into span status | Gated: bounded raw error when capture on, `agent turn failed` when off | Privacy control bypass on failed turns | fixed |
 | E.23 | The usage whitelist must include registry-declared flat cache fields | Branch autoreview r10 (P2): DeepSeek `prompt_cache_hit_tokens` / Together `cached_tokens` dropped → inflated cost estimates | Whitelist extended with the registry's flat cache fields | Missing cache attribution + wrong streamed cost for those providers | fixed |
 
+| E.24 | Completion extraction must respect capture mode and the trace budget | Branch autoreview r11 (P2): extraction ran (full joins/serialization) even in metadata-only mode | Extraction skipped when capture is off; text join early-exits at the trace budget; the no-text fallback is bounded | Avoidable allocations/latency on the hot path in metadata-only mode | fixed |
+
 ## Stage D — Gateway wiring + integration tests
 
 | # | Assumption | Missing info that forced it | Choice taken | Impact if wrong | Validated |

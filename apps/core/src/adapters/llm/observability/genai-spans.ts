@@ -9,6 +9,7 @@ import {
   boundedContent,
   boundedJsonArray,
   MAX_ATTRIBUTE_CHARS,
+  TRACE_CONTENT_MAX_CHARS,
   childContextFor,
   contentCaptureEnabled,
   getTurnSpan,
@@ -138,11 +139,18 @@ function responseCompletionText(
   response: Record<string, unknown>,
 ): string | undefined {
   if (kind === 'anthropic' && Array.isArray(response.content)) {
-    const text = (response.content as Record<string, unknown>[])
-      .filter((block) => block.type === 'text')
-      .map((block) => (typeof block.text === 'string' ? block.text : ''))
-      .join('');
-    return text || JSON.stringify(response.content);
+    // Accumulate only up to the trace budget — joining every block of an
+    // unbounded provider response would allocate freely on the hot path.
+    let text = '';
+    for (const block of response.content as Record<string, unknown>[]) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        text += block.text;
+        if (text.length > TRACE_CONTENT_MAX_CHARS) {
+          return text.slice(0, TRACE_CONTENT_MAX_CHARS + 1);
+        }
+      }
+    }
+    return text || boundedContent(JSON.stringify(response.content));
   }
   if (kind === 'openai') {
     const choice = (
@@ -439,7 +447,9 @@ export function observeGatewayCall(input: {
               : undefined;
           responseModel =
             typeof response.model === 'string' ? response.model : undefined;
-          completionText = responseCompletionText(kind, response);
+          completionText = captureContent
+            ? responseCompletionText(kind, response)
+            : undefined;
           finishReason =
             typeof response.stop_reason === 'string'
               ? response.stop_reason
