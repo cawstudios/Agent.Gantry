@@ -269,8 +269,10 @@ export function observeGatewayCall(input: {
     const runId =
       input.token.runId === undefined ? undefined : String(input.token.runId);
     const parent = runId ? getTurnSpan(runId) : undefined;
+    // Span names bypass the attribute length limit; model comes from an
+    // untrusted request body.
     const span = activeTracer.startSpan(
-      `chat ${requestModel ?? input.providerId}`,
+      `chat ${(requestModel ?? input.providerId).slice(0, 128)}`,
       {
         attributes: {
           'gen_ai.operation.name': 'chat',

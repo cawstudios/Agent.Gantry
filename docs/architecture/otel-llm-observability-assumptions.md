@@ -90,6 +90,10 @@ _(Backfilled by the orchestrator — stage launched before the ledger rule; rows
 
 | E.24 | Completion extraction must respect capture mode and the trace budget | Branch autoreview r11 (P2): extraction ran (full joins/serialization) even in metadata-only mode | Extraction skipped when capture is off; text join early-exits at the trace budget; the no-text fallback is bounded | Avoidable allocations/latency on the hot path in metadata-only mode | fixed |
 
+| E.25 | Span names bypass the attribute length limit | Branch autoreview r12 (P1): untrusted `request.model` interpolated verbatim | Model portion sliced to 128 chars | Provider/runner-controlled telemetry bloat / failed OTLP batches | fixed |
+| E.26 | The revision document exposed the OTLP endpoint through the desired-state API | Branch autoreview r12 (P1): agents:admin could read AND redirect the endpoint the secret headers follow — contradicting private-v1 | `observability` stripped from `/v1/settings` + desired-state reads; writes preserve the stored block server-side (filesystem surfaces remain the only way to change it); route test added | Credential exfiltration via endpoint redirect | fixed |
+| E.27 | Fleet workers must init tracing when the FIRST revision arrives | Branch autoreview r12 (P2): `onSettingsReady` released the scheduler but never initialized tracing | First-revision callback reloads settings and calls `initTracingFromSettings` (idempotent) | Ready workers silently untraced until manual restart | fixed |
+
 ## Stage D — Gateway wiring + integration tests
 
 | # | Assumption | Missing info that forced it | Choice taken | Impact if wrong | Validated |

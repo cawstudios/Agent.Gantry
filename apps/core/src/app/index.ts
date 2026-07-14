@@ -360,6 +360,16 @@ export async function startGantryRuntime(
           const start = heldSchedulerStart;
           heldSchedulerStart = undefined;
           if (!start) return;
+          // Tracing was skipped at boot (no revision yet); initialize from
+          // the first authoritative revision.
+          try {
+            initTracingFromSettings(loadRuntimeSettings(GANTRY_HOME));
+          } catch (err) {
+            logger.warn(
+              { err },
+              'Failed to initialize tracing on first settings revision',
+            );
+          }
           await start();
           logger.info(
             'First settings revision applied; scheduler job claiming started',

@@ -17,6 +17,19 @@ import {
 } from '../handler-context.js';
 import { readJson, sendError, sendJson } from '../http.js';
 
+// observability.tracing is private in v1: the exporter endpoint pairs with
+// the GANTRY_OTEL_TRACES_HEADERS secret, so exposing it read/write here
+// would let an agents:admin caller redirect authenticated telemetry to a
+// server it controls. The block persists in durable revisions but is
+// stripped from reads and preserved server-side across writes; changing it
+// requires the filesystem surfaces (settings.yaml / CLI --file).
+function omitObservability<T extends Record<string, unknown>>(
+  document: T,
+): Record<string, unknown> {
+  const { observability: _observability, ...rest } = document;
+  return rest;
+}
+
 export async function handleSettingsRoutes(
   req: IncomingMessage,
   res: ServerResponse,
@@ -35,7 +48,11 @@ export async function handleSettingsRoutes(
     if (!authorizeControlRequest(req, res, ctx.keys, ['agents:admin'])) {
       return true;
     }
-    sendJson(res, 200, { settings: ctx.getRuntimeSettings() });
+    sendJson(res, 200, {
+      settings: omitObservability(
+        ctx.getRuntimeSettings() as unknown as Record<string, unknown>,
+      ),
+    });
     return true;
   }
 
@@ -86,7 +103,9 @@ async function handleDesiredState(
     sendJson(res, 200, {
       revision: latest.revision,
       minReaderVersion: latest.minReaderVersion,
-      settings: latest.settingsDocument,
+      settings: omitObservability(
+        latest.settingsDocument as Record<string, unknown>,
+      ),
       createdBy: latest.createdBy,
       note: latest.note,
       updatedAt: latest.createdAt,
@@ -129,15 +148,28 @@ async function handleDesiredState(
       );
       return true;
     }
+    // Preserve the server-side observability block across writes: this
+    // surface can neither read nor set it (see omitObservability above).
+    const latestForPreserve =
+      await getRuntimeStorage().repositories.settingsRevisions.getLatestSettingsRevision(
+        appId,
+      );
+    const preservedObservability = (
+      latestForPreserve?.settingsDocument as Record<string, unknown> | undefined
+    )?.observability;
+    const inboundDocument = {
+      ...omitObservability(body.settings as Record<string, unknown>),
+      ...(preservedObservability !== undefined
+        ? { observability: preservedObservability }
+        : {}),
+    };
     // Decode the inbound typed document through the shared settings parser so a
     // structurally invalid document surfaces the same document-path-level error
     // the file/CLI surface produces (one validation path). YAML never reaches
     // this surface — it is the CLI `--file` edge only.
     let parsed;
     try {
-      parsed = parseRuntimeSettingsObject(
-        body.settings as Record<string, unknown>,
-      );
+      parsed = parseRuntimeSettingsObject(inboundDocument);
     } catch (err) {
       sendError(
         res,

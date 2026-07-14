@@ -118,6 +118,28 @@ describe('settings desired-state control routes', () => {
     });
   });
 
+  it('strips the private observability block from desired-state reads', async () => {
+    revisions.push({
+      appId: 'default',
+      revision: 5,
+      settingsDocument: {
+        agent: { name: 'Ada' },
+        observability: {
+          tracing: { enabled: true, endpoint: 'https://otlp.example.test' },
+        },
+      },
+      minReaderVersion: 1,
+      createdBy: 'cli',
+      note: 'seed',
+      createdAt: '2026-06-11T00:00:00.000Z',
+    });
+    const res = await invoke('GET', '/v1/settings/desired-state', undefined);
+    expect(res.statusCode).toBe(200);
+    const payload = JSON.parse(res.body);
+    expect(payload.settings.agent).toEqual({ name: 'Ada' });
+    expect(payload.settings.observability).toBeUndefined();
+  });
+
   it('rejects a non-object settings document with a 400', async () => {
     const res = await invoke('PUT', '/v1/settings/desired-state', {
       settings: 'not-an-object',
