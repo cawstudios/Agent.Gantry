@@ -1,3 +1,5 @@
+import { migrateLegacyAgentBindings } from './settings-revision-legacy-bindings.js';
+
 function isRecord(raw: unknown): raw is Record<string, unknown> {
   return typeof raw === 'object' && raw !== null && !Array.isArray(raw);
 }
@@ -22,6 +24,92 @@ function assertSupportedKeys(
       throw new Error(`${pathPrefix}.${key} is not supported`);
     }
   }
+}
+
+const STORED_REVISION_KEY_ALIASES = new Map<string, string>([
+  ['addedAt', 'added_at'],
+  ['agentHarness', 'agent_harness'],
+  ['accessPreset', 'access_preset'],
+  ['artifactStore', 'artifact_store'],
+  ['baseRetryMs', 'base_retry_ms'],
+  ['batchSize', 'batch_size'],
+  ['bindHost', 'bind_host'],
+  ['brainHarvest', 'brain_harvest'],
+  ['controlApprovers', 'control_approvers'],
+  ['contextWindowTokens', 'context_window_tokens'],
+  ['cpuSeconds', 'cpu_seconds'],
+  ['credentialBroker', 'model_access'],
+  ['dailyLimit', 'daily_limit'],
+  ['defaultModel', 'default_model'],
+  ['defaultConnection', 'default_connection'],
+  ['denylistPaths', 'denylist_paths'],
+  ['desiredState', 'desired_state'],
+  ['deploymentMode', 'deployment_mode'],
+  ['displayName', 'display_name'],
+  ['drainDeadlineMs', 'drain_deadline_ms'],
+  ['externalId', 'external_id'],
+  ['extractorMaxFacts', 'extractor_max_facts'],
+  ['extractorMinConfidence', 'extractor_min_confidence'],
+  ['forcePathStyle', 'force_path_style'],
+  ['inputUsdPerMillionTokens', 'input_usd_per_million_tokens'],
+  ['installedAgents', 'installed_agents'],
+  ['liveTurns', 'live_turns'],
+  ['maxActionsPerWindow', 'max_actions_per_window'],
+  ['maxConcurrentPerSite', 'max_concurrent_per_site'],
+  ['maxItemsPerRun', 'max_items_per_run'],
+  ['maxJobRuns', 'max_job_runs'],
+  ['maxMemoryContextChars', 'max_memory_context_chars'],
+  ['maxMessageBacklog', 'max_message_backlog'],
+  ['maxMessageRuns', 'max_message_runs'],
+  ['maxOutputTokens', 'max_output_tokens'],
+  ['maxPending', 'max_pending'],
+  ['maxProcesses', 'max_processes'],
+  ['maxRetries', 'max_retries'],
+  ['maxTaskBacklog', 'max_task_backlog'],
+  ['memoryItemLimit', 'memory_item_limit'],
+  ['memoryMb', 'memory_mb'],
+  ['memoryScope', 'memory_scope'],
+  ['mcpServers', 'mcp_servers'],
+  ['modelAccess', 'model_access'],
+  ['modelAliases', 'model_aliases'],
+  ['modelFamilies', 'model_families'],
+  ['oneTimeJobDefaultModel', 'one_time_job_default_model'],
+  ['outputUsdPerMillionTokens', 'output_usd_per_million_tokens'],
+  ['providerAccount', 'provider_account'],
+  ['providerAccounts', 'provider_accounts'],
+  ['providerConnection', 'provider_connection'],
+  ['providerConnections', 'provider_connections'],
+  ['providerBatchMinItems', 'provider_batch_min_items'],
+  ['providerModelId', 'provider_model_id'],
+  ['recurringJobDefaultModel', 'recurring_job_default_model'],
+  ['recommendedAlias', 'recommended_alias'],
+  ['relationshipMode', 'relationship_mode'],
+  ['requestsPerMinute', 'requests_per_minute'],
+  ['requiresTrigger', 'requires_trigger'],
+  ['resourceLimits', 'resource_limits'],
+  ['runtimeSecretRefs', 'runtime_secret_refs'],
+  ['senderPolicy', 'sender_policy'],
+  ['supportedWorkloads', 'supported_workloads'],
+  ['supportsThinking', 'supports_thinking'],
+  ['supportsTools', 'supports_tools'],
+  ['urlEnv', 'url_env'],
+  ['verifiedAt', 'verified_at'],
+  ['windowMs', 'window_ms'],
+  ['yoloMode', 'yolo_mode'],
+]);
+
+function normalizeStoredRevisionAliases(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeStoredRevisionAliases);
+  if (!isRecord(value)) return value;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, rawItem] of Object.entries(value)) {
+    const normalizedKey = STORED_REVISION_KEY_ALIASES.get(key) ?? key;
+    if (normalized[normalizedKey] !== undefined && normalizedKey !== key) {
+      continue;
+    }
+    normalized[normalizedKey] = normalizeStoredRevisionAliases(rawItem);
+  }
+  return normalized;
 }
 
 function normalizeCompactDefaults(
@@ -180,17 +268,20 @@ function normalizeCompactConversations(
 export function normalizeCompactRuntimeSettingsRoot(
   root: Record<string, unknown>,
 ): Record<string, unknown> {
+  const normalizedRoot = migrateLegacyAgentBindings(
+    normalizeStoredRevisionAliases(root) as Record<string, unknown>,
+  );
   for (const key of ['provider_connections', 'bindings']) {
-    if (root[key] !== undefined) {
+    if (normalizedRoot[key] !== undefined) {
       throw new Error(
         `${key} is no longer supported. Use provider_accounts and conversations.*.installed_agents.`,
       );
     }
   }
-  const normalized: Record<string, unknown> = { ...root };
-  normalizeCompactDefaults(normalized, root);
-  normalizeCompactProviders(normalized, root);
-  normalizeCompactAgents(normalized, root);
-  normalizeCompactConversations(normalized, root);
+  const normalized: Record<string, unknown> = { ...normalizedRoot };
+  normalizeCompactDefaults(normalized, normalizedRoot);
+  normalizeCompactProviders(normalized, normalizedRoot);
+  normalizeCompactAgents(normalized, normalizedRoot);
+  normalizeCompactConversations(normalized, normalizedRoot);
   return normalized;
 }

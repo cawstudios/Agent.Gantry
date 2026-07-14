@@ -1,5 +1,6 @@
 import path from 'path';
 
+import { ApplicationError } from '../application/common/application-error.js';
 import { publishInvalidMcpToolRequestAudit } from '../application/mcp/mcp-tool-audit.js';
 import type { McpToolProxy } from '../application/mcp/mcp-tool-proxy.js';
 import { isActiveRunLeaseForInteraction } from '../application/interactions/pending-interaction-durability.js';
@@ -242,10 +243,8 @@ function mcpCallToolHandler(
         preserveRemoteMcpError(result),
       );
     } catch (err) {
-      reject(
-        err instanceof Error ? err.message : 'MCP tool call failed.',
-        'mcp_proxy_failed',
-      );
+      const failure = mcpToolCallFailure(err, 'MCP tool call failed.');
+      reject(failure.message, failure.code, failure.details);
     }
   };
 }
@@ -450,12 +449,44 @@ function asyncMcpCallToolHandler(
         task: toPublicAsyncTaskDto(taskResult.task),
       });
     } catch (err) {
-      reject(
-        err instanceof Error ? err.message : 'Async MCP tool call failed.',
-        'mcp_proxy_failed',
-      );
+      const failure = mcpToolCallFailure(err, 'Async MCP tool call failed.');
+      reject(failure.message, failure.code, failure.details);
     }
   };
+}
+
+function mcpToolCallFailure(
+  err: unknown,
+  fallbackMessage: string,
+): {
+  message: string;
+  code: string;
+  details?: string[];
+} {
+  if (isMcpApprovalDenial(err)) {
+    return {
+      message: err.message,
+      code: 'missing_capability',
+      details: [
+        'The MCP source is connected, but this exact MCP tool is not covered by the agent current-run reviewed capability access.',
+        'For one-off recovery, call request_access with target.kind=tool and target.name set to the exact MCP tool named in this error, then retry the tool call after approval.',
+        'For durable future access, ask an admin to refresh the reviewed semantic capability binding for this MCP source.',
+      ],
+    };
+  }
+  return {
+    message: err instanceof Error ? err.message : fallbackMessage,
+    code: 'mcp_proxy_failed',
+  };
+}
+
+function isMcpApprovalDenial(err: unknown): err is ApplicationError {
+  return (
+    err instanceof ApplicationError &&
+    (err.code === 'FORBIDDEN' || err.code === 'NOT_FOUND') &&
+    (err.message.startsWith('MCP tool is not approved for this agent:') ||
+      err.message.startsWith('MCP server is not approved for this agent:'))
+  );
 }
 
 async function validateAsyncMcpParentTask(input: {

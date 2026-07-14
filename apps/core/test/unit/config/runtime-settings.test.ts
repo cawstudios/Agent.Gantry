@@ -13,6 +13,7 @@ import {
   saveRuntimeSettings,
   withRuntimeModelAliases,
 } from '@core/config/settings/runtime-settings.js';
+import { parseRuntimeSettingsObject } from '@core/config/settings/runtime-settings-parser.js';
 import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 import { validateLoadedRuntimeSettings } from '@core/config/settings/runtime-settings-validation.js';
 import { settingsFilePath } from '@core/config/settings/runtime-home.js';
@@ -29,6 +30,319 @@ function emptySources() {
 }
 
 describe('runtime settings', () => {
+  it('accepts camelCase provider defaultConnection from stored revision documents', () => {
+    const settings = parseRuntimeSettingsObject({
+      providers: {
+        slack: {
+          enabled: true,
+          defaultConnection: 'slack_default',
+        },
+      },
+      provider_connections: {
+        slack_default: {
+          provider: 'slack',
+          runtime_secret_refs: {
+            app_token: 'SLACK_APP_TOKEN',
+            bot_token: 'SLACK_BOT_TOKEN',
+          },
+        },
+      },
+    });
+
+    expect(settings.providerAccounts.slack_default).toMatchObject({
+      agentId: 'main_agent',
+      provider: 'slack',
+      runtimeSecretRefs: {
+        app_token: 'env:SLACK_APP_TOKEN',
+        bot_token: 'env:SLACK_BOT_TOKEN',
+      },
+    });
+    const rendered = renderRuntimeSettingsYaml(settings);
+    expect(rendered).toContain('  slack:');
+    expect(rendered).not.toContain('defaultConnection');
+  });
+
+  it('accepts camelCase conversation fields from stored revision documents', () => {
+    const settings = parseRuntimeSettingsObject({
+      providers: {
+        slack: {
+          enabled: true,
+          defaultConnection: 'slack_default',
+        },
+      },
+      provider_connections: {
+        slack_default: {
+          provider: 'slack',
+          runtime_secret_refs: {
+            app_token: 'SLACK_APP_TOKEN',
+            bot_token: 'SLACK_BOT_TOKEN',
+          },
+        },
+      },
+      agents: {
+        main_agent: {
+          name: 'ReAgent',
+        },
+      },
+      conversations: {
+        slack_default_c123: {
+          provider: 'slack',
+          providerConnection: 'slack_default',
+          externalId: 'C123',
+          kind: 'channel',
+          displayName: 'agent-gantry-test',
+          senderPolicy: { allow: '*', mode: 'trigger' },
+          controlApprovers: ['U123'],
+          agent: 'main_agent',
+          trigger: '@reagent',
+          addedAt: '2026-06-23T14:54:36.468Z',
+          requiresTrigger: true,
+          memoryScope: 'conversation',
+        },
+      },
+    });
+
+    expect(settings.conversations.slack_default_c123).toMatchObject({
+      providerConnection: 'slack_default',
+      externalId: 'C123',
+      displayName: 'agent-gantry-test',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['U123'],
+    });
+    expect(Object.values(settings.bindings)).toContainEqual(
+      expect.objectContaining({
+        agent: 'main_agent',
+        conversation: 'slack_default_c123',
+        trigger: '@reagent',
+        addedAt: '2026-06-23T14:54:36.468Z',
+        requiresTrigger: true,
+        memoryScope: 'conversation',
+      }),
+    );
+
+    const rendered = renderRuntimeSettingsYaml(settings);
+    expect(rendered).toContain('id: C123');
+    expect(rendered).not.toContain('externalId');
+    expect(rendered).not.toContain('requiresTrigger');
+  });
+
+  it('accepts Gantry-owned camelCase stored revision documents', () => {
+    const settings = parseRuntimeSettingsObject({
+      desiredState: { authoritative: true },
+      providers: {
+        slack: { enabled: true, defaultConnection: 'slack_default' },
+      },
+      providerConnections: {
+        slack_default: {
+          provider: 'slack',
+          label: 'Slack Default',
+          runtimeSecretRefs: {
+            app_token: 'SLACK_APP_TOKEN',
+            bot_token: 'SLACK_BOT_TOKEN',
+          },
+        },
+      },
+      conversations: {
+        slack_default_c123: {
+          provider: 'slack',
+          providerConnection: 'slack_default',
+          externalId: 'C123',
+          kind: 'channel',
+          displayName: 'agent-gantry-test',
+          senderPolicy: { allow: '*', mode: 'trigger' },
+          controlApprovers: ['U123'],
+        },
+      },
+      bindings: {
+        slack_default_c123: {
+          agent: 'main_agent',
+          conversation: 'slack_default_c123',
+          trigger: '@reagent',
+          addedAt: '2026-06-23T14:54:36.468Z',
+          requiresTrigger: true,
+          memoryScope: 'conversation',
+        },
+      },
+      agents: {
+        main_agent: {
+          name: 'ReAgent',
+          folder: 'main_agent',
+          relationshipMode: 'organization',
+          agentHarness: 'deepagents',
+          oneTimeJobDefaultModel: 'custom-kimi-test',
+          recurringJobDefaultModel: 'custom-kimi-test',
+          bindings: {},
+          sources: {
+            skills: [{ id: 'skill:recruiter' }],
+            mcpServers: [{ id: 'mcp:caw-ats', tools: ['ats_*'] }],
+            tools: [{ id: 'Browser', kind: 'builtin' }],
+          },
+          capabilities: [{ id: 'mcp.caw-ats.access', version: '1' }],
+          accessPreset: 'locked',
+        },
+      },
+      storage: {
+        postgres: { urlEnv: 'GANTRY_DATABASE_URL', schema: 'gantry' },
+      },
+      agent: {
+        name: 'ReAgent',
+        defaultModel: 'custom-kimi-test',
+        agentHarness: 'deepagents',
+        sessions: {
+          memoryItemLimit: 7,
+          maxMemoryContextChars: 14000,
+        },
+      },
+      credentialBroker: {
+        mode: 'gantry',
+        gateway: { bindHost: '127.0.0.1' },
+      },
+      memory: {
+        enabled: true,
+        embeddings: {
+          enabled: false,
+          provider: 'disabled',
+          model: 'text-embedding-3-small',
+          dimensions: 1536,
+          dailyLimit: 500,
+          batchSize: 16,
+          backfill: {
+            enabled: true,
+            cron: '45 3 * * *',
+            maxItemsPerRun: 500,
+            mode: 'auto',
+            providerBatchMinItems: 100,
+          },
+        },
+        dreaming: {
+          enabled: true,
+          cron: '15 3 * * *',
+          embeddings: {
+            enabled: false,
+            provider: 'disabled',
+            model: 'text-embedding-3-small',
+          },
+        },
+        llm: {
+          extractorMaxFacts: 8,
+          extractorMinConfidence: 0.6,
+          models: {
+            extractor: 'custom-kimi-test',
+            dreaming: 'custom-kimi-test',
+            consolidation: 'custom-kimi-test',
+          },
+        },
+        maintenance: { maxPending: 5000 },
+      },
+      runtime: {
+        deploymentMode: 'fleet',
+        queue: {
+          maxMessageRuns: 3,
+          maxJobRuns: 4,
+          maxMessageBacklog: 0,
+          maxTaskBacklog: 0,
+          maxRetries: 5,
+          baseRetryMs: 5000,
+          drainDeadlineMs: 120000,
+        },
+        liveTurns: { enabled: true },
+        sandbox: {
+          provider: 'sandbox_runtime',
+          resourceLimits: {
+            cpuSeconds: 0,
+            memoryMb: 0,
+            maxProcesses: 0,
+          },
+        },
+        artifactStore: {
+          driver: 's3',
+          bucket: 'gantry-artifacts',
+          region: 'ap-south-1',
+          forcePathStyle: false,
+        },
+      },
+      browser: {
+        usage: {
+          enabled: true,
+          mode: 'audit',
+          windowMs: 60000,
+          maxActionsPerWindow: 10,
+          maxConcurrentPerSite: 2,
+        },
+      },
+      permissions: {
+        yoloMode: {
+          enabled: false,
+          denylist: ['*'],
+          denylistPaths: ['/etc/*'],
+        },
+      },
+      limits: {
+        openrouter: { requestsPerMinute: 30 },
+      },
+      modelAliases: {
+        custom_kimi_test: {
+          provider: 'openrouter',
+          providerModelId: 'moonshotai/kimi-k2.6',
+          displayName: 'Kimi K2.6',
+          aliases: ['custom-kimi-test'],
+          recommendedAlias: 'custom-kimi-test',
+          supportedWorkloads: [
+            'chat',
+            'one_time_job',
+            'recurring_job',
+            'memory_extractor',
+            'memory_dreaming',
+            'memory_consolidation',
+          ],
+          contextWindowTokens: 200000,
+          maxOutputTokens: 32000,
+          inputUsdPerMillionTokens: 0.6,
+          outputUsdPerMillionTokens: 2.5,
+          supportsThinking: true,
+          supportsTools: true,
+          source: {
+            label: 'manual',
+            url: 'https://openrouter.ai/',
+            verifiedAt: '2026-06-27T00:00:00.000Z',
+          },
+        },
+      },
+      modelFamilies: {
+        fast: ['custom-kimi-test'],
+      },
+    });
+
+    expect(settings.desiredState.authoritative).toBe(true);
+    expect(settings.providerAccounts.slack_default).toMatchObject({
+      agentId: 'main_agent',
+      provider: 'slack',
+    });
+    expect(settings.agents.main_agent.sources.mcpServers).toEqual([
+      { id: 'mcp:caw-ats', tools: ['ats_*'] },
+    ]);
+    expect(settings.agents.main_agent.capabilities).toEqual([
+      { id: 'mcp.caw-ats.access', version: '1' },
+    ]);
+    expect(settings.runtime.deploymentMode).toBe('fleet');
+    expect(settings.runtime.queue.maxMessageRuns).toBe(3);
+    expect(settings.credentialBroker.mode).toBe('gantry');
+    expect(settings.memory.embeddings.dailyLimit).toBe(500);
+    expect(settings.browser.usage.windowMs).toBe(60000);
+    expect(settings.permissions.yoloMode.denylistPaths).toEqual(['/etc/*']);
+    expect(settings.limits.providers.openrouter.requestsPerMinute).toBe(30);
+    expect(settings.modelAliases.custom_kimi_test.providerModelId).toBe(
+      'moonshotai/kimi-k2.6',
+    );
+
+    const rendered = renderRuntimeSettingsYaml(settings);
+    expect(rendered).toContain('desired_state:');
+    expect(rendered).not.toContain('desiredState');
+    expect(rendered).not.toContain('providerConnections');
+    expect(rendered).not.toContain('providerConnection');
+    expect(rendered).not.toContain('deploymentMode');
+  });
+
   it('adds active MCP source refs before desired-state mirroring reconciles settings', async () => {
     const settings = createDefaultRuntimeSettings();
     settings.agents.main_agent = {

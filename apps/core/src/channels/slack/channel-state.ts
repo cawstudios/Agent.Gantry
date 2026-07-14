@@ -207,7 +207,7 @@ export abstract class SlackChannelState {
         );
         return {
           type: 'button',
-          action_id: 'gantry_userq_select',
+          action_id: `gantry_userq_select_${optionIndex}`,
           text: {
             type: 'plain_text',
             text: label,

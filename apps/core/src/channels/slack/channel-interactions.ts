@@ -363,7 +363,7 @@ export abstract class SlackChannelInteractions extends SlackChannelState {
         logger.debug({ err }, 'Failed to open Slack permission full view');
       }
     });
-    this.app.action('gantry_userq_select', async (args: any) => {
+    this.app.action(/^gantry_userq_select(?:_\d+)?$/, async (args: any) => {
       await args.ack();
       const action = args.action as { value?: string };
       const body = args.body as {

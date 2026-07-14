@@ -80,18 +80,22 @@ export function selectJobNotificationSummary(summary: string): string {
   const markers = [
     '## Final Job Report',
     '# Final Job Report',
+    '## Scoring Summary',
+    '# Scoring Summary',
     'Final Job Report',
     'Final Report',
+    'Scoring Summary',
+    'Score Summary',
   ];
-  const lower = normalized.toLowerCase();
+  const cleaned = stripRawToolCallBlocks(normalized);
+  const lower = cleaned.toLowerCase();
   let markerIndex = -1;
   for (const marker of markers) {
     const index = lower.lastIndexOf(marker.toLowerCase());
     if (index > markerIndex) markerIndex = index;
   }
-  const selected =
-    markerIndex >= 0 ? normalized.slice(markerIndex) : normalized;
-  return stripTrailingEmptyReceiptLines(selected).trim() || summary;
+  const selected = markerIndex >= 0 ? cleaned.slice(markerIndex) : cleaned;
+  return stripTrailingEmptyReceiptLines(selected).trim();
 }
 
 function statusLabel(
@@ -120,7 +124,7 @@ function compactSummary(summary: string, max = 180): string {
 }
 
 function humanizeSummary(summary: string): string {
-  const trimmed = stripDiagnosticSuffix(summary).trim();
+  const trimmed = stripRawToolCallBlocks(stripDiagnosticSuffix(summary)).trim();
   if (!trimmed) return '';
   const jsonOutcome = humanizeJsonSummary(trimmed);
   if (jsonOutcome) return jsonOutcome;
@@ -132,6 +136,13 @@ function humanizeSummary(summary: string): string {
     .replace(/^\s*[-*]\s+/gm, '')
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:])/g, '$1')
+    .trim();
+}
+
+function stripRawToolCallBlocks(summary: string): string {
+  return summary
+    .replace(/\b[A-Za-z_][\w.-]*<arg_key>[\s\S]*?(?:<\/tool_call>|$)/g, '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
     .trim();
 }
 

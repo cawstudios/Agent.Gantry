@@ -16,7 +16,7 @@ import {
 import {
   buildAgentToolAccessView,
   buildRequestableBrowserToolAccess,
-  buildRequestableAdminToolAccess,
+  buildRequestableGantryMcpToolAccess,
   formatAgentToolAccess,
   PERMISSION_GATED_NATIVE_TOOLS,
 } from '../../shared/tool-access-view.js';
@@ -270,7 +270,7 @@ export function capabilityStatusText(): string {
           'Agent access model:',
           '- Use an available action when one fits.',
           '- If the action is missing, request_access target.kind=capability for the reviewed capability id.',
-          '- If an exact Gantry facade or admin tool is missing, request_access target.kind=tool with a durable Gantry tool name such as AgentDelegation or mcp__gantry__request_settings_update.',
+          '- If an exact Gantry facade or durable Gantry MCP tool is missing, request_access target.kind=tool with a durable Gantry tool name such as AgentDelegation, mcp__gantry__request_settings_update, or mcp__gantry__scheduler_run_now.',
           '- If setup is missing, request source setup through the Gantry access flow; setup records inventory, not authority.',
           '- Use request_access target.kind=run_command only as a temporary exact-command fallback when no reviewed capability fits.',
           '- Use admin_permission_list (read-only, no grant needed) to review current permissions, suggest cleanup of unused or overly broad access, or spot missing access; report findings in plain language.',
@@ -349,6 +349,7 @@ export function capabilityStatusText(): string {
     ...(attachedMcpSourceIds.length > 0
       ? [
           'MCP source rule: ready sources are already attached. Inspect them with mcp_list_tools, fetch one-tool schema/details with mcp_describe_tool when needed, call approved immediate actions through mcp_call_tool, and use async_mcp_call for long-running or parallel work. Do not request the same MCP capability again unless the tool response says access is missing or denied.',
+          'MCP tool choice rule: when several tools could fit, choose the narrowest tool that matches the requested output and prefer read-only tools for read requests. If the user intent or required arguments are unclear, inspect likely tools with mcp_describe_tool or ask one concise clarifying question before calling a write, mutation, or narrower summary tool.',
         ]
       : []),
     ...(requestableBrowserTools.length > 0
@@ -385,7 +386,9 @@ export function capabilityStatusText(): string {
         ),
     ),
     requestableAdminTools: [
-      ...buildRequestableAdminToolAccess(currentAdminTools),
+      ...buildRequestableGantryMcpToolAccess(
+        new Set([...currentAllowedTools, ...currentAdminTools]),
+      ),
       ...requestableBrowserTools,
     ],
     source:

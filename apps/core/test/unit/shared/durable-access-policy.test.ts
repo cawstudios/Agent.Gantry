@@ -62,10 +62,16 @@ describe('durable access policy', () => {
     }
   });
 
-  it('allows canonical Browser and exact Gantry admin tools', () => {
+  it('allows canonical Browser and exact durable Gantry MCP tools', () => {
     expect(validateDurableAccessRule('Browser')).toEqual({ ok: true });
     expect(
       validateDurableAccessRule('mcp__gantry__settings_desired_state'),
+    ).toEqual({ ok: true });
+    expect(validateDurableAccessRule('mcp__gantry__scheduler_run_now')).toEqual(
+      { ok: true },
+    );
+    expect(
+      validateDurableAccessRule('mcp__gantry__scheduler_list_jobs'),
     ).toEqual({ ok: true });
   });
 

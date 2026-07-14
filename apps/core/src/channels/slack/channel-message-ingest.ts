@@ -57,6 +57,34 @@ function dedupeRouteAliases(matches: SlackRouteMatch[]): SlackRouteMatch[] {
   return [...byIdentity.values()].map(({ match }) => match);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeSingleRouteSlackMentionContent(input: {
+  rawContent: string;
+  botUserId: string;
+  trigger: string;
+  allowInlineMention: boolean;
+}): string {
+  const leadingMentionPattern = new RegExp(
+    `^<@${escapeRegExp(input.botUserId)}>\\s+`,
+  );
+  if (leadingMentionPattern.test(input.rawContent)) {
+    return input.rawContent.replace(leadingMentionPattern, `${input.trigger} `);
+  }
+  if (!input.allowInlineMention) return input.rawContent;
+  const inlineMentionPattern = new RegExp(
+    `<@${escapeRegExp(input.botUserId)}>\\s*`,
+  );
+  if (!inlineMentionPattern.test(input.rawContent)) return input.rawContent;
+  const withoutMention = input.rawContent.replace(inlineMentionPattern, '');
+  const normalizedContent = withoutMention.trim();
+  return normalizedContent
+    ? `${input.trigger} ${normalizedContent}`
+    : input.trigger;
+}
+
 export async function ingestSlackSlashCommand(input: {
   command: {
     channel_id?: string;
@@ -116,16 +144,38 @@ export async function ingestSlackMessage(input: {
     input.opts.inboundProviderAccountIds?.length && input.opts.providerAccountId
       ? input.opts.inboundProviderAccountIds
       : [input.opts.providerAccountId];
-  const routeMatches = dedupeRouteAliases(
-    providerAccountIds.flatMap((providerAccountId) =>
-      findConversationRoutesForChat(
-        routes,
-        jid,
-        event.thread_ts,
-        providerAccountId,
-      ).map((match) => [...match, providerAccountId] as SlackRouteMatch),
-    ),
-  );
+  const findRouteMatches = (
+    threadId: string | undefined,
+    accountIds: Array<string | undefined>,
+  ): SlackRouteMatch[] =>
+    dedupeRouteAliases(
+      accountIds.flatMap((providerAccountId) =>
+        findConversationRoutesForChat(
+          routes,
+          jid,
+          threadId,
+          providerAccountId,
+        ).map((match) => [...match, providerAccountId] as SlackRouteMatch),
+      ),
+    );
+  let routeMatches = findRouteMatches(event.thread_ts, providerAccountIds);
+  if (
+    routeMatches.length < 1 &&
+    input.options?.forceOwnedTopLevel &&
+    event.thread_ts
+  ) {
+    routeMatches = findRouteMatches(undefined, providerAccountIds);
+  }
+  if (routeMatches.length < 1 && input.options?.forceOwnedTopLevel) {
+    routeMatches = findRouteMatches(event.thread_ts, [undefined]);
+  }
+  if (
+    routeMatches.length < 1 &&
+    input.options?.forceOwnedTopLevel &&
+    event.thread_ts
+  ) {
+    routeMatches = findRouteMatches(undefined, [undefined]);
+  }
   const singleRoute =
     routeMatches.length === 1 ? routeMatches[0]?.[1] : undefined;
   if (routeMatches.length < 1 && isGroupConversation) {
@@ -139,12 +189,17 @@ export async function ingestSlackMessage(input: {
   const rawContent = enriched.text;
   const content =
     input.botUserId && singleRoute
-      ? rawContent.replace(
-          new RegExp(`^<@${input.botUserId}>\\s+`),
-          `${triggerForRoute(singleRoute)} `,
-        )
+      ? normalizeSingleRouteSlackMentionContent({
+          rawContent,
+          botUserId: input.botUserId,
+          trigger: triggerForRoute(singleRoute),
+          allowInlineMention: input.options?.forceOwnedTopLevel === true,
+        })
       : input.botUserId && routeMatches.length > 1
-        ? rawContent.replace(new RegExp(`^<@${input.botUserId}>\\s*`), '')
+        ? rawContent.replace(
+            new RegExp(`^<@${escapeRegExp(input.botUserId)}>\\s*`),
+            '',
+          )
         : rawContent;
   if (!content) return;
   const triggeredRoutes =

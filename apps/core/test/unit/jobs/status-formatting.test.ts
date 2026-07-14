@@ -176,4 +176,45 @@ describe('job status formatting', () => {
     expect(message).toContain('Needs attention: Approve the missing access');
     expect(message).toContain('Next: Stopped until the job is fixed or rerun.');
   });
+
+  it('does not expose raw MCP tool-call markup as the completed summary', () => {
+    const message = formatRunStatusMessage({
+      job: job(),
+      runId: 'cb7f3c0a-c8f8-40eb-82f0-3b21d2cfc342',
+      runShortId: 3,
+      runStatus: 'completed',
+      summary:
+        'mcp_call_tool<arg_key>arguments</arg_key><arg_value>{"limit": 5}</arg_value><arg_key>serverName</arg_key><arg_value>caw-ats</arg_value><arg_key>toolName</arg_key><arg_value>ats_claim_scoring_queue</arg_value></tool_call>',
+      nextRun: null,
+      retryCount: 0,
+    });
+
+    expect(message).toContain('Completed: Completed, no reportable output.');
+    expect(message).not.toContain('mcp_call_tool');
+    expect(message).not.toContain('<arg_key>');
+    expect(message).not.toContain('ats_claim_scoring_queue');
+  });
+
+  it('prefers a scoring summary over earlier raw tool-call markup', () => {
+    const message = formatRunStatusMessage({
+      job: job(),
+      runId: 'cb7f3c0a-c8f8-40eb-82f0-3b21d2cfc342',
+      runShortId: 3,
+      runStatus: 'completed',
+      summary: [
+        'mcp_call_tool<arg_key>arguments</arg_key><arg_value>{"limit": 5}</arg_value><arg_key>serverName</arg_key><arg_value>caw-ats</arg_value><arg_key>toolName</arg_key><arg_value>ats_claim_scoring_queue</arg_value></tool_call>',
+        '',
+        '## Scoring Summary',
+        'Scored 5 candidates: 2 shortlist, 1 hold, 2 reject.',
+      ].join('\n'),
+      nextRun: null,
+      retryCount: 0,
+    });
+
+    expect(message).toContain(
+      'Completed: Scoring Summary Scored 5 candidates: 2 shortlist, 1 hold, 2 reject.',
+    );
+    expect(message).not.toContain('mcp_call_tool');
+    expect(message).not.toContain('<arg_key>');
+  });
 });

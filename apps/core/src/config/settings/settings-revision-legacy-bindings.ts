@@ -1,22 +1,26 @@
 export function migrateLegacyAgentBindings(
   document: Record<string, unknown>,
 ): Record<string, unknown> {
-  const agents = recordOrUndefined(document.agents);
-  const conversations = recordOrUndefined(document.conversations);
-  if (!agents || !conversations) return document;
+  let next = migrateLegacyProviderConnections(document);
+  next = migrateLegacyConversationInstalls(next);
+  next = migrateLegacyTopLevelBindings(next);
+  next = migrateLegacyModelAccess(next);
+  const agents = recordOrUndefined(next.agents);
+  const conversations = recordOrUndefined(next.conversations);
+  if (!agents || !conversations) return next;
   if (
     !Object.values(agents).some(
       (agent) => recordOrUndefined(agent)?.bindings !== undefined,
     )
   ) {
-    return document;
+    return next;
   }
 
-  const next = structuredClone(document);
+  next = structuredClone(next);
   const nextAgents = recordOrUndefined(next.agents);
   const nextConversations = recordOrUndefined(next.conversations);
   const providerAccounts = recordOrUndefined(next.provider_accounts) ?? {};
-  if (!nextAgents || !nextConversations) return document;
+  if (!nextAgents || !nextConversations) return next;
 
   for (const [agentId, agentRaw] of Object.entries(nextAgents)) {
     const agent = recordOrUndefined(agentRaw);
@@ -69,6 +73,249 @@ export function migrateLegacyAgentBindings(
   }
 
   return next;
+}
+
+function migrateLegacyProviderConnections(
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  const providerConnections = recordOrUndefined(document.provider_connections);
+  if (!providerConnections) return document;
+  const migratableConnections = Object.entries(providerConnections).filter(
+    ([, connectionRaw]) => isMigratableProviderConnection(connectionRaw),
+  );
+  if (migratableConnections.length === 0) return document;
+
+  const next = structuredClone(document);
+  const nextProviderConnections = recordOrUndefined(next.provider_connections);
+  const providerAccounts = recordOrUndefined(next.provider_accounts) ?? {};
+  next.provider_accounts = providerAccounts;
+  const agents = recordOrUndefined(next.agents) ?? {};
+  next.agents = agents;
+  ensureLegacyAgent(agents, 'main_agent');
+  stripLegacyAgentFolderFields(agents);
+
+  if (nextProviderConnections) {
+    for (const [accountId, connectionRaw] of Object.entries(
+      nextProviderConnections,
+    )) {
+      if (providerAccounts[accountId] !== undefined) continue;
+      const connection = recordOrUndefined(connectionRaw);
+      if (!connection) continue;
+      const agentId =
+        stringValue(connection.agent ?? connection.agent_id) ?? 'main_agent';
+      ensureLegacyAgent(agents, agentId);
+      providerAccounts[accountId] = stripUndefinedDeep({
+        ...connection,
+        agent: agentId,
+      });
+    }
+    delete next.provider_connections;
+  }
+
+  const nextProviders = recordOrUndefined(next.providers);
+  if (nextProviders) {
+    for (const providerRaw of Object.values(nextProviders)) {
+      const provider = recordOrUndefined(providerRaw);
+      if (!provider) continue;
+      delete provider.default_connection;
+      delete provider.defaultConnection;
+    }
+  }
+
+  return next;
+}
+
+function migrateLegacyConversationInstalls(
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  const conversations = recordOrUndefined(document.conversations);
+  if (!conversations) return document;
+  const hasLegacyConversationInstall = Object.values(conversations).some(
+    (conversationRaw) => {
+      const conversation = recordOrUndefined(conversationRaw);
+      return (
+        conversation?.agent !== undefined ||
+        conversation?.trigger !== undefined ||
+        conversation?.requires_trigger !== undefined ||
+        conversation?.requiresTrigger !== undefined ||
+        conversation?.added_at !== undefined ||
+        conversation?.addedAt !== undefined ||
+        conversation?.memory_scope !== undefined ||
+        conversation?.memoryScope !== undefined ||
+        conversation?.model !== undefined
+      );
+    },
+  );
+  if (!hasLegacyConversationInstall) return document;
+
+  const next = structuredClone(document);
+  const nextConversations = recordOrUndefined(next.conversations);
+  if (!nextConversations) return next;
+  const agents = recordOrUndefined(next.agents) ?? {};
+  next.agents = agents;
+
+  for (const [conversationId, conversationRaw] of Object.entries(
+    nextConversations,
+  )) {
+    const conversation = recordOrUndefined(conversationRaw);
+    if (!conversation) continue;
+    const agentId = stringValue(conversation.agent) ?? 'main_agent';
+    ensureLegacyAgent(agents, agentId);
+    const installedAgents =
+      recordOrUndefined(conversation.installed_agents) ?? {};
+    conversation.installed_agents = installedAgents;
+    if (!installedAgents[agentId]) {
+      installedAgents[agentId] = stripUndefinedDeep({
+        agent: agentId,
+        provider_account:
+          stringValue(conversation.provider_account) ??
+          stringValue(conversation.provider_connection),
+        status: 'active',
+        added_at: stringValue(conversation.added_at ?? conversation.addedAt),
+        memory_scope: stringValue(
+          conversation.memory_scope ?? conversation.memoryScope,
+        ),
+        trigger: stringValue(conversation.trigger),
+        requires_trigger:
+          conversation.requires_trigger ?? conversation.requiresTrigger,
+        model: stringValue(conversation.model),
+      });
+    }
+    if (!conversation.provider_account && conversation.provider_connection) {
+      conversation.provider_account = conversation.provider_connection;
+    }
+    delete conversation.provider;
+    delete conversation.provider_connection;
+    delete conversation.providerConnection;
+    delete conversation.agent;
+    delete conversation.trigger;
+    delete conversation.requires_trigger;
+    delete conversation.requiresTrigger;
+    delete conversation.added_at;
+    delete conversation.addedAt;
+    delete conversation.memory_scope;
+    delete conversation.memoryScope;
+    delete conversation.model;
+    nextConversations[conversationId] = conversation;
+  }
+
+  return next;
+}
+
+function migrateLegacyTopLevelBindings(
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  const bindings = recordOrUndefined(document.bindings);
+  const conversations = recordOrUndefined(document.conversations);
+  if (!bindings || !conversations || Object.keys(bindings).length === 0) {
+    return document;
+  }
+
+  const next = structuredClone(document);
+  const nextBindings = recordOrUndefined(next.bindings);
+  const nextConversations = recordOrUndefined(next.conversations);
+  if (!nextBindings || !nextConversations) return next;
+  const agents = recordOrUndefined(next.agents) ?? {};
+  next.agents = agents;
+
+  for (const [bindingId, bindingRaw] of Object.entries(nextBindings)) {
+    const binding = recordOrUndefined(bindingRaw);
+    if (!binding) continue;
+    const agentId = stringValue(binding.agent) ?? 'main_agent';
+    ensureLegacyAgent(agents, agentId);
+    const conversationId = stringValue(binding.conversation);
+    if (!conversationId) continue;
+    const conversation = recordOrUndefined(nextConversations[conversationId]);
+    if (!conversation) continue;
+    const providerAccount =
+      stringValue(binding.provider_account) ??
+      stringValue(binding.provider_connection) ??
+      stringValue(conversation.provider_account) ??
+      stringValue(conversation.provider_connection);
+    if (!providerAccount) continue;
+    if (!conversation.provider_account) {
+      conversation.provider_account = providerAccount;
+    }
+    delete conversation.provider;
+    delete conversation.provider_connection;
+    delete conversation.providerConnection;
+    const installedAgents =
+      recordOrUndefined(conversation.installed_agents) ?? {};
+    conversation.installed_agents = installedAgents;
+    installedAgents[uniqueInstallId(bindingId, installedAgents)] =
+      stripUndefinedDeep({
+        agent: agentId,
+        provider_account: providerAccount,
+        thread_id: stringValue(binding.thread_id ?? binding.threadId),
+        status: 'active',
+        added_at: stringValue(binding.added_at ?? binding.addedAt),
+        memory_scope: stringValue(binding.memory_scope ?? binding.memoryScope),
+        trigger: stringValue(binding.trigger),
+        requires_trigger: binding.requires_trigger ?? binding.requiresTrigger,
+        model: stringValue(binding.model),
+      });
+    nextConversations[conversationId] = conversation;
+  }
+
+  delete next.bindings;
+  return next;
+}
+
+function migrateLegacyModelAccess(
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  const modelAccess = recordOrUndefined(document.model_access);
+  if (!modelAccess || modelAccess.mode === undefined) return document;
+  const next = structuredClone(document);
+  const nextModelAccess = recordOrUndefined(next.model_access);
+  if (!nextModelAccess) return next;
+  if (nextModelAccess.enabled === undefined) {
+    nextModelAccess.enabled = stringValue(nextModelAccess.mode) !== 'disabled';
+  }
+  delete nextModelAccess.mode;
+  return next;
+}
+
+function isMigratableProviderConnection(value: unknown): boolean {
+  const connection = recordOrUndefined(value);
+  return Boolean(
+    connection &&
+    stringValue(connection.provider) &&
+    recordOrUndefined(connection.runtime_secret_refs),
+  );
+}
+
+function ensureLegacyAgent(
+  agents: Record<string, unknown>,
+  agentId: string,
+): void {
+  const existing = recordOrUndefined(agents[agentId]) ?? {};
+  if (!stringValue(existing.name)) {
+    existing.name = agentId === 'main_agent' ? 'Default Agent' : agentId;
+  }
+  agents[agentId] = existing;
+}
+
+function stripLegacyAgentFolderFields(agents: Record<string, unknown>): void {
+  for (const agentRaw of Object.values(agents)) {
+    const agent = recordOrUndefined(agentRaw);
+    if (!agent) continue;
+    const access = recordOrUndefined(agent.access) ?? {};
+    if (agent.sources !== undefined && access.sources === undefined) {
+      access.sources = agent.sources;
+    }
+    if (agent.capabilities !== undefined && access.selections === undefined) {
+      access.selections = agent.capabilities;
+    }
+    if (agent.access_preset !== undefined && access.preset === undefined) {
+      access.preset = agent.access_preset;
+    }
+    if (Object.keys(access).length > 0) agent.access = access;
+    delete agent.folder;
+    delete agent.sources;
+    delete agent.capabilities;
+    delete agent.access_preset;
+  }
 }
 
 function findLegacyBindingConversation(input: {

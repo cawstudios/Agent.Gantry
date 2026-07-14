@@ -469,8 +469,16 @@ export class McpServer {
         fs.mkdirSync(responseDir, { recursive: true });
         const responsePayload = {
           taskId,
-          ok: true,
-          message: 'Scheduler task confirmed.',
+          ok: process.env.TEST_MCP_TASK_RESPONSE_OK === '0' ? false : true,
+          ...(process.env.TEST_MCP_TASK_RESPONSE_CODE
+            ? { code: process.env.TEST_MCP_TASK_RESPONSE_CODE }
+            : {}),
+          ...(process.env.TEST_MCP_TASK_RESPONSE_ERROR
+            ? { error: process.env.TEST_MCP_TASK_RESPONSE_ERROR }
+            : { message: 'Scheduler task confirmed.' }),
+          ...(process.env.TEST_MCP_TASK_RESPONSE_DETAILS
+            ? { details: JSON.parse(process.env.TEST_MCP_TASK_RESPONSE_DETAILS) }
+            : {}),
           ...(process.env.TEST_MCP_TASK_RESPONSE_DATA
             ? { data: JSON.parse(process.env.TEST_MCP_TASK_RESPONSE_DATA) }
             : {}),
@@ -888,6 +896,41 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
     expect(record.result).toMatchObject({
       ...remoteResult,
     });
+  });
+
+  it('returns missing MCP capability denials as recoverable guidance', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'mcp_call_tool',
+      {
+        serverName: 'caw-ats',
+        toolName: 'ats_list_client_projects',
+        arguments: { clientName: 'Manipal' },
+      },
+      {
+        TEST_MCP_AUTO_RESPOND_TASKS: '1',
+        TEST_MCP_TASK_RESPONSE_OK: '0',
+        TEST_MCP_TASK_RESPONSE_CODE: 'missing_capability',
+        TEST_MCP_TASK_RESPONSE_ERROR:
+          'MCP tool is not approved for this agent: mcp__caw-ats__ats_list_client_projects',
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).not.toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'MCP tool is not approved for this agent',
+    );
+    expect(record.result.content[0].text).toContain('target.kind=tool');
+    expect(record.result.content[0].text).toContain(
+      'mcp__caw-ats__ats_list_client_projects',
+    );
+    expect(record.result.content[0].text).toContain(
+      'refresh the reviewed semantic capability binding',
+    );
   });
 
   it('writes MCP tool detail requests through IPC without execution arguments', async () => {
@@ -1386,6 +1429,9 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
     expect(record.result.content[0].text).toContain(
       'Do not request the same MCP capability again',
     );
+    expect(record.result.content[0].text).toContain(
+      'MCP tool choice rule: when several tools could fit',
+    );
   });
 
   it('allows request_access run_command fallbacks when MCP access is only requestable', async () => {
@@ -1649,6 +1695,111 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
     });
   });
 
+  it('maps guessed MCP source capability ids to the reviewed source capability', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: { kind: 'capability', id: 'caw-ats.projects.list' },
+        reason: 'Need to list client projects through caw-ats.',
+      },
+      {
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_client_projects'),
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      payload: {
+        capabilityRequestSource: 'request_access',
+        permissionKind: 'tool',
+        capabilityId: 'mcp.caw-ats.access',
+      },
+    });
+  });
+
+  it('maps guessed MCP read capability ids using the reviewed MCP capability id', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: { kind: 'capability', id: 'caw-ats.read' },
+        reason: 'Need to read projects through caw-ats.',
+      },
+      {
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          {
+            capabilityId: 'mcp.caw-ats.access',
+            version: '1',
+            displayName: 'caw-ats MCP access',
+            category: 'MCP',
+            risk: 'write',
+            can: 'Call approved tools on the caw-ats MCP server.',
+            cannot: 'Call unapproved MCP tools or receive raw credentials.',
+            credentialSource: 'none',
+            implementationBindings: [
+              {
+                kind: 'mcp_tool',
+                mcpTool: 'mcp__legacy-source__legacy_tool',
+              },
+            ],
+          },
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      payload: {
+        capabilityRequestSource: 'request_access',
+        permissionKind: 'tool',
+        capabilityId: 'mcp.caw-ats.access',
+      },
+    });
+  });
+
+  it('returns recoverable guidance for unknown capability ids instead of failing the run', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(fixture, 'request_access', {
+      target: { kind: 'capability', id: 'unknown.access' },
+      reason: 'Try to request an unknown capability.',
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const record = JSON.parse(fs.readFileSync(fixture.resultPath, 'utf-8'));
+    expect(record.result.isError).not.toBe(true);
+    expect(record.result.content[0].text).toContain(
+      'No reviewed capability matches id "unknown.access".',
+    );
+    const taskDir = path.join(fixture.ipcDir, 'tasks');
+    expect(fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : []).toEqual([]);
+  });
+
   it('submits request_access exact Gantry tool targets as reviewed permission requests', async () => {
     const fixture = createMcpFixture();
 
@@ -1672,6 +1823,122 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
         capabilityRequestSource: 'request_access',
         permissionKind: 'tool',
         toolName: 'AgentDelegation',
+      },
+    });
+  });
+
+  it('maps request_access exact third-party MCP tool targets to reviewed semantic capabilities', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: {
+          kind: 'tool',
+          name: 'mcp__caw-ats__ats_list_client_projects',
+        },
+        reason: 'Need to list client projects through caw-ats.',
+      },
+      {
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_client_projects'),
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      payload: {
+        capabilityRequestSource: 'request_access',
+        permissionKind: 'tool',
+        capabilityId: 'mcp.caw-ats.access',
+      },
+    });
+  });
+
+  it('submits exact third-party MCP tool targets as temporary approval requests', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(fixture, 'request_access', {
+      target: {
+        kind: 'tool',
+        name: 'mcp__caw-ats__ats_list_client_projects',
+      },
+      reason: 'Need to list client projects through caw-ats.',
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      payload: {
+        capabilityRequestSource: 'request_access',
+        permissionKind: 'tool',
+        toolName: 'mcp__caw-ats__ats_list_client_projects',
+        temporaryOnly: true,
+      },
+    });
+    expect(task.payload.reason).toContain(
+      'Durable access requires refreshing the reviewed capability.',
+    );
+  });
+
+  it('asks for temporary approval when an MCP tool is visible but missing from the selected capability binding', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(
+      fixture,
+      'request_access',
+      {
+        target: {
+          kind: 'tool',
+          name: 'mcp__caw-ats__ats_position_counts',
+        },
+        reason: 'Need to call the new caw-ats position counts tool.',
+      },
+      {
+        GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON: JSON.stringify([
+          'capability:mcp.caw-ats.access',
+        ]),
+        GANTRY_SEMANTIC_CAPABILITIES_JSON: JSON.stringify([
+          cawAtsMcpCapability('mcp__caw-ats__ats_list_positions'),
+        ]),
+      },
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      payload: {
+        permissionKind: 'tool',
+        capabilityRequestSource: 'request_access',
+        toolName: 'mcp__caw-ats__ats_position_counts',
+        temporaryOnly: true,
       },
     });
   });
@@ -1780,6 +2047,33 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
         capabilityRequestSource: 'request_access',
         permissionKind: 'tool',
         toolName: 'mcp__gantry__request_settings_update',
+      },
+    });
+  });
+
+  it('submits request_access Gantry scheduler tool targets as reviewed permission requests', async () => {
+    const fixture = createMcpFixture();
+
+    const result = await runMcpFixture(fixture, 'request_access', {
+      target: { kind: 'tool', name: 'scheduler_run_now' },
+      reason: 'Trigger an approved scheduled job without asking every time.',
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+    expect(taskFiles).toHaveLength(1);
+    const task = JSON.parse(
+      fs.readFileSync(
+        path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+        'utf-8',
+      ),
+    );
+    expect(task).toMatchObject({
+      type: 'request_permission',
+      payload: {
+        capabilityRequestSource: 'request_access',
+        permissionKind: 'tool',
+        toolName: 'mcp__gantry__scheduler_run_now',
       },
     });
   });
