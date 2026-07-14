@@ -8,6 +8,7 @@ import {
   ATTR_PROMPT,
   boundedContent,
   boundedJsonArray,
+  MAX_ATTRIBUTE_CHARS,
   childContextFor,
   contentCaptureEnabled,
   getTurnSpan,
@@ -97,23 +98,31 @@ function promptJson(request: Record<string, unknown>): string | undefined {
   const messages = Array.isArray(request.messages)
     ? (request.messages as Record<string, unknown>[])
     : [];
+  // Walk from the end (most recent messages) under a raw-char budget so a
+  // request with millions of tiny messages never materializes millions of
+  // entries — the serializer's 32k output limit is enforced afterwards.
   const entries: { role: string; content: string }[] = [];
-  const system = request.system;
-  if (typeof system === 'string') {
-    entries.push({ role: 'system', content: boundedContent(system) });
-  } else if (Array.isArray(system)) {
-    entries.push({
-      role: 'system',
-      content: boundedContent(JSON.stringify(system)),
-    });
-  }
-  for (const message of messages) {
+  let budget = MAX_ATTRIBUTE_CHARS;
+  for (let index = messages.length - 1; index >= 0 && budget > 0; index -= 1) {
+    const message = messages[index]!;
     const role = typeof message.role === 'string' ? message.role : 'unknown';
     const content =
       typeof message.content === 'string'
         ? message.content
         : JSON.stringify(message.content ?? '');
-    entries.push({ role, content: boundedContent(content) });
+    const entry = { role, content: boundedContent(content) };
+    entries.push(entry);
+    budget -= entry.content.length + 32;
+  }
+  entries.reverse();
+  const system = request.system;
+  if (typeof system === 'string') {
+    entries.unshift({ role: 'system', content: boundedContent(system) });
+  } else if (Array.isArray(system)) {
+    entries.unshift({
+      role: 'system',
+      content: boundedContent(JSON.stringify(system)),
+    });
   }
   return entries.length > 0 ? boundedJsonArray(entries) : undefined;
 }
@@ -328,7 +337,7 @@ export function observeGatewayCall(input: {
       if (!sawFirstChunk) {
         sawFirstChunk = true;
         try {
-          span.addEvent('gen_ai.first_token');
+          span.addEvent('gantry.first_response_byte');
         } catch {
           // fail-open
         }

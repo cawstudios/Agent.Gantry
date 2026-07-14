@@ -77,6 +77,10 @@ _(Backfilled by the orchestrator — stage launched before the ledger rule; rows
 | E.14 | `capture_content: false` must cover provider error text | Branch autoreview r7 (P1): SSE `error.message` is provider-sourced and can echo request content into span status/error.type | Provider-stream errors record a stable label when capture is off; host/gateway errors (timeouts, statusText) stay, all bounded | Privacy control bypassed on error paths | fixed |
 | E.15 | Streamed usage merging must not retain arbitrary objects | Branch autoreview r7 (P2): `mergeUsage` kept every provider key/nested value for the stream's lifetime | Whitelist of recognized usage fields; nested details capped at 8 numeric sub-keys | Unbounded host memory growth on adversarial streams | fixed |
 
+| E.16 | Prompt entries must be budgeted during traversal, not after | Branch autoreview r8 (P1): a 16 MiB `/llm` body with millions of tiny messages materialized millions of entry objects before bounding | `promptJson` reverse-walks under a raw-char budget (recent messages win), then the bounded serializer applies | Heap exhaustion from a bounded authenticated request when capture is on | fixed |
+| E.17 | The pre-parse stream event measures first BYTE, not first token | Branch autoreview r8 (P2) | Renamed to `gantry.first_response_byte` — honest TTFB semantics | Misleading latency metric name | fixed |
+| E.18 | Continuation rotation re-raised a third time | Reviewer r8 | Held — C.8/E.8 documented decision with named revisit (synchronous frame hook in agent-spawn-process) | — | ok |
+
 ## Stage D — Gateway wiring + integration tests
 
 | # | Assumption | Missing info that forced it | Choice taken | Impact if wrong | Validated |
