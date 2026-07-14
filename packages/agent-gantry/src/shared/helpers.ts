@@ -163,7 +163,9 @@ export function parseJsonRecord(value: string): Record<string, unknown> {
   const candidates = [
     stripOuterJsonFence(value),
     ...extractFencedJsonCandidates(value),
-    ...(openedFence === value ? [] : [openedFence, ...extractBalancedJsonObjectCandidates(openedFence)]),
+    ...(openedFence === value
+      ? []
+      : [openedFence, ...extractBalancedJsonObjectCandidates(openedFence)]),
   ];
   let lastError: unknown = null;
   for (const candidate of candidates) {
@@ -185,7 +187,9 @@ export function parseJsonRecord(value: string): Record<string, unknown> {
 
 function stripOuterJsonFence(value: string): string {
   const trimmed = value.trim();
-  const fenced = /^```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```$/u.exec(trimmed);
+  const fenced = /^```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```$/u.exec(
+    trimmed,
+  );
   if (!fenced) return value;
 
   const inner = fenced[1]?.trim() ?? '';
@@ -194,12 +198,17 @@ function stripOuterJsonFence(value: string): string {
 }
 
 function stripOpeningJsonFence(value: string): string {
-  return value.trim().replace(/^```(?:json|JSON)?\s*\r?\n?/u, '').trim();
+  return value
+    .trim()
+    .replace(/^```(?:json|JSON)?\s*\r?\n?/u, '')
+    .trim();
 }
 
 function extractFencedJsonCandidates(value: string): string[] {
   const candidates: string[] = [];
-  const fencedBlocks = value.matchAll(/```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```/gu);
+  const fencedBlocks = value.matchAll(
+    /```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```/gu,
+  );
   for (const block of fencedBlocks) {
     const inner = block[1]?.trim() ?? '';
     if (isJsonShaped(inner)) candidates.push(inner);

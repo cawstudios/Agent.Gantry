@@ -29,6 +29,18 @@ export interface GantryRuntimeMessageRecord {
   readonly occurredAt: string;
 }
 
+export interface GantryObservabilityContext {
+  readonly flowId?: string | null;
+  readonly flowType?: string | null;
+  readonly flowStage?: string | null;
+  readonly sessionId?: string | null;
+  readonly userId?: string | null;
+  readonly costCategory?: string | null;
+  readonly costStage?: string | null;
+  readonly tags?: readonly string[];
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface GantryStructuredTaskInput {
   readonly taskType: string;
   readonly instructions: string;
@@ -37,6 +49,7 @@ export interface GantryStructuredTaskInput {
   readonly cacheablePrefix?: string | null;
   readonly promptCache?: GantryPromptCacheConfig | null;
   readonly correlationId?: string | null;
+  readonly observability?: GantryObservabilityContext | null;
 }
 
 export interface GantryStructuredTaskResult {
@@ -83,6 +96,7 @@ export interface GantryAgentToolContext {
   readonly correlationId?: string | null;
   readonly step: number;
   readonly state: Record<string, unknown>;
+  readonly observability?: GantryObservabilityContext | null;
 }
 
 export interface GantryAgentTool {
@@ -104,6 +118,7 @@ export interface GantryAgentTaskInput {
   readonly cacheablePrefix?: string | null;
   readonly promptCache?: GantryPromptCacheConfig | null;
   readonly correlationId?: string | null;
+  readonly observability?: GantryObservabilityContext | null;
   readonly maxSteps?: number;
   readonly deadlineAt?: string | null;
   readonly stepTimeoutMs?: number;
@@ -511,6 +526,7 @@ export interface StructuredJsonModelProvider {
     readonly promptCache?: GantryPromptCacheConfig | null;
     readonly correlationId?: string | null;
     readonly attachments?: readonly GantryAgentTaskAttachment[];
+    readonly observability?: GantryObservabilityContext | null;
   }): Promise<StructuredJsonModelProviderResult>;
 }
 
@@ -605,7 +621,8 @@ export interface AnthropicStructuredModelTaskPolicy {
 
 export interface AnthropicStructuredModelConfig {
   readonly provider: 'anthropic';
-  readonly apiKey?: string | null;
+  readonly gantryBaseUrl?: string | null;
+  readonly gantryApiKey?: string | null;
   readonly model?: string | null;
   readonly defaultModel?: string | null;
   readonly taskModels?: Record<string, string | null | undefined>;
@@ -620,7 +637,6 @@ export interface AnthropicStructuredModelConfig {
   readonly retryMaxDelayMs?: number;
   readonly temperature?: number;
   readonly maxTokens?: number;
-  readonly apiVersion?: string;
 }
 
 export type GantryStructuredModelConfig =

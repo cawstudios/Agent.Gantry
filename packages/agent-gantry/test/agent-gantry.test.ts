@@ -28,8 +28,101 @@ import {
   normalizeAgentMaxSteps,
   summarizeAgentObservation,
 } from '../src/tasks/agent-task-runner-helpers.js';
+import { observeGantryModelCall } from '../src/tasks/model-observability.js';
+
+const langfuseTracingMock = vi.hoisted(() => {
+  const state = {
+    activeSpanId: null as string | null,
+    throwOnUpdate: false,
+    updates: [] as Record<string, unknown>[],
+    starts: [] as Array<{
+      name: string;
+      options: Record<string, unknown> | undefined;
+    }>,
+    traceAttributes: [] as Record<string, unknown>[],
+  };
+  return {
+    state,
+    propagateAttributes: vi.fn(
+      async (_attributes: unknown, fn: () => Promise<unknown>) => await fn(),
+    ),
+    startActiveObservation: vi.fn(
+      async (
+        _name: string,
+        fn: (observation: {
+          update(attributes: Record<string, unknown>): void;
+          otelSpan: {
+            setAttributes(attributes: Record<string, unknown>): void;
+          };
+        }) => Promise<unknown>,
+        options?: Record<string, unknown>,
+      ) => {
+        state.starts.push({ name: _name, options });
+        return await fn({
+          update: (attributes: Record<string, unknown>) => {
+            state.updates.push(attributes);
+            if (state.throwOnUpdate) {
+              throw new Error('Langfuse update failed');
+            }
+          },
+          otelSpan: {
+            setAttributes: (attributes: Record<string, unknown>) => {
+              state.traceAttributes.push(attributes);
+            },
+          },
+        });
+      },
+    ),
+  };
+});
+
+vi.mock('@langfuse/tracing', () => ({
+  LangfuseOtelSpanAttributes: {
+    TRACE_NAME: 'langfuse.trace.name',
+    TRACE_TAGS: 'langfuse.trace.tags',
+    TRACE_SESSION_ID: 'langfuse.trace.sessionId',
+  },
+  getActiveSpanId: () => langfuseTracingMock.state.activeSpanId,
+  propagateAttributes: langfuseTracingMock.propagateAttributes,
+  startActiveObservation: langfuseTracingMock.startActiveObservation,
+  setLangfuseTracerProvider: vi.fn(),
+}));
 
 describe('@cawstudios/agent-gantry', () => {
+  it('projects the task final schema into generic agent final actions', async () => {
+    let seenOutputSchema: Record<string, unknown> | undefined;
+    const finalSchema = {
+      type: 'object',
+      required: ['summary'],
+      properties: { summary: { type: 'string' } },
+    };
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async (input) => {
+          seenOutputSchema = input.outputSchema;
+          return { action: 'final', output: { summary: 'Done' } };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.final-schema',
+      instructions: 'Return the requested summary.',
+      input: {},
+      tools: [],
+      finalSchema,
+      maxSteps: 1,
+    });
+
+    expect(
+      (seenOutputSchema?.properties as Record<string, unknown>).output,
+    ).toEqual(finalSchema);
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { summary: 'Done' },
+    });
+  });
+
   it('allows generic agent loops to run up to 100 steps', () => {
     expect(normalizeAgentMaxSteps(100)).toBe(100);
     expect(normalizeAgentMaxSteps(101)).toBe(100);
@@ -145,9 +238,10 @@ describe('@cawstudios/agent-gantry', () => {
         generateJson: async () => {
           callCount += 1;
           return {
-            output: callCount === 1
-              ? { action: 'call_tool', toolName: 'lookup', input: { q: 'x' } }
-              : { action: 'final', output: { status: 'ok' } },
+            output:
+              callCount === 1
+                ? { action: 'call_tool', toolName: 'lookup', input: { q: 'x' } }
+                : { action: 'final', output: { status: 'ok' } },
             modelUsage: {
               provider: 'anthropic',
               model: 'claude-test',
@@ -168,10 +262,12 @@ describe('@cawstudios/agent-gantry', () => {
       taskType: 'task.agent.usage',
       instructions: 'Use the tool, then finish.',
       input: {},
-      tools: [{
-        name: 'lookup',
-        execute: async () => ({ status: 'ok' }),
-      }],
+      tools: [
+        {
+          name: 'lookup',
+          execute: async () => ({ status: 'ok' }),
+        },
+      ],
       maxSteps: 2,
       correlationId: 'agent-usage-1',
     });
@@ -191,6 +287,253 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
+  it('passes generic observability context to model providers and tools', async () => {
+    const previousTracing = process.env.LANGFUSE_TRACING_ENABLED;
+    process.env.LANGFUSE_TRACING_ENABLED = 'false';
+    const seen: Record<string, unknown>[] = [];
+    const observability = {
+      flowId: 'flow-1',
+      flowType: 'chat',
+      flowStage: 'turn',
+      sessionId: 'session-1',
+      costCategory: 'agent',
+      costStage: 'agent.chat_turn',
+      metadata: { request_id: 'request-1' },
+    };
+    let callCount = 0;
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async (input) => {
+          seen.push({ kind: 'model', observability: input.observability });
+          callCount += 1;
+          return callCount === 1
+            ? { action: 'call_tool', toolName: 'lookup', input: {} }
+            : { action: 'final', output: { status: 'ok' } };
+        },
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.observed',
+      instructions: 'Use the tool, then finish.',
+      input: {},
+      observability,
+      tools: [
+        {
+          name: 'lookup',
+          execute: async (_input, context) => {
+            seen.push({ kind: 'tool', observability: context.observability });
+            return { status: 'ok' };
+          },
+        },
+      ],
+      maxSteps: 2,
+    });
+    if (previousTracing === undefined) {
+      delete process.env.LANGFUSE_TRACING_ENABLED;
+    } else {
+      process.env.LANGFUSE_TRACING_ENABLED = previousTracing;
+    }
+
+    expect(result?.status).toBe('completed');
+    expect(seen).toHaveLength(3);
+    expect(seen.every((entry) => Boolean(entry.observability))).toBe(true);
+    expect(seen[0]?.observability).toMatchObject({
+      ...observability,
+      metadata: {
+        request_id: 'request-1',
+        agent_step: 1,
+        agent_step_kind: 'model',
+        agent_step_detail: 'primary',
+      },
+    });
+    expect(seen[1]?.observability).toMatchObject({
+      ...observability,
+      metadata: {
+        request_id: 'request-1',
+        agent_step: 1,
+        agent_step_kind: 'tool',
+        agent_step_detail: 'lookup',
+      },
+    });
+  });
+
+  it('does not rerun model work when Langfuse update fails', async () => {
+    const previousTracing = process.env.LANGFUSE_TRACING_ENABLED;
+    process.env.LANGFUSE_TRACING_ENABLED = 'true';
+    langfuseTracingMock.state.throwOnUpdate = true;
+    langfuseTracingMock.state.updates = [];
+    let callCount = 0;
+    try {
+      const result = await observeGantryModelCall(
+        {
+          operationName: 'anthropic.generateJson',
+          taskType: 'task.no-rerun',
+          modelCallType: 'agent_step',
+          provider: 'anthropic',
+          model: 'claude-test',
+          metadata: { correlation_id: 'corr-raw' },
+          observability: {
+            flowId: 'flow-1',
+            flowType: 'chat',
+            flowStage: 'turn',
+            costCategory: 'agent',
+            costStage: 'agent.chat_turn',
+            metadata: { redact_correlation_id: true },
+          },
+        },
+        async () => {
+          callCount += 1;
+          return { ok: true };
+        },
+      );
+
+      expect(result).toEqual({ ok: true });
+      expect(callCount).toBe(1);
+      expect(langfuseTracingMock.state.updates[0]?.metadata).toMatchObject({
+        session_id: 'flow-1',
+        correlation_id_hash: expect.any(String),
+        correlation_id_redacted: true,
+      });
+      expect(JSON.stringify(langfuseTracingMock.state.updates)).not.toContain(
+        'corr-raw',
+      );
+    } finally {
+      langfuseTracingMock.state.throwOnUpdate = false;
+      if (previousTracing === undefined) {
+        delete process.env.LANGFUSE_TRACING_ENABLED;
+      } else {
+        process.env.LANGFUSE_TRACING_ENABLED = previousTracing;
+      }
+    }
+  });
+
+  it('uses the business stage as the generation name and attaches a remote parent', async () => {
+    const previousTracing = process.env.LANGFUSE_TRACING_ENABLED;
+    process.env.LANGFUSE_TRACING_ENABLED = 'true';
+    langfuseTracingMock.state.starts = [];
+    langfuseTracingMock.state.updates = [];
+    langfuseTracingMock.state.traceAttributes = [];
+    langfuseTracingMock.propagateAttributes.mockClear();
+    try {
+      await observeGantryModelCall(
+        {
+          operationName: 'normalizeFromDetail',
+          modelCallType: 'generation',
+          provider: 'anthropic',
+          model: 'claude-test',
+          parentSpanContext: {
+            traceId: 'a'.repeat(32),
+            spanId: 'b'.repeat(16),
+          },
+          observability: {
+            sessionId: 'scrape_run:run-1',
+            costCategory: 'scrape',
+            costStage: 'scrape.normalization_full',
+          },
+        },
+        async () => ({ ok: true }),
+      );
+
+      expect(langfuseTracingMock.state.starts).toEqual([
+        {
+          name: 'scrape.normalization_full',
+          options: {
+            asType: 'generation',
+            parentSpanContext: {
+              traceId: 'a'.repeat(32),
+              spanId: 'b'.repeat(16),
+              traceFlags: 1,
+              isRemote: true,
+            },
+          },
+        },
+      ]);
+      expect(langfuseTracingMock.state.updates[0]?.metadata).toMatchObject({
+        cost_stage: 'scrape.normalization_full',
+        operation_name: 'normalizeFromDetail',
+      });
+      expect(langfuseTracingMock.state.updates[0]?.metadata).not.toHaveProperty(
+        'status',
+      );
+      expect(langfuseTracingMock.state.updates[1]?.metadata).toMatchObject({
+        status: 'success',
+      });
+      expect(langfuseTracingMock.propagateAttributes).toHaveBeenCalledWith(
+        expect.not.objectContaining({ traceName: expect.anything() }),
+        expect.any(Function),
+      );
+      expect(langfuseTracingMock.state.traceAttributes[0]).not.toHaveProperty(
+        'langfuse.trace.name',
+      );
+    } finally {
+      if (previousTracing === undefined) {
+        delete process.env.LANGFUSE_TRACING_ENABLED;
+      } else {
+        process.env.LANGFUSE_TRACING_ENABLED = previousTracing;
+      }
+    }
+  });
+
+  it('does not rename a trace when an active parent span already exists', async () => {
+    const previousTracing = process.env.LANGFUSE_TRACING_ENABLED;
+    process.env.LANGFUSE_TRACING_ENABLED = 'true';
+    langfuseTracingMock.state.activeSpanId = 'c'.repeat(16);
+    langfuseTracingMock.propagateAttributes.mockClear();
+    try {
+      await observeGantryModelCall(
+        {
+          operationName: 'deepAnalysisSection',
+          modelCallType: 'generation',
+          provider: 'gemini',
+          model: 'gemini-test',
+          observability: {
+            sessionId: 'deep_analysis:request-1',
+            costCategory: 'deep_analysis',
+            costStage: 'deep_analysis.section',
+          },
+        },
+        async () => ({ ok: true }),
+      );
+
+      expect(langfuseTracingMock.propagateAttributes).toHaveBeenCalledWith(
+        expect.not.objectContaining({ traceName: expect.anything() }),
+        expect.any(Function),
+      );
+    } finally {
+      langfuseTracingMock.state.activeSpanId = null;
+      if (previousTracing === undefined)
+        delete process.env.LANGFUSE_TRACING_ENABLED;
+      else process.env.LANGFUSE_TRACING_ENABLED = previousTracing;
+    }
+  });
+
+  it('uses agent.structured_model only when no business stage exists', async () => {
+    const previousTracing = process.env.LANGFUSE_TRACING_ENABLED;
+    process.env.LANGFUSE_TRACING_ENABLED = 'true';
+    langfuseTracingMock.state.starts = [];
+    try {
+      await observeGantryModelCall(
+        {
+          operationName: 'generic.generate',
+          modelCallType: 'generation',
+          provider: 'anthropic',
+          model: 'claude-test',
+        },
+        async () => ({ ok: true }),
+      );
+      expect(langfuseTracingMock.state.starts[0]?.name).toBe(
+        'agent.structured_model',
+      );
+    } finally {
+      if (previousTracing === undefined) {
+        delete process.env.LANGFUSE_TRACING_ENABLED;
+      } else {
+        process.env.LANGFUSE_TRACING_ENABLED = previousTracing;
+      }
+    }
+  });
+
   it('includes tool timeout recovery model usage in generic agent task usage', async () => {
     let callCount = 0;
     const runner = createStructuredModelTaskRunner({
@@ -198,9 +541,10 @@ describe('@cawstudios/agent-gantry', () => {
         generateJson: async () => {
           callCount += 1;
           return {
-            output: callCount === 1
-              ? { action: 'call_tool', toolName: 'slow', input: {} }
-              : { action: 'final', output: { status: 'recovered' } },
+            output:
+              callCount === 1
+                ? { action: 'call_tool', toolName: 'slow', input: {} }
+                : { action: 'final', output: { status: 'recovered' } },
             modelUsage: {
               provider: 'anthropic',
               model: 'claude-test',
@@ -218,12 +562,14 @@ describe('@cawstudios/agent-gantry', () => {
       taskType: 'task.agent.recovery-usage',
       instructions: 'Recover from tool timeout.',
       input: {},
-      tools: [{
-        name: 'slow',
-        execute: async () => {
-          throw new Error('agent_tool_timeout:slow');
+      tools: [
+        {
+          name: 'slow',
+          execute: async () => {
+            throw new Error('agent_tool_timeout:slow');
+          },
         },
-      }],
+      ],
       recoverFromToolError: async () => ({ attempt: 'tool_error_recovery' }),
       maxSteps: 1,
       correlationId: 'agent-recovery-usage-1',
@@ -616,7 +962,8 @@ describe('@cawstudios/agent-gantry', () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       taskModels: { 'task.test': 'claude-task' },
       fetchImpl: async (_url, init) => {
@@ -651,7 +998,7 @@ describe('@cawstudios/agent-gantry', () => {
         correlationId: 'corr-1',
         inputTokens: 12,
         outputTokens: 3,
-        totalTokens: 15,
+        totalTokens: 17,
         cachedTokens: 2,
         usageSource: 'provider',
       },
@@ -667,11 +1014,12 @@ describe('@cawstudios/agent-gantry', () => {
     expect(JSON.stringify(requestBody)).not.toContain('test-key');
   });
 
-  it('adds Anthropic prompt cache control only to the stable prefix block', async () => {
+  it('forwards the cacheable prefix as stable Gantry system content', async () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       fetchImpl: async (_url, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -705,6 +1053,7 @@ describe('@cawstudios/agent-gantry', () => {
     ).resolves.toMatchObject({
       output: { status: 'completed' },
       modelUsage: {
+        totalTokens: 205,
         cacheCreationInputTokens: 40,
         cacheReadInputTokens: 60,
         promptCacheTtl: '1h',
@@ -712,29 +1061,38 @@ describe('@cawstudios/agent-gantry', () => {
       },
     });
 
-    const messages = requestBody?.messages as Array<{ content?: unknown }> | undefined;
+    const messages = requestBody?.messages as
+      | Array<{ content?: unknown }>
+      | undefined;
     const content = messages?.[0]?.content as Array<Record<string, unknown>>;
-    expect(String(requestBody?.system)).not.toContain('commercial financial terms');
-    expect(content).toHaveLength(2);
+    expect(requestBody?.system).toEqual([
+      {
+        type: 'text',
+        text: 'stable tender evidence scope',
+        cache_control: { type: 'ephemeral', ttl: '1h' },
+      },
+    ]);
+    expect(content).toHaveLength(1);
     expect(content[0]).toMatchObject({
       type: 'text',
-      text: 'stable tender evidence scope',
-      cache_control: { type: 'ephemeral', ttl: '1h' },
     });
-    expect(JSON.stringify(content[0])).not.toContain('commercial_financial_terms');
-    expect(JSON.stringify(content[0])).not.toContain('dynamic-correlation');
-    expect(content[1]).toMatchObject({ type: 'text' });
-    expect(JSON.stringify(content[1])).toContain('Return JSON for commercial financial terms.');
-    expect(JSON.stringify(content[1])).toContain('commercial_financial_terms');
-    expect(JSON.stringify(content[1])).toContain('dynamic-correlation');
-    expect(content[1]).not.toHaveProperty('cache_control');
+    expect(JSON.stringify(content[0])).not.toContain(
+      'stable tender evidence scope',
+    );
+    expect(JSON.stringify(content[0])).toContain(
+      'Return JSON for commercial financial terms.',
+    );
+    expect(JSON.stringify(content[0])).toContain('commercial_financial_terms');
+    expect(JSON.stringify(content[0])).toContain('dynamic-correlation');
+    expect(content[0]).not.toHaveProperty('cache_control');
   });
 
   it('keeps the existing Anthropic single-block prompt shape when prompt cache is disabled', async () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       fetchImpl: async (_url, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -757,11 +1115,15 @@ describe('@cawstudios/agent-gantry', () => {
       }),
     ).resolves.toMatchObject({ output: { status: 'completed' } });
 
-    const messages = requestBody?.messages as Array<{ content?: unknown }> | undefined;
+    const messages = requestBody?.messages as
+      | Array<{ content?: unknown }>
+      | undefined;
     const content = messages?.[0]?.content as Array<Record<string, unknown>>;
     expect(content).toHaveLength(1);
     expect(content[0]?.cache_control).toBeUndefined();
-    expect(JSON.stringify(content)).not.toContain('stable tender evidence scope');
+    expect(JSON.stringify(content)).not.toContain(
+      'stable tender evidence scope',
+    );
   });
 
   it.each([
@@ -774,7 +1136,8 @@ describe('@cawstudios/agent-gantry', () => {
   ])('parses Anthropic text content as %s', async (_label, text) => {
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       fetchImpl: async () =>
         new Response(
@@ -797,7 +1160,8 @@ describe('@cawstudios/agent-gantry', () => {
   it('rejects malformed Anthropic JSON text content', async () => {
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       maxRetries: 1,
       fetchImpl: async () =>
@@ -823,7 +1187,8 @@ describe('@cawstudios/agent-gantry', () => {
   it('rejects non-object Anthropic JSON text content', async () => {
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       maxRetries: 1,
       fetchImpl: async () =>
@@ -861,7 +1226,8 @@ describe('@cawstudios/agent-gantry', () => {
     });
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       maxRetries: 2,
       retryBaseDelayMs: 0,
@@ -889,7 +1255,8 @@ describe('@cawstudios/agent-gantry', () => {
     );
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       maxRetries: 3,
       retryBaseDelayMs: 0,
@@ -903,14 +1270,15 @@ describe('@cawstudios/agent-gantry', () => {
         instructions: 'Return JSON.',
         input: { value: 1 },
       }),
-    ).rejects.toThrow('Anthropic task.bad_request failed after 3 attempts');
+    ).rejects.toThrow('Anthropic task.bad_request failed after 1 attempts');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('estimates generic Anthropic token usage when provider usage is missing', async () => {
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       fetchImpl: async () =>
         new Response(
@@ -942,7 +1310,8 @@ describe('@cawstudios/agent-gantry', () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-default',
       maxTokens: 4096,
       taskPolicies: {
@@ -979,16 +1348,17 @@ describe('@cawstudios/agent-gantry', () => {
     expect(requestBody).toMatchObject({
       model: 'claude-sonnet-task',
       max_tokens: 1234,
-      thinking: { type: 'adaptive' },
       output_config: { effort: 'low' },
     });
+    expect(requestBody).not.toHaveProperty('thinking');
   });
 
   it('omits Anthropic effort fields when a task policy sets effort off', async () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-default',
       taskPolicies: {
         'task.cheap': {
@@ -1033,7 +1403,8 @@ describe('@cawstudios/agent-gantry', () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
-      apiKey: 'test-key',
+      gantryBaseUrl: 'http://gantry.test',
+      gantryApiKey: 'test-key',
       defaultModel: 'claude-test',
       fetchImpl: async (_url, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -1055,7 +1426,7 @@ describe('@cawstudios/agent-gantry', () => {
           {
             label: 'captcha',
             mimeType: 'image/png',
-            base64: 'base64-image',
+            base64: 'aGVsbG8=',
             purpose: 'captcha_ocr',
           },
         ],
@@ -1069,7 +1440,7 @@ describe('@cawstudios/agent-gantry', () => {
       source: {
         type: 'base64',
         media_type: 'image/png',
-        data: 'base64-image',
+        data: 'aGVsbG8=',
       },
     });
   });
