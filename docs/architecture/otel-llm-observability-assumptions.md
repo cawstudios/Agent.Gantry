@@ -99,6 +99,8 @@ _(Backfilled by the orchestrator — stage launched before the ledger rule; rows
 | E.29 | Hidden-block preservation must be race-free | Branch autoreview r14 (P2): unconditional appends could revert a concurrent observability change (read-merge-append) | When the hidden block exists and the caller omits `expectedRevision`, the append binds to the merged-from head revision (documented 409 + retry) | Silent lost-update of tracing config | fixed |
 | E.30 | Malformed message elements must not orphan a recording span | Branch autoreview r14 (P2): `messages: [null]` threw after `startSpan`; outer catch never ended the span | Element type guard + outer catch ends any started span | Unfinished, never-exported spans on malformed traced requests | fixed |
 
+| E.31 | The CAS must also cover the first-enable window | Branch autoreview r15 (P2): a head WITHOUT the block left the append unconditional, so a concurrent first enable could be erased | API appends bind to whatever head they read (409 + retry is the documented flow) | First tracing enable silently reverted by a racing API write | fixed |
+
 ## Stage D — Gateway wiring + integration tests
 
 | # | Assumption | Missing info that forced it | Choice taken | Impact if wrong | Validated |
