@@ -3414,4 +3414,16 @@ conversations:
       restartRequired: ['agents', 'memory'],
     });
   });
+
+  it('classifies observability tracing changes as restart-required', () => {
+    const before = createDefaultRuntimeSettings();
+    const after = createDefaultRuntimeSettings();
+    after.observability.tracing.enabled = true;
+    after.observability.tracing.endpoint = 'https://otlp.example.test/traces';
+
+    expect(classifySettingsChanges(before, after)).toEqual({
+      liveApplied: [],
+      restartRequired: ['observability'],
+    });
+  });
 });

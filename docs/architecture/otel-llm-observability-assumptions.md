@@ -64,6 +64,9 @@ _(Backfilled by the orchestrator — stage launched before the ledger rule; rows
 | E.5 | Header secret must resolve through the runtime env loader | Branch autoreview r3 (P1): managed services pass a minimal process env; `GANTRY_HOME/.env` secrets load via `runtimeEnvValueDynamic` | startup reads the header secret through the loader (process env still wins) | Authenticated exporters 401 under launchd/systemd — feature dead on the documented config path | fixed |
 | E.6 | Registered runtime secrets must mask in `gantry config list/get` | Branch autoreview r3 (P1): the name-regex sensitivity check misses `…_HEADERS` | `isSensitiveKey` treats every `runtime-secret`-classified key as sensitive | OTLP Basic-auth credentials printed in plaintext by ordinary CLI use | fixed |
 
+| E.7 | Operators must be told observability edits need a restart | Branch autoreview r4 (P2): `classifySettingsChanges()` didn't compare the new block | `observability` diff → `restartRequired`; focused test added | Silent stale-tracer confusion after live settings edits | fixed |
+| E.8 | C.8 (continuation rotation behind the output chain) and E.3's ≤3-byte pathological degradation re-raised | Reviewer re-flags real but accepted limits | Held as documented decisions — both carry explicit revisit paths | — | ok |
+
 ## Stage D — Gateway wiring + integration tests
 
 | # | Assumption | Missing info that forced it | Choice taken | Impact if wrong | Validated |

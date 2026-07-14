@@ -249,6 +249,10 @@ export function classifySettingsChanges(
   if (!jsonEqual(before.runtime, after.runtime)) {
     restartRequired.push('runtime');
   }
+  // Tracing initializes once at boot from authoritative settings.
+  if (!jsonEqual(before.observability, after.observability)) {
+    restartRequired.push('observability');
+  }
 
   return {
     liveApplied: [...new Set(liveApplied)].sort(),
