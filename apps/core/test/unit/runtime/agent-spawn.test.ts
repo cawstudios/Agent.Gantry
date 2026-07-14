@@ -3616,6 +3616,7 @@ describe('agent-spawn timeout behavior', () => {
       undefined,
       {
         purpose: 'model_runtime',
+        runId: expect.stringMatching(/^credential-run:/),
         runContext: expect.objectContaining({
           chatJid: 'test@g.us',
         }),

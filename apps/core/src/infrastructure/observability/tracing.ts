@@ -167,6 +167,7 @@ export function startTurnSpan(input: {
   threadId?: string;
   jobId?: string;
   userId?: string;
+  continuation?: boolean;
 }): TurnSpanHandle {
   const current = state;
   if (!current) return NOOP_TURN_SPAN;
@@ -182,6 +183,7 @@ export function startTurnSpan(input: {
         'gantry.run_id': input.runId,
         ...(input.jobId ? { 'gantry.job_id': input.jobId } : {}),
         ...(input.threadId ? { 'gantry.thread_id': input.threadId } : {}),
+        ...(input.continuation ? { 'gantry.continuation': true } : {}),
       },
     });
     turnSpans.set(input.runId, span);

@@ -17,6 +17,7 @@ import {
 } from '../config/index.js';
 import { resolveAgentAccessPolicy } from '../config/profiles.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { createSpawnTurnTracker } from '../infrastructure/observability/spawn-turn-tracker.js';
 import { ConversationRoute } from '../domain/types.js';
 import * as host from './agent-spawn-host.js';
 import {
@@ -227,66 +228,7 @@ export async function spawnAgent(
         'No LLM execution adapter configured. Runtime bootstrap must provide an AgentExecutionAdapterRegistry.',
     };
   }
-  const hostCredentials = await hostStartup.measureAsync(
-    'credentialProjectionMs',
-    () =>
-      credentials(agentIdentifier, options?.credentialBroker, {
-        purpose: 'model_runtime',
-        runContext: input,
-        modelRouteId: resolvedModel.value.modelEntry.modelRoute.id,
-      }),
-  );
-  let preparedExecution: Awaited<ReturnType<typeof executionAdapter.prepare>>;
-  try {
-    preparedExecution = await hostStartup.measureAsync('adapterPrepareMs', () =>
-      executionAdapter.prepare({
-        group,
-        input: { ...input, permissionMode: input.permissionMode ?? 'ask' },
-        hostRuntime,
-        groupDir,
-        effectiveModel,
-        effectiveModelEntry: resolvedModel.value.modelEntry,
-        modelCredentialProjection: {
-          env: hostCredentials.env,
-          credentialProviders: hostCredentials.credentialProviders,
-          brokerProfile: hostCredentials.brokerProfile,
-          brokerApplied: hostCredentials.brokerApplied,
-          ...(hostCredentials.brokerAuthMode
-            ? { brokerAuthMode: hostCredentials.brokerAuthMode }
-            : {}),
-          proxy: hostCredentials.proxy,
-        },
-        runtimeStorage: {
-          postgresUrl: STORAGE_POSTGRES_URL,
-          postgresUrlEnv: STORAGE_POSTGRES_URL_ENV,
-          postgresSchema: STORAGE_POSTGRES_SCHEMA,
-        },
-        browserIpcEnabled,
-        packageRootFromRunner: (runnerPath) =>
-          resolvePackageRootFromSourceDir(path.dirname(runnerPath)),
-        options,
-      }),
-    );
-  } catch (err) {
-    await hostCredentials.revoke?.().catch((revokeErr) => {
-      logger.warn(
-        { err: revokeErr },
-        'Failed to revoke model gateway token after LLM runtime materialization failure',
-      );
-    });
-    const errorText = err instanceof Error ? err.message : String(err);
-    const generatedRuntimeError = formatGeneratedRuntimePathPermissionError({
-      runnerLabel: 'LLM runtime materialization',
-      errorText,
-    });
-    return {
-      status: 'error',
-      result: null,
-      error:
-        generatedRuntimeError ??
-        `LLM runtime materialization failed: ${errorText}`,
-    };
-  }
+  const turnTracker = createSpawnTurnTracker(group.name, input, onOutput);
   let mcpConfigPath: string | undefined;
   let sandboxConfigPath: string | undefined;
   let runnerTempDir: string | undefined;
@@ -298,7 +240,67 @@ export async function spawnAgent(
     appId: input.appId || 'default',
     agentId: input.agentId,
   });
+  let hostCredentials: Awaited<ReturnType<typeof credentials>> | undefined;
+  let preparedExecution:
+    | Awaited<ReturnType<typeof executionAdapter.prepare>>
+    | undefined;
+  let output: AgentOutput | undefined;
   try {
+    const projectedCredentials = await hostStartup.measureAsync(
+      'credentialProjectionMs',
+      () =>
+        credentials(agentIdentifier, options?.credentialBroker, {
+          purpose: 'model_runtime',
+          runId: turnTracker.correlationId as never,
+          runContext: input,
+          modelRouteId: resolvedModel.value.modelEntry.modelRoute.id,
+        }),
+    );
+    hostCredentials = projectedCredentials;
+    try {
+      preparedExecution = await hostStartup.measureAsync(
+        'adapterPrepareMs',
+        () =>
+          executionAdapter.prepare({
+            group,
+            input: { ...input, permissionMode: input.permissionMode ?? 'ask' },
+            hostRuntime,
+            groupDir,
+            effectiveModel,
+            effectiveModelEntry: resolvedModel.value.modelEntry,
+            modelCredentialProjection: {
+              env: projectedCredentials.env,
+              credentialProviders: projectedCredentials.credentialProviders,
+              brokerProfile: projectedCredentials.brokerProfile,
+              brokerApplied: projectedCredentials.brokerApplied,
+              ...(projectedCredentials.brokerAuthMode
+                ? { brokerAuthMode: projectedCredentials.brokerAuthMode }
+                : {}),
+              proxy: projectedCredentials.proxy,
+            },
+            runtimeStorage: {
+              postgresUrl: STORAGE_POSTGRES_URL,
+              postgresUrlEnv: STORAGE_POSTGRES_URL_ENV,
+              postgresSchema: STORAGE_POSTGRES_SCHEMA,
+            },
+            browserIpcEnabled,
+            packageRootFromRunner: (runnerPath) =>
+              resolvePackageRootFromSourceDir(path.dirname(runnerPath)),
+            options,
+          }),
+      );
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      const generatedRuntimeError = formatGeneratedRuntimePathPermissionError({
+        runnerLabel: 'LLM runtime materialization',
+        errorText,
+      });
+      const failure =
+        generatedRuntimeError ??
+        `LLM runtime materialization failed: ${errorText}`;
+      output = { status: 'error', result: null, error: failure };
+      return output;
+    }
     const command = process.execPath;
     const args = preparedExecution.runnerArgs;
     const ipcInputDir = getContinuationInputDir(
@@ -381,7 +383,7 @@ export async function spawnAgent(
       },
     );
     const upstreamProxyUrl =
-      hostCredentials.proxy?.https || hostCredentials.proxy?.http;
+      projectedCredentials.proxy?.https || projectedCredentials.proxy?.http;
     const runnerInputPatch = preparedExecution.runnerInputPatch ?? {};
     runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
     const checkpointerNetworkHost = databaseNetworkHostFromUrl(
@@ -433,7 +435,7 @@ export async function spawnAgent(
           ? {
               upstreamProxy: {
                 url: upstreamProxyUrl,
-                provider: hostCredentials.brokerProfile,
+                provider: projectedCredentials.brokerProfile,
               },
             }
           : {}),
@@ -450,7 +452,7 @@ export async function spawnAgent(
           proxyUrl: egressGateway.proxyUrl,
           caBundlePath:
             runnerInputPatch.modelCredentialEnv?.NODE_EXTRA_CA_CERTS ??
-            hostCredentials.env.NODE_EXTRA_CA_CERTS,
+            projectedCredentials.env.NODE_EXTRA_CA_CERTS,
           noProxy: {
             NO_PROXY: process.env.NO_PROXY,
             no_proxy: process.env.no_proxy,
@@ -588,8 +590,8 @@ export async function spawnAgent(
       ipcInputDir,
       sandboxProviderId: options?.runnerSandboxProvider?.id ?? 'direct',
       sandboxEnforcing: options?.runnerSandboxProvider?.enforcing === true,
-      brokerProfile: hostCredentials.brokerProfile,
-      brokerApplied: hostCredentials.brokerApplied,
+      brokerProfile: projectedCredentials.brokerProfile,
+      brokerApplied: projectedCredentials.brokerApplied,
       mcpServerNames: allMcpCapabilities.map((capability) => capability.name),
       browserProfileName,
       preparedRuntimeDetails: preparedExecution.runtimeDetails,
@@ -725,18 +727,18 @@ export async function spawnAgent(
         sandboxWarmTemplate,
         egressProxyConfigured: Boolean(egressGateway?.proxyUrl),
         upstreamProxyConfigured: Boolean(upstreamProxyUrl),
-        hostCredentials,
+        hostCredentials: projectedCredentials,
         compiledSystemPrompt,
       },
     });
-    const output = await executeRunnerProcess({
+    output = await executeRunnerProcess({
       group,
       input: runnerInput,
       command,
       args,
       env,
       onProcess,
-      onOutput,
+      onOutput: turnTracker.onOutput,
       options,
       runnerLabel: 'Host agent',
       processName,
@@ -772,6 +774,7 @@ export async function spawnAgent(
     });
     return output;
   } finally {
+    turnTracker.finish(output);
     cleanupRunnerTempDir(runnerTempDir, logger.warn.bind(logger));
     if (browserIpcEnabled) {
       revokeBrowserIpcAuthorization({
@@ -783,15 +786,17 @@ export async function spawnAgent(
     cleanupRunnerMcpConfigFile(mcpConfigPath, logger.warn.bind(logger));
     cleanupRunnerMcpConfigFile(sandboxConfigPath, logger.warn.bind(logger));
     if (egressGateway) await closeEgressGateway(egressGateway);
-    await hostCredentials.revoke?.();
+    await hostCredentials?.revoke?.().catch((revokeErr) => {
+      logger.warn({ err: revokeErr }, 'Model gateway token revoke failed');
+    });
     try {
-      preparedExecution.cleanup();
+      preparedExecution?.cleanup();
     } catch (err) {
       logger.warn(
         {
           err,
           group: group.name,
-          executionProviderId: preparedExecution.providerId,
+          executionProviderId: preparedExecution?.providerId,
         },
         'Failed to clean prepared execution runtime',
       );
