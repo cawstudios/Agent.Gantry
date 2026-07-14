@@ -98,7 +98,6 @@ Important constraints:
 - Jobs must use canonical `execution_context` and `notification_routes` for runtime execution/delivery targeting; do not add or mirror legacy job-notification alias fields.
 - Postgres `pgcrypto` must be installed in `public` schema for shared test/runtime databases; schema-scoped extension installs break `digest()` lookups under per-schema `search_path`.
 - Postgres `settings_revisions` is the durable desired-state authority in managed workstation/personal and fleet modes. `settings.yaml` remains the canonical human-readable copy and bootstrap/import/export surface; managed writes must append a revision before syncing the file.
-- Setup/onboarding desired-state writes can be multi-step; when the final config write loses an optimistic-concurrency race on `settings_revisions`, reload the latest desired state and retry once instead of failing setup immediately.
 - Deployment entrypoints run the explicit Postgres migrator with `GANTRY_DATABASE_URL` before starting runtime; runtime only asserts migrations are current and must not apply them itself.
 - When using Drizzle Postgres upserts, do not assume `onConflictDoUpdate.target` supports SQL expressions; expression-index identities require explicit insert + unique-violation update flows.
 
