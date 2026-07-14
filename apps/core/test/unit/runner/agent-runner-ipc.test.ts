@@ -364,6 +364,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'yolo-mode-policy.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/runtime-env-command.ts'),
+    path.join(sharedDir, 'runtime-env-command.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/sensitive-material.ts'),
     path.join(sharedDir, 'sensitive-material.ts'),
   );
