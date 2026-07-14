@@ -39,3 +39,4 @@ precedence when they conflict with broader architecture notes.
 - [Deployment profiles](./deployment-profiles.md)
 - [Current verification commands](./current-verification-commands.md)
 - [Operator trust and runtime honesty](./operator-trust-runtime-honesty.md)
+- [Web UI delivery phases](./web-ui/README.md)
