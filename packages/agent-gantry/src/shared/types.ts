@@ -134,13 +134,6 @@ export interface GantryAgentTaskInput {
     | GantryAgentTaskToolErrorRecoveryResult
     | null
     | undefined;
-  readonly normalizeUnsupportedModelAction?: (
-    input: GantryAgentTaskUnsupportedModelActionNormalizationRequest,
-  ) =>
-    | Promise<Record<string, unknown> | null | undefined>
-    | Record<string, unknown>
-    | null
-    | undefined;
   readonly validateFinal?: (
     input: GantryAgentTaskFinalValidationRequest,
   ) =>
@@ -304,22 +297,6 @@ export interface GantryAgentTaskToolErrorRecoveryResult {
   readonly instructions?: string | null;
   readonly tools?: readonly GantryAgentTool[];
   readonly attempt?: 'tool_error_recovery';
-}
-
-export interface GantryAgentTaskUnsupportedModelActionNormalizationRequest {
-  readonly taskType: string;
-  readonly correlationId?: string | null;
-  readonly step: number;
-  readonly state: Record<string, unknown>;
-  readonly rawAction: Record<string, unknown>;
-  readonly parsedAction: {
-    readonly action: string;
-    readonly toolName?: string | null;
-    readonly input: Record<string, unknown>;
-    readonly output: Record<string, unknown>;
-    readonly reason?: string | null;
-  };
-  readonly unsupportedAction: string;
 }
 
 export interface GantryAgentTaskStep {
@@ -544,6 +521,8 @@ export type StructuredJsonModelProviderResult =
   | {
       readonly output: Record<string, unknown> | string;
       readonly modelUsage?: GantryStructuredModelUsage | null;
+      readonly rawText?: string | null;
+      readonly stopReason?: string | null;
     };
 
 export interface GantryDelegatedAgentTaskInput {

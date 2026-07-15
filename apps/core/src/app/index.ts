@@ -55,6 +55,10 @@ import { getOldestWaitingLiveAdmissionSeconds } from './bootstrap/runtime-servic
 import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 import { defaultHostnameLookup } from '../infrastructure/network/hostname-lookup.js';
 import { createRepositoryRuntimeSecretProvider } from '../adapters/credentials/repository-runtime-secret-provider.js';
+import {
+  initializeGantryLangfuseTracingFromEnv,
+  shutdownGantryLangfuseTracing,
+} from '@cawstudios/agent-gantry';
 
 export { escapeXml, formatMessages } from '../messaging/router.js';
 export {
@@ -70,6 +74,7 @@ export interface StartGantryRuntimeOptions {
 export async function startGantryRuntime(
   options: StartGantryRuntimeOptions = {},
 ): Promise<void> {
+  await initializeGantryLangfuseTracingFromEnv(process.env);
   const mcpHostnameLookup = options.mcpHostnameLookup ?? defaultHostnameLookup;
 
   // Resolve the deployment-owned process role before preflight. Fleet workers
@@ -238,6 +243,7 @@ export async function startGantryRuntime(
     },
     closeBrowserToolBackends: async () =>
       (await loadBrowserToolModule()).closeBrowserToolBackends(),
+    closeLangfuseTracing: shutdownGantryLangfuseTracing,
   });
 
   // The standby acquirer runs in the background; every live worker polls and
@@ -404,6 +410,7 @@ export async function startGantryRuntime(
   } catch (err) {
     await liveRecoveryCoordinatorLeaseManager.stop();
     await fleetSubsystems?.stop();
+    await shutdownGantryLangfuseTracing();
     throw err;
   }
 }

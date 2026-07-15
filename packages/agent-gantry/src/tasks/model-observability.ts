@@ -1,10 +1,56 @@
 import { createHash } from 'node:crypto';
 import {
+  getActiveSpanId,
+  LangfuseOtelSpanAttributes,
   propagateAttributes,
+  setLangfuseTracerProvider,
   startActiveObservation,
   type LangfuseObservation,
   type LangfuseObservationType,
 } from '@langfuse/tracing';
+
+let langfuseTracerProvider: { shutdown(): Promise<void> } | null = null;
+
+export async function initializeGantryLangfuseTracingFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (langfuseTracerProvider) return true;
+  if (!isLangfuseEnabled(env)) return false;
+  const publicKey = env.LANGFUSE_PUBLIC_KEY?.trim();
+  const secretKey = env.LANGFUSE_SECRET_KEY?.trim();
+  if (!publicKey || !secretKey) return false;
+  const [{ LangfuseSpanProcessor }, { NodeTracerProvider }] = await Promise.all(
+    [import('@langfuse/otel'), import('@opentelemetry/sdk-trace-node')],
+  );
+  const processor = new LangfuseSpanProcessor({
+    publicKey,
+    secretKey,
+    baseUrl: normalizeLangfuseBaseUrl(env.LANGFUSE_BASE_URL?.trim() || undefined),
+    environment: env.LANGFUSE_TRACING_ENVIRONMENT?.trim() || env.NODE_ENV,
+    release: env.LANGFUSE_RELEASE?.trim() || undefined,
+    flushAt: readPositiveInteger(env.LANGFUSE_FLUSH_AT),
+    flushInterval: readPositiveInteger(env.LANGFUSE_FLUSH_INTERVAL),
+    timeout: readPositiveInteger(env.LANGFUSE_TIMEOUT),
+  });
+  const provider = new NodeTracerProvider({ spanProcessors: [processor] });
+  provider.register();
+  langfuseTracerProvider = provider;
+  setLangfuseTracerProvider(provider);
+  return true;
+}
+
+export async function shutdownGantryLangfuseTracing(): Promise<void> {
+  const provider = langfuseTracerProvider;
+  if (!provider) return;
+  langfuseTracerProvider = null;
+  setLangfuseTracerProvider(null);
+  await provider.shutdown();
+}
+
+export interface GantryParentSpanContext {
+  readonly traceId: string;
+  readonly spanId: string;
+}
 
 export interface GantryModelObservationInput<TOutput> {
   readonly operationName: string;
@@ -13,6 +59,8 @@ export interface GantryModelObservationInput<TOutput> {
   readonly provider: string;
   readonly model: string;
   readonly attempt?: number;
+  readonly costStage?: string;
+  readonly parentSpanContext?: GantryParentSpanContext;
   readonly input?: unknown;
   readonly output?: unknown | ((result: TOutput) => unknown);
   readonly usageDetails?: Record<string, number> | ((result: TOutput) => Record<string, number> | undefined);
@@ -37,12 +85,13 @@ export async function observeGantryModelCall<TOutput>(
   return observeGantryOperation({
     asType: 'generation',
     operationName: input.operationName,
-    costStage: 'agent.structured_model',
+    costStage: input.costStage ?? 'agent.structured_model',
     taskType: input.taskType,
     modelCallType: input.modelCallType,
     provider: input.provider,
     model: input.model,
     attempt: input.attempt,
+    parentSpanContext: input.parentSpanContext,
     input: input.input,
     output: input.output,
     usageDetails: input.usageDetails,
@@ -100,6 +149,7 @@ async function observeGantryOperation<TOutput>(
     readonly provider: string;
     readonly model: string;
     readonly attempt?: number;
+    readonly parentSpanContext?: GantryParentSpanContext;
     readonly input?: unknown;
     readonly output?: unknown | ((result: TOutput) => unknown);
     readonly usageDetails?: Record<string, number> | ((result: TOutput) => Record<string, number> | undefined);
@@ -113,23 +163,32 @@ async function observeGantryOperation<TOutput>(
     return operation();
   }
   const metadata = buildMetadata(input, 'pending');
+  const tags = [
+    'category:agent',
+    `stage:${input.costStage}`,
+    `kind:${input.modelCallType}`,
+    `provider:${input.provider}`,
+    'service:agent-gantry',
+  ];
+  const hasParent = Boolean(input.parentSpanContext) || safelyHasActiveParent();
+  let operationStarted = false;
+  let operationCompleted = false;
+  let operationResult: TOutput | undefined;
   try {
     return await propagateAttributes(
       {
-        traceName: input.costStage,
-        tags: [
-          'category:agent',
-          `stage:${input.costStage}`,
-          `kind:${input.modelCallType}`,
-          `provider:${input.provider}`,
-          'service:agent-gantry',
-        ],
+        ...(!hasParent ? { traceName: input.costStage } : {}),
+        tags,
         metadata: stringifyTraceMetadata(metadata),
       },
       async () => startTypedObservation(
         input.costStage,
         async (observation) => {
-          updateObservation(observation, {
+          applyTraceAttributes(observation, {
+            ...(!hasParent ? { traceName: input.costStage } : {}),
+            tags,
+          });
+          safeUpdateObservation(observation, {
             input: summarizePayload(input.input),
             metadata,
             model: input.model,
@@ -137,15 +196,18 @@ async function observeGantryOperation<TOutput>(
             environment: process.env.NODE_ENV ?? 'development',
           });
           try {
+            operationStarted = true;
             const result = await operation();
-            updateObservation(observation, {
+            operationCompleted = true;
+            operationResult = result;
+            safeUpdateObservation(observation, {
               output: summarizePayload(resolveMaybeFunction(input.output, result)),
               metadata: buildMetadata(input, 'success', result),
               usageDetails: resolveMaybeFunction(input.usageDetails, result),
             });
             return result;
           } catch (error) {
-            updateObservation(observation, {
+            safeUpdateObservation(observation, {
               metadata: {
                 ...buildMetadata(input, 'error'),
                 error_message: error instanceof Error ? error.message : String(error),
@@ -158,11 +220,15 @@ async function observeGantryOperation<TOutput>(
           }
         },
         input.asType,
+        input.parentSpanContext,
       ),
     );
   } catch (error) {
-    if (error instanceof Error && /langfuse|otel|opentelemetry/i.test(`${error.name} ${error.message}`)) {
+    if (!operationStarted && isLangfuseTelemetryError(error)) {
       return operation();
+    }
+    if (operationCompleted && isLangfuseTelemetryError(error)) {
+      return operationResult as TOutput;
     }
     throw error;
   }
@@ -204,17 +270,53 @@ function startTypedObservation<TOutput>(
   name: string,
   fn: (observation: LangfuseObservation) => Promise<TOutput>,
   asType: LangfuseObservationType,
+  parentSpanContext?: GantryParentSpanContext,
 ): Promise<TOutput> {
   const start = startActiveObservation as unknown as (
     observationName: string,
     observationFn: (observation: LangfuseObservation) => Promise<TOutput>,
-    options: { readonly asType: LangfuseObservationType },
+    options: {
+      readonly asType: LangfuseObservationType;
+      readonly parentSpanContext?: {
+        readonly traceId: string;
+        readonly spanId: string;
+        readonly traceFlags: number;
+        readonly isRemote: boolean;
+      };
+    },
   ) => Promise<TOutput>;
-  return start(name, fn, { asType });
+  return start(name, fn, {
+    asType,
+    ...(parentSpanContext
+      ? { parentSpanContext: { ...parentSpanContext, traceFlags: 1, isRemote: true } }
+      : {}),
+  });
 }
 
 function updateObservation(observation: LangfuseObservation, attributes: Record<string, unknown>): void {
   ((observation as { update(nextAttributes: Record<string, unknown>): unknown }).update)(attributes);
+}
+
+function safeUpdateObservation(observation: LangfuseObservation, attributes: Record<string, unknown>): void {
+  try {
+    updateObservation(observation, attributes);
+  } catch (error) {
+    if (!isLangfuseTelemetryError(error)) throw error;
+  }
+}
+
+function applyTraceAttributes(
+  observation: LangfuseObservation,
+  input: { readonly traceName?: string; readonly tags: readonly string[] },
+): void {
+  const span = (
+    observation as { readonly otelSpan?: { setAttributes(attributes: Record<string, unknown>): void } }
+  ).otelSpan;
+  if (!span) return;
+  span.setAttributes({
+    ...(input.traceName ? { [LangfuseOtelSpanAttributes.TRACE_NAME]: input.traceName } : {}),
+    [LangfuseOtelSpanAttributes.TRACE_TAGS]: [...input.tags],
+  });
 }
 
 function summarizePayload(value: unknown): unknown {
@@ -227,7 +329,14 @@ function summarizePayload(value: unknown): unknown {
   if (policy === 'hash' || policy === 'metadata') {
     return { sha256: digest, chars: serialized.length };
   }
-  return { preview: serialized.slice(0, 1000), sha256: digest, chars: serialized.length };
+  return { preview: serialized.slice(0, readPreviewCharLimit()), sha256: digest, chars: serialized.length };
+}
+
+function readPreviewCharLimit(): number {
+  const parsed = Number(process.env.LANGFUSE_PAYLOAD_PREVIEW_CHARS);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(Math.round(parsed), 8_000)
+    : 1_000;
 }
 
 function stringifyPayload(value: unknown): string {
@@ -258,9 +367,34 @@ function stringifyTraceMetadata(metadata: Record<string, unknown>): Record<strin
   return propagated;
 }
 
-function isLangfuseEnabled(): boolean {
-  const explicit = process.env.LANGFUSE_TRACING_ENABLED?.trim().toLowerCase();
+function isLangfuseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const explicit = env.LANGFUSE_TRACING_ENABLED?.trim().toLowerCase();
   return explicit !== 'false' && explicit !== '0';
+}
+
+function safelyHasActiveParent(): boolean {
+  try {
+    return Boolean(getActiveSpanId());
+  } catch {
+    return false;
+  }
+}
+
+function isLangfuseTelemetryError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /langfuse|otel|opentelemetry/i.test(`${error.name} ${error.message}`)
+  );
+}
+
+function readPositiveInteger(value: string | undefined): number | undefined {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeLangfuseBaseUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return /^https?:\/\//iu.test(value) ? value : `https://${value}`;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

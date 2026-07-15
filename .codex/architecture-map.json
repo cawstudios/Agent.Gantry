@@ -190,6 +190,7 @@
       ],
       "allowedExternalImports": [
         "node:",
+        "ajv",
         "botbuilder"
       ]
     }

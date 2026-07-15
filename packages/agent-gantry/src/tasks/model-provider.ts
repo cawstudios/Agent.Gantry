@@ -18,6 +18,14 @@ import {
   extractAnthropicUsageDetails,
   observeGantryModelCall,
 } from './model-observability.js';
+import { buildCompatibleJsonSchema } from './json-schema-output-format.js';
+
+type AnthropicObservedResult = {
+  readonly payload: Record<string, unknown>;
+  readonly output: Record<string, unknown> | string;
+  readonly rawText: string;
+  readonly stopReason: string | null;
+};
 
 export function resolveStructuredModelProvider(
   config: GantryStructuredModelConfig,
@@ -66,10 +74,13 @@ export function createAnthropicStructuredModelProvider(
             temperature: taskPolicy.temperature,
             effort: taskPolicy.effort,
           });
-          const observed = await observeGantryModelCall<{
-            readonly payload: Record<string, unknown>;
-            readonly output: Record<string, unknown>;
-          }>({
+          const outputConfig = asRecord(body.output_config);
+          const structuredOutputMode = input.outputSchema
+            ? asRecord(outputConfig?.format)
+              ? 'native'
+              : 'local_validation'
+            : 'none';
+          const observed = await observeGantryModelCall<AnthropicObservedResult>({
             operationName: 'anthropic.generateJson',
             taskType: input.taskType,
             modelCallType: 'agent_step',
@@ -90,12 +101,13 @@ export function createAnthropicStructuredModelProvider(
                 hasLocalPath: Boolean(attachment.localPath),
               })) ?? [],
             },
-            output: (result: { readonly payload: Record<string, unknown>; readonly output: Record<string, unknown> }) => result.output,
-            usageDetails: (result: { readonly payload: Record<string, unknown>; readonly output: Record<string, unknown> }) => extractAnthropicUsageDetails(result.payload),
+            output: (result: AnthropicObservedResult) => result.output,
+            usageDetails: (result: AnthropicObservedResult) => extractAnthropicUsageDetails(result.payload),
             modelParameters: {
               max_tokens: taskPolicy.maxTokens,
               max_retries: maxRetries,
               timeout_ms: timeoutMs,
+              structured_output_mode: structuredOutputMode,
               ...(typeof taskPolicy.temperature === 'number' ? { temperature: taskPolicy.temperature } : {}),
               ...(taskPolicy.effort ? { effort: taskPolicy.effort } : {}),
             },
@@ -104,8 +116,9 @@ export function createAnthropicStructuredModelProvider(
               prompt_cache_ttl: promptCacheMetadata?.ttl ?? null,
               prompt_cache_prefix_hash: promptCacheMetadata?.prefixHash ?? null,
             },
-            resultMetadata: (result: { readonly payload: Record<string, unknown>; readonly output: Record<string, unknown> }) => ({
+            resultMetadata: (result: AnthropicObservedResult) => ({
               response_id: typeof result.payload.id === 'string' ? result.payload.id : null,
+              stop_reason: result.stopReason,
               duration_ms: Date.now() - startedAt,
             }),
           }, async () => {
@@ -127,8 +140,10 @@ export function createAnthropicStructuredModelProvider(
             if (!response.ok) {
               throw buildAnthropicError(response.status, payload);
             }
-            const output = parseAnthropicJsonPayload(payload);
-            return { payload, output };
+            const rawText = readAnthropicTextPayload(payload);
+            const stopReason = asNonEmptyString(payload.stop_reason);
+            const output = parseJsonRecordOrText(rawText);
+            return { payload, output, rawText, stopReason };
           });
           const payload = observed.payload;
           const output = observed.output;
@@ -144,6 +159,8 @@ export function createAnthropicStructuredModelProvider(
               durationMs: Date.now() - startedAt,
               promptCacheMetadata,
             }),
+            rawText: observed.rawText,
+            stopReason: observed.stopReason,
           };
         } catch (error) {
           lastError = error;
@@ -270,7 +287,10 @@ function buildAnthropicRequestBody(input: {
     ...(input.temperature === undefined
       ? {}
       : { temperature: input.temperature }),
-    ...buildAnthropicEffortRequestFields(input.effort),
+    ...buildAnthropicOutputRequestFields(
+      input.effort,
+      input.input.outputSchema,
+    ),
     system: buildAnthropicSystemPrompt(input.input),
     messages: [
       {
@@ -281,14 +301,31 @@ function buildAnthropicRequestBody(input: {
   };
 }
 
-function buildAnthropicEffortRequestFields(
+function buildAnthropicOutputRequestFields(
   effort: AnthropicStructuredModelEffort,
+  outputSchema: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
-  if (effort === 'off') return {};
+  const format = buildAnthropicOutputFormat(outputSchema);
+  if (effort === 'off' && !format) return {};
   return {
-    thinking: { type: 'adaptive' },
-    output_config: { effort },
+    ...(effort === 'off' ? {} : { thinking: { type: 'adaptive' } }),
+    output_config: {
+      ...(effort === 'off' ? {} : { effort }),
+      ...(format ? { format } : {}),
+    },
   };
+}
+
+function buildAnthropicOutputFormat(
+  schema: Record<string, unknown> | undefined,
+): Record<string, unknown> | null {
+  const compatibleSchema = buildCompatibleJsonSchema(schema, {
+    optionalParameters: 24,
+    unionParameters: 16,
+  });
+  return compatibleSchema
+    ? { type: 'json_schema', schema: compatibleSchema }
+    : null;
 }
 
 function buildAnthropicSystemPrompt(
@@ -432,29 +469,36 @@ function buildAnthropicError(
   );
 }
 
-function parseAnthropicJsonPayload(
+function readAnthropicTextPayload(
   payload: Record<string, unknown>,
-): Record<string, unknown> {
+): string {
   const content = Array.isArray(payload.content) ? payload.content : [];
   const text = content
     .flatMap((entry) => {
       const record = asRecord(entry);
       return record?.type === 'text'
-        ? [asNonEmptyString(record.text) ?? '']
+        ? [typeof record.text === 'string' ? record.text : '']
         : [];
     })
-    .join('\n')
-    .trim();
-  if (!text) {
+    .join('\n');
+  if (!text.trim()) {
     throw new Error('Anthropic response did not include text content.');
   }
-  return parseJsonRecord(text);
+  return text;
+}
+
+function parseJsonRecordOrText(text: string): Record<string, unknown> | string {
+  try {
+    return parseJsonRecord(text);
+  } catch {
+    return text;
+  }
 }
 
 function readAnthropicModelUsage(input: {
   readonly payload: Record<string, unknown>;
   readonly body: Record<string, unknown>;
-  readonly output: Record<string, unknown>;
+  readonly output: Record<string, unknown> | string;
   readonly model: string;
   readonly taskType: string;
   readonly correlationId: string | null;
@@ -538,14 +582,31 @@ export function unwrapStructuredJsonModelProviderResult(
 ): {
   readonly output: Record<string, unknown> | string;
   readonly modelUsage: GantryStructuredModelUsage | null;
+  readonly rawText: string | null;
+  readonly stopReason: string | null;
 } {
   if (isStructuredModelProviderEnvelope(result)) {
     return {
       output: result.output,
       modelUsage: result.modelUsage ?? null,
+      rawText: result.rawText ?? null,
+      stopReason: result.stopReason ?? null,
     };
   }
-  return { output: result, modelUsage: null };
+  return {
+    output: result,
+    modelUsage: null,
+    rawText: typeof result === 'string' ? result : null,
+    stopReason: null,
+  };
+}
+
+export function readStructuredModelStopError(
+  stopReason: string | null,
+): 'model_output_truncated' | 'model_output_refused' | null {
+  if (stopReason === 'max_tokens') return 'model_output_truncated';
+  if (stopReason === 'refusal') return 'model_output_refused';
+  return null;
 }
 
 function isStructuredModelProviderEnvelope(
@@ -553,12 +614,14 @@ function isStructuredModelProviderEnvelope(
 ): value is {
   readonly output: Record<string, unknown> | string;
   readonly modelUsage?: GantryStructuredModelUsage | null;
+  readonly rawText?: string | null;
+  readonly stopReason?: string | null;
 } {
   return Boolean(
     value &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
     'output' in value &&
-    'modelUsage' in value,
+    ('modelUsage' in value || 'rawText' in value || 'stopReason' in value),
   );
 }

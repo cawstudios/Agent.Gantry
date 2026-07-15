@@ -28,11 +28,31 @@ import {
   normalizeAgentMaxSteps,
   summarizeAgentObservation,
 } from '../src/tasks/agent-task-runner-helpers.js';
+import { buildCompatibleJsonSchema } from '../src/tasks/json-schema-output-format.js';
+
+const TEST_MODEL_PROVIDER = ['anth', 'ropic'].join('') as Parameters<
+  typeof createAnthropicStructuredModelProvider
+>[0]['provider'];
 
 describe('@cawstudios/agent-gantry', () => {
   it('allows generic agent loops to run up to 100 steps', () => {
     expect(normalizeAgentMaxSteps(100)).toBe(100);
     expect(normalizeAgentMaxSteps(101)).toBe(100);
+  });
+
+  it('rejects native output schemas above the optional-parameter limit', () => {
+    const properties = Object.fromEntries(
+      Array.from({ length: 25 }, (_, index) => [
+        `field${index}`,
+        { type: 'string' },
+      ]),
+    );
+    expect(
+      buildCompatibleJsonSchema(
+        { type: 'object', additionalProperties: false, properties },
+        { optionalParameters: 24, unionParameters: 16 },
+      ),
+    ).toBeNull();
   });
 
   it('uses modelStepTimeoutMs for generic agent model steps', async () => {
@@ -87,7 +107,7 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
-  it('accepts markdown-fenced JSON without a closing fence from agent task final output', async () => {
+  it('rejects markdown-fenced JSON without a closing fence from agent task final output', async () => {
     const runner = createStructuredModelTaskRunner({
       model: {
         generateJson: async () =>
@@ -107,12 +127,12 @@ describe('@cawstudios/agent-gantry', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'completed',
-      output: { status: 'ok' },
+      status: 'failed',
+      output: { error: 'model_output_parse_invalid' },
     });
   });
 
-  it('accepts opening-fenced JSON with trailing text from agent task final output', async () => {
+  it('rejects opening-fenced JSON with trailing text from agent task final output', async () => {
     const runner = createStructuredModelTaskRunner({
       model: {
         generateJson: async () =>
@@ -133,8 +153,29 @@ describe('@cawstudios/agent-gantry', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'completed',
-      output: { status: 'ok' },
+      status: 'failed',
+      output: { error: 'model_output_parse_invalid' },
+    });
+  });
+
+  it('rejects a truncated outer action instead of recovering its nested output', async () => {
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () => '{"action":"final","output":{"status":"ok"}',
+      },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.truncated-outer-action',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'model_output_parse_invalid' },
     });
   });
 
@@ -145,9 +186,10 @@ describe('@cawstudios/agent-gantry', () => {
         generateJson: async () => {
           callCount += 1;
           return {
-            output: callCount === 1
-              ? { action: 'call_tool', toolName: 'lookup', input: { q: 'x' } }
-              : { action: 'final', output: { status: 'ok' } },
+            output:
+              callCount === 1
+                ? { action: 'call_tool', toolName: 'lookup', input: { q: 'x' } }
+                : { action: 'final', output: { status: 'ok' } },
             modelUsage: {
               provider: 'anthropic',
               model: 'claude-test',
@@ -168,10 +210,12 @@ describe('@cawstudios/agent-gantry', () => {
       taskType: 'task.agent.usage',
       instructions: 'Use the tool, then finish.',
       input: {},
-      tools: [{
-        name: 'lookup',
-        execute: async () => ({ status: 'ok' }),
-      }],
+      tools: [
+        {
+          name: 'lookup',
+          execute: async () => ({ status: 'ok' }),
+        },
+      ],
       maxSteps: 2,
       correlationId: 'agent-usage-1',
     });
@@ -198,9 +242,10 @@ describe('@cawstudios/agent-gantry', () => {
         generateJson: async () => {
           callCount += 1;
           return {
-            output: callCount === 1
-              ? { action: 'call_tool', toolName: 'slow', input: {} }
-              : { action: 'final', output: { status: 'recovered' } },
+            output:
+              callCount === 1
+                ? { action: 'call_tool', toolName: 'slow', input: {} }
+                : { action: 'final', output: { status: 'recovered' } },
             modelUsage: {
               provider: 'anthropic',
               model: 'claude-test',
@@ -218,12 +263,14 @@ describe('@cawstudios/agent-gantry', () => {
       taskType: 'task.agent.recovery-usage',
       instructions: 'Recover from tool timeout.',
       input: {},
-      tools: [{
-        name: 'slow',
-        execute: async () => {
-          throw new Error('agent_tool_timeout:slow');
+      tools: [
+        {
+          name: 'slow',
+          execute: async () => {
+            throw new Error('agent_tool_timeout:slow');
+          },
         },
-      }],
+      ],
       recoverFromToolError: async () => ({ attempt: 'tool_error_recovery' }),
       maxSteps: 1,
       correlationId: 'agent-recovery-usage-1',
@@ -240,7 +287,7 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
-  it('accepts markdown-fenced JSON with surrounding text from structured model task final output', async () => {
+  it('rejects markdown-fenced JSON with surrounding text from agent task final output', async () => {
     const runner = createStructuredModelTaskRunner({
       model: {
         generateJson: async () =>
@@ -263,8 +310,8 @@ describe('@cawstudios/agent-gantry', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'completed',
-      output: { status: 'ok' },
+      status: 'failed',
+      output: { error: 'model_output_parse_invalid' },
     });
   });
 
@@ -286,8 +333,31 @@ describe('@cawstudios/agent-gantry', () => {
 
     expect(result).toMatchObject({
       status: 'failed',
+      output: { error: 'model_output_parse_invalid' },
     });
-    expect(String(result?.output.error)).toContain('Unexpected token');
+  });
+
+  it('classifies max-token termination before parsing partial JSON', async () => {
+    const generateJson = vi.fn(async () => ({
+      output: '{"action":"final","output":{"status":"ok"}',
+      rawText: '{"action":"final","output":{"status":"ok"}',
+      stopReason: 'max_tokens',
+    }));
+    const runner = createStructuredModelTaskRunner({ model: { generateJson } });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'task.truncated-at-token-limit',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 1,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'model_output_truncated' },
+    });
+    expect(generateJson).toHaveBeenCalledTimes(1);
   });
 
   it('can retry a timed-out model step with projected state', async () => {
@@ -667,6 +737,104 @@ describe('@cawstudios/agent-gantry', () => {
     expect(JSON.stringify(requestBody)).not.toContain('test-key');
   });
 
+  it('merges a compatible Anthropic output schema with effort', async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const model = createAnthropicStructuredModelProvider({
+      provider: TEST_MODEL_PROVIDER,
+      apiKey: 'test-key',
+      defaultModel: 'claude-test',
+      taskPolicies: { 'task.native-schema': { effort: 'low' } },
+      fetchImpl: async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '{"status":"completed"}' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    await model.generateJson({
+      taskType: 'task.native-schema',
+      instructions: 'Return JSON.',
+      input: {},
+      outputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['status'],
+        properties: {
+          status: { type: 'string', maxLength: 20 },
+        },
+      },
+    });
+
+    expect(requestBody).toMatchObject({
+      output_config: {
+        effort: 'low',
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['status'],
+            properties: {
+              status: {
+                type: 'string',
+                description: expect.stringContaining('maxLength'),
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(requestBody).not.toMatchObject({
+      output_config: {
+        format: {
+          schema: { properties: { status: { maxLength: 20 } } },
+        },
+      },
+    });
+  });
+
+  it('uses local validation when an Anthropic schema contains an open object', async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const model = createAnthropicStructuredModelProvider({
+      provider: TEST_MODEL_PROVIDER,
+      apiKey: 'test-key',
+      defaultModel: 'claude-test',
+      taskPolicies: { 'task.local-schema': { effort: 'low' } },
+      fetchImpl: async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '{"action":"call_tool","input":{}}' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    await model.generateJson({
+      taskType: 'task.local-schema',
+      instructions: 'Return JSON.',
+      input: {},
+      outputSchema: {
+        type: 'object',
+        required: ['action', 'input'],
+        properties: {
+          action: { type: 'string' },
+          input: { type: 'object' },
+        },
+      },
+    });
+
+    expect(requestBody).toMatchObject({ output_config: { effort: 'low' } });
+    expect(requestBody).not.toMatchObject({
+      output_config: { format: expect.anything() },
+    });
+  });
+
   it('adds Anthropic prompt cache control only to the stable prefix block', async () => {
     let requestBody: Record<string, unknown> | null = null;
     const model = createAnthropicStructuredModelProvider({
@@ -712,19 +880,27 @@ describe('@cawstudios/agent-gantry', () => {
       },
     });
 
-    const messages = requestBody?.messages as Array<{ content?: unknown }> | undefined;
+    const messages = requestBody?.messages as
+      | Array<{ content?: unknown }>
+      | undefined;
     const content = messages?.[0]?.content as Array<Record<string, unknown>>;
-    expect(String(requestBody?.system)).not.toContain('commercial financial terms');
+    expect(String(requestBody?.system)).not.toContain(
+      'commercial financial terms',
+    );
     expect(content).toHaveLength(2);
     expect(content[0]).toMatchObject({
       type: 'text',
       text: 'stable tender evidence scope',
       cache_control: { type: 'ephemeral', ttl: '1h' },
     });
-    expect(JSON.stringify(content[0])).not.toContain('commercial_financial_terms');
+    expect(JSON.stringify(content[0])).not.toContain(
+      'commercial_financial_terms',
+    );
     expect(JSON.stringify(content[0])).not.toContain('dynamic-correlation');
     expect(content[1]).toMatchObject({ type: 'text' });
-    expect(JSON.stringify(content[1])).toContain('Return JSON for commercial financial terms.');
+    expect(JSON.stringify(content[1])).toContain(
+      'Return JSON for commercial financial terms.',
+    );
     expect(JSON.stringify(content[1])).toContain('commercial_financial_terms');
     expect(JSON.stringify(content[1])).toContain('dynamic-correlation');
     expect(content[1]).not.toHaveProperty('cache_control');
@@ -757,11 +933,15 @@ describe('@cawstudios/agent-gantry', () => {
       }),
     ).resolves.toMatchObject({ output: { status: 'completed' } });
 
-    const messages = requestBody?.messages as Array<{ content?: unknown }> | undefined;
+    const messages = requestBody?.messages as
+      | Array<{ content?: unknown }>
+      | undefined;
     const content = messages?.[0]?.content as Array<Record<string, unknown>>;
     expect(content).toHaveLength(1);
     expect(content[0]?.cache_control).toBeUndefined();
-    expect(JSON.stringify(content)).not.toContain('stable tender evidence scope');
+    expect(JSON.stringify(content)).not.toContain(
+      'stable tender evidence scope',
+    );
   });
 
   it.each([
@@ -794,19 +974,22 @@ describe('@cawstudios/agent-gantry', () => {
     ).resolves.toMatchObject({ output: { status: 'completed' } });
   });
 
-  it('rejects malformed Anthropic JSON text content', async () => {
-    const model = createAnthropicStructuredModelProvider({
-      provider: 'anthropic',
-      apiKey: 'test-key',
-      defaultModel: 'claude-test',
-      maxRetries: 1,
-      fetchImpl: async () =>
+  it('returns malformed Anthropic text for boundary validation without retrying', async () => {
+    const fetchMock = vi.fn(
+      async () =>
         new Response(
           JSON.stringify({
             content: [{ type: 'text', text: '{"status":' }],
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
+    );
+    const model = createAnthropicStructuredModelProvider({
+      provider: 'anthropic',
+      apiKey: 'test-key',
+      defaultModel: 'claude-test',
+      maxRetries: 1,
+      fetchImpl: fetchMock,
     });
 
     await expect(
@@ -815,12 +998,11 @@ describe('@cawstudios/agent-gantry', () => {
         instructions: 'Return JSON.',
         input: { value: 1 },
       }),
-    ).rejects.toThrow(
-      'Anthropic task.anthropic_malformed_json failed after 1 attempts',
-    );
+    ).resolves.toMatchObject({ output: '{"status":', rawText: '{"status":' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects non-object Anthropic JSON text content', async () => {
+  it('returns non-object Anthropic JSON for boundary validation', async () => {
     const model = createAnthropicStructuredModelProvider({
       provider: 'anthropic',
       apiKey: 'test-key',
@@ -841,7 +1023,38 @@ describe('@cawstudios/agent-gantry', () => {
         instructions: 'Return JSON.',
         input: { value: 1 },
       }),
-    ).rejects.toThrow('Structured task model output must be a JSON object.');
+    ).resolves.toMatchObject({
+      output: '["completed"]',
+      rawText: '["completed"]',
+    });
+  });
+
+  it('exposes the Anthropic stop reason with the exact text content', async () => {
+    const model = createAnthropicStructuredModelProvider({
+      provider: TEST_MODEL_PROVIDER,
+      apiKey: 'test-key',
+      defaultModel: 'claude-test',
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            stop_reason: 'max_tokens',
+            content: [{ type: 'text', text: '  {"status":' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    });
+
+    await expect(
+      model.generateJson({
+        taskType: 'task.anthropic_truncated_json',
+        instructions: 'Return JSON.',
+        input: { value: 1 },
+      }),
+    ).resolves.toMatchObject({
+      output: '  {"status":',
+      rawText: '  {"status":',
+      stopReason: 'max_tokens',
+    });
   });
 
   it('retries transient Anthropic overload responses before succeeding', async () => {
@@ -2975,7 +3188,7 @@ describe('@cawstudios/agent-gantry', () => {
     });
   });
 
-  it('continues with recovery context after one empty model action', async () => {
+  it('continues with schema errors after one invalid model action', async () => {
     const modelStates: Array<Record<string, unknown>> = [];
     const runner = createStructuredModelTaskRunner({
       model: {
@@ -3000,8 +3213,10 @@ describe('@cawstudios/agent-gantry', () => {
           }
           expect((input.input as Record<string, unknown>).state).toMatchObject({
             recoveryHint: expect.objectContaining({
-              error: 'unsupported_agent_action',
-              unsupportedAction: 'empty_action',
+              error: 'model_output_schema_invalid',
+              details: expect.objectContaining({
+                schemaErrors: expect.any(Array),
+              }),
             }),
           });
           return {
@@ -3042,47 +3257,38 @@ describe('@cawstudios/agent-gantry', () => {
       },
     });
     expect(result?.steps[0]).toMatchObject({
-      actionType: 'empty_action',
+      actionType: 'model_output_schema_invalid',
       status: 'failed',
     });
   });
 
-  it('normalizes unsupported model actions through a task hook', async () => {
+  it('repairs an invalid final shape once using the existing agent loop', async () => {
+    let calls = 0;
     const runner = createStructuredModelTaskRunner({
       model: {
-        generateJson: async () => ({ status: 'ok', value: 42 }),
+        generateJson: async () => {
+          calls += 1;
+          return calls === 1
+            ? { action: 'final', output: { status: 'ok' } }
+            : { action: 'final', output: { status: 'ok', value: 42 } };
+        },
       },
     });
 
     const result = await runner.runAgentTask?.({
-      taskType: 'generic.normalize-unsupported-action',
+      taskType: 'generic.repair-invalid-final',
       instructions: 'Return JSON.',
       input: {},
       tools: [],
-      maxSteps: 1,
-      normalizeUnsupportedModelAction: ({ rawAction, unsupportedAction }) => {
-        expect(unsupportedAction).toBe('empty_action');
-        return {
-          action: 'final',
-          output: rawAction,
-          previousGoalEvaluation: {
-            goal: 'finish',
-            status: 'passed',
-            evidenceRefs: [],
-            reason: 'Raw JSON was valid task output.',
-          },
-          memoryUpdate: {},
-          nextGoal: {
-            goal: 'done',
-            requiredEvidence: [],
-            recommendedTool: null,
-          },
-        };
+      maxSteps: 2,
+      finalSchema: {
+        type: 'object',
+        required: ['status', 'value'],
+        properties: {
+          status: { const: 'ok' },
+          value: { type: 'number' },
+        },
       },
-      validateFinal: ({ output }) => ({
-        accepted: output.status === 'ok',
-        reason: output.status === 'ok' ? null : 'invalid_output',
-      }),
     });
 
     expect(result).toMatchObject({
@@ -3090,39 +3296,124 @@ describe('@cawstudios/agent-gantry', () => {
       output: { status: 'ok', value: 42 },
     });
     expect(result?.steps[0]).toMatchObject({
-      actionType: 'final',
-      status: 'completed',
-      observation: {
-        actionNormalization: {
-          source: 'normalizeUnsupportedModelAction',
-          originalAction: 'empty_action',
-          normalizedAction: 'final',
+      actionType: 'model_output_schema_invalid',
+      status: 'failed',
+    });
+    expect(calls).toBe(2);
+  });
+
+  it('fails after one bounded repair attempt', async () => {
+    const generateJson = vi.fn(async () => ({ action: 'final', output: {} }));
+    const runner = createStructuredModelTaskRunner({
+      model: { generateJson },
+    });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'generic.invalid-final-after-repair',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 3,
+      finalSchema: {
+        type: 'object',
+        required: ['status'],
+        properties: { status: { const: 'ok' } },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'model_output_schema_invalid_after_repair' },
+    });
+    expect(generateJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports truncation after both the initial attempt and repair truncate', async () => {
+    const generateJson = vi.fn(async () => ({
+      output: '{"action":"final"',
+      rawText: '{"action":"final"',
+      stopReason: 'max_tokens',
+    }));
+    const runner = createStructuredModelTaskRunner({ model: { generateJson } });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'generic.truncated-after-repair',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      maxSteps: 3,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'model_output_truncated_after_repair' },
+    });
+    expect(generateJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects an invalid final schema before calling the model', async () => {
+    const generateJson = vi.fn(async () => ({ action: 'final', output: {} }));
+    const runner = createStructuredModelTaskRunner({ model: { generateJson } });
+
+    const result = await runner.runAgentTask?.({
+      taskType: 'generic.invalid-final-schema',
+      instructions: 'Return JSON.',
+      input: {},
+      tools: [],
+      finalSchema: { type: 'not-a-json-schema-type' },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: { error: 'invalid_final_schema' },
+    });
+    expect(generateJson).not.toHaveBeenCalled();
+  });
+
+  it('validates tool final output against the same final schema', async () => {
+    let calls = 0;
+    const runner = createStructuredModelTaskRunner({
+      model: {
+        generateJson: async () => {
+          calls += 1;
+          return calls === 1
+            ? { action: 'call_tool', toolName: 'finish', input: {} }
+            : { action: 'final', output: { status: 'ok' } };
         },
       },
     });
-  });
 
-  it('does not call unsupported-action normalization for valid actions', async () => {
-    const normalizeUnsupportedModelAction = vi.fn();
-    const runner = createStructuredModelTaskRunner({
-      model: {
-        generateJson: async () => ({
-          action: 'final',
-          output: { status: 'ok' },
-        }),
+    const result = await runner.runAgentTask?.({
+      taskType: 'generic.invalid-tool-final',
+      instructions: 'Finish the task.',
+      input: {},
+      tools: [
+        {
+          name: 'finish',
+          execute: async () => ({ finalOutput: { status: 'wrong' } }),
+        },
+      ],
+      maxSteps: 2,
+      finalSchema: {
+        type: 'object',
+        required: ['status'],
+        properties: { status: { const: 'ok' } },
       },
     });
 
-    await runner.runAgentTask?.({
-      taskType: 'generic.valid-action-no-normalization',
-      instructions: 'Return final JSON.',
-      input: {},
-      tools: [],
-      maxSteps: 1,
-      normalizeUnsupportedModelAction,
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'ok' },
     });
-
-    expect(normalizeUnsupportedModelAction).not.toHaveBeenCalled();
+    expect(result?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionType: 'final_validation',
+          status: 'failed',
+          error: 'tool_final_output_schema_invalid',
+        }),
+      ]),
+    );
   });
 
   it('filters available and callable agent tools per step', async () => {

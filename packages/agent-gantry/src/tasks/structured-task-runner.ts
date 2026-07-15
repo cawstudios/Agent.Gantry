@@ -14,7 +14,11 @@ import {
   readString,
 } from '../shared/helpers.js';
 import { runGenericAgentTask } from './agent-task-runner.js';
-import { resolveStructuredModelProvider, unwrapStructuredJsonModelProviderResult } from './model-provider.js';
+import {
+  readStructuredModelStopError,
+  resolveStructuredModelProvider,
+  unwrapStructuredJsonModelProviderResult,
+} from './model-provider.js';
 import { observeGantryAgentSpan } from './model-observability.js';
 
 export function createStructuredModelTaskRunner(
@@ -55,6 +59,8 @@ export function createStructuredModelTaskRunner(
             ...(toolContext ? { toolContext } : {}),
           },
         }));
+        const stopError = readStructuredModelStopError(generated.stopReason);
+        if (stopError) throw new Error(stopError);
         const modelOutput =
           typeof generated.output === 'string'
             ? parseJsonRecord(generated.output)
