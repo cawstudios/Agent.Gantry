@@ -128,6 +128,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
             chatId: input.chatId,
             request: input.request,
             fullView: parts.fullView,
+            threadOpts: input.threadOpts,
           })
         : false;
     if (parts.fullView && !includeInlineFullView && !fullViewSent) {
@@ -173,7 +174,7 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
               ...parts.bodyLines,
               `${parts.fullView.label}: ${
                 fullViewSent
-                  ? 'sent to approver DM.'
+                  ? 'sent above for review.'
                   : 'too large for inline full view.'
               }`,
             ],
@@ -268,50 +269,30 @@ export abstract class TelegramChannelPrompts extends TelegramChannelPolling {
     fullView: NonNullable<
       ReturnType<typeof buildPermissionPromptParts>['fullView']
     >;
+    threadOpts: { message_thread_id?: number };
   }): Promise<boolean> {
     if (!this.bot) throw new Error('Telegram bot is not connected');
-    const targets = this.telegramFullViewDocumentChatIds(
-      input.chatId,
-      input.request,
-    );
-    if (targets.length === 0) return false;
+    // The details belong next to the prompt: same chat, same thread. The
+    // prompt is already visible there, so a private copy adds no privacy.
     const content = Buffer.from(input.fullView.content, 'utf8');
-    const sent = await Promise.all(
-      targets.map(async (chatId) => {
-        try {
-          const result = await this.bot!.api.sendDocument(
-            chatId,
-            new InputFile(content, input.fullView.filename),
-            { caption: input.fullView.filename },
-          );
-          return result.message_id !== undefined;
-        } catch {
-          return false;
-        }
-      }),
-    );
-    return sent.some(Boolean);
-  }
-  private telegramFullViewDocumentChatIds(
-    chatId: string,
-    request: PermissionApprovalRequest,
-  ): string[] {
-    if (!chatId.startsWith('-')) return [chatId];
-    const settings = this.opts.runtimeSettings?.();
-    const binding = Object.values(settings?.bindings || {}).find(
-      (entry) =>
-        entry.agent === request.sourceAgentFolder &&
-        this.telegramConversationMatchesChat(
-          settings?.conversations[entry.conversation],
-          settings?.providerAccounts || {},
-          request.providerAccountId ?? this.opts.providerAccountId,
-          chatId,
-        ),
-    );
-    if (!binding || !settings) return [];
-    const approvers =
-      settings.conversations[binding.conversation]?.controlApprovers || [];
-    return [...new Set(approvers)].filter(Boolean);
+    try {
+      const result = await this.bot.api.sendDocument(
+        input.chatId,
+        new InputFile(content, input.fullView.filename),
+        {
+          ...input.threadOpts,
+          caption: [
+            input.fullView.filename,
+            `Full details for: ${input.request.displayName ?? input.request.title ?? input.request.toolName}`,
+          ]
+            .join('\n')
+            .slice(0, 1024),
+        },
+      );
+      return result.message_id !== undefined;
+    } catch {
+      return false;
+    }
   }
   private telegramConversationMatchesChat(
     conversation: { providerAccount: string; externalId: string } | undefined,

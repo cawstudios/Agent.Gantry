@@ -20,6 +20,13 @@ import { authenticate, type ApiKeyRecord, type Scope } from './auth.js';
 import { sendError } from './http.js';
 import type { RateLimiter } from './rate-limit.js';
 
+type ProjectionSettingsOverrides = {
+  providerAccount?: {
+    id: string;
+    runtimeSecretRefs: Record<string, string>;
+  };
+};
+
 type InternalRuntimeSettings = ControlPlaneStorageSettings & {
   modelFamilies?: Record<string, string[]>;
 };
@@ -135,7 +142,10 @@ export type ControlRouteContext = {
     options?: { providerAccountId?: string },
   ) => Promise<void>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
-  syncSettingsFromProjection: (appId: AppId) => Promise<void>;
+  syncSettingsFromProjection: (
+    appId: AppId,
+    overrides?: ProjectionSettingsOverrides,
+  ) => Promise<void>;
   getSelectedAgentHarness: (agentFolder?: string) => AgentHarness;
   getConfiguredAgentRuntime?: (
     agentFolder?: string,

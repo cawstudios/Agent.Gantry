@@ -965,7 +965,7 @@ describe('skill registry integration flow', () => {
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledWith(
         'chat-origin',
-        expect.stringContaining('Installed skill LinkedIn Posting'),
+        expect.stringContaining('Installed: LinkedIn Posting'),
         { threadId: 'thread-origin' },
       );
     });

@@ -1,3 +1,8 @@
+import { materializedSkillDirectoryNameFor } from '../domain/skills/skills.js';
+import {
+  skillNameForReceipt,
+  withSkillMaterializationLock,
+} from './skill-install-assets.js';
 import { SkillService } from '../application/skills/skill-service.js';
 import type { AgentId } from '../domain/agent/agent.js';
 import type { AppId } from '../domain/app/app.js';
@@ -15,6 +20,7 @@ export function startSkillPermissionReview(input: {
     ReturnType<typeof createTaskResponder>,
     'acceptData' | 'reject'
   >;
+  logError?: (context: Record<string, unknown>, message: string) => void;
   service: SkillService;
   syncApprovedCapabilitySettings: (appId: AppId) => Promise<void>;
   appId: AppId;
@@ -50,6 +56,16 @@ export function startSkillPermissionReview(input: {
 }): void {
   void completeSkillPermissionReview(input)
     .catch(async (err) => {
+      input.logError?.(
+        {
+          appId: input.appId,
+          agentId: input.agentId,
+          skillName: input.skill.name,
+          toolName: input.requestToolName,
+          err,
+        },
+        'Skill permission review failed',
+      );
       await notifyLifecycle(input.onBlocked);
       input.responder.reject(
         err instanceof Error ? err.message : 'Skill permission review failed.',
@@ -117,33 +133,47 @@ async function completeSkillPermissionReview(
     );
   }
 
-  let installedSkillId: string | undefined;
   let installedSkill: SkillCatalogItem | undefined;
   try {
-    const installed = await input.service.installSkill({
-      appId: input.appId,
-      agentId: input.agentId,
-      fallbackName: input.skill.name,
-      createdBy: decision.decidedBy,
-      requiredEnvVars: input.skill.requiredEnvVars,
-      assets: input.assets,
-    });
-    installedSkill = installed;
-    installedSkillId = installed.id;
-    await input.service.bindSkillToAgent({
-      appId: input.appId,
-      agentId: input.agentId,
-      skillId: installed.id,
-    });
-    await input.syncApprovedCapabilitySettings(input.appId);
+    // The full install→bind→sync→compensation sequence holds the keyed lock
+    // so a concurrent same-name writer can never interleave with a partial
+    // state from this path.
+    installedSkill = await withSkillMaterializationLock(
+      materializedSkillDirectoryNameFor(
+        skillNameForReceipt(input.assets, input.skill.name),
+      ).toLowerCase(),
+      async () => {
+        let installedSkillId: string | undefined;
+        try {
+          const installed = await input.service.installSkill({
+            appId: input.appId,
+            agentId: input.agentId,
+            fallbackName: input.skill.name,
+            createdBy: decision.decidedBy,
+            requiredEnvVars: input.skill.requiredEnvVars,
+            assets: input.assets,
+          });
+          installedSkillId = installed.id;
+          await input.service.bindSkillToAgent({
+            appId: input.appId,
+            agentId: input.agentId,
+            skillId: installed.id,
+          });
+          await input.syncApprovedCapabilitySettings(input.appId);
+          return installed;
+        } catch (err) {
+          if (installedSkillId) {
+            await input.service.rollbackInstalledSkillBinding({
+              appId: input.appId,
+              agentId: input.agentId,
+              skillId: installedSkillId as never,
+            });
+          }
+          throw err;
+        }
+      },
+    );
   } catch (err) {
-    if (installedSkillId) {
-      await input.service.rollbackInstalledSkillBinding({
-        appId: input.appId,
-        agentId: input.agentId,
-        skillId: installedSkillId as never,
-      });
-    }
     await notifyLifecycle(input.onBlocked);
     throw err;
   }

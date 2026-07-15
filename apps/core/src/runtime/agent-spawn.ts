@@ -568,10 +568,7 @@ export async function spawnAgent(
       pickSafeHostEnv,
       pickPreparedExecutionEnv,
     });
-    if (
-      options?.runnerSandboxProvider?.enforcing === true &&
-      options.asyncTaskRepositoryAvailable === true
-    ) {
+    if (options?.asyncTaskRepositoryAvailable === true) {
       env.GANTRY_ASYNC_TASK_TOOLS_ENABLED = '1';
     } else {
       delete env.GANTRY_ASYNC_TASK_TOOLS_ENABLED;

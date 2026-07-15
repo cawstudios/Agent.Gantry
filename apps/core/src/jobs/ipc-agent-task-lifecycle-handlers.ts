@@ -110,7 +110,7 @@ function validateSameConversation(context: TaskContext): string | null {
 function taskService(context: TaskContext): AsyncCommandTaskService | null {
   const repository = context.deps.getAsyncTaskRepository?.();
   const runnerSandboxProvider = context.deps.runnerSandboxProvider;
-  if (!repository || !runnerSandboxProvider?.enforcing) return null;
+  if (!repository || !runnerSandboxProvider) return null;
   const existing = asyncCommandServices.get(repository);
   if (existing) return existing;
   const service = new AsyncCommandTaskService(

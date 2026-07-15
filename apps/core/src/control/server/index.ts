@@ -379,7 +379,7 @@ export function startControlServer(input: {
     sendConversationIngressProjection: input.sendConversationIngressProjection,
     addMessageReaction: input.addMessageReaction,
     getBrowserStatus: input.getBrowserStatus,
-    syncSettingsFromProjection: (appId: AppId) => {
+    syncSettingsFromProjection: (appId: AppId, overrides) => {
       const storage = getRuntimeStorage();
       return syncRuntimeSettingsFromProjection({
         runtimeHome: GANTRY_HOME,
@@ -390,6 +390,7 @@ export function startControlServer(input: {
         pool: storage.service?.pool,
         createdBy: 'control-api:projection-sync',
         reloadRuntimeState: () => input.app.loadState(),
+        overrides,
       });
     },
     getSelectedAgentHarness: (agentFolder?: string) =>

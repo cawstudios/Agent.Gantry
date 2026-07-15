@@ -8,6 +8,7 @@ import {
 import {
   GANTRY_HOME,
   resolveRuntimeBootstrapStorageConfigFromEnv,
+  readRuntimeSecretEnv,
 } from '../../config/index.js';
 import type { AppId } from '../../domain/app/app.js';
 import { logger } from '../../infrastructure/logging/logger.js';
@@ -16,7 +17,6 @@ import {
   parseOtlpHeaders,
   shutdownTracing,
 } from '../../infrastructure/observability/tracing.js';
-import { runtimeEnvValueDynamic } from '../../config/env/index.js';
 import { ensureRuntimeLayoutDirectories } from '../../platform/runtime-layout.js';
 import { initializeRuntimeStorage } from '../../adapters/storage/postgres/runtime-store.js';
 import { SettingsDesiredStateService } from '../../config/settings/desired-state-service.js';
@@ -178,7 +178,7 @@ export async function runStartup(
         // Managed services (launchd/systemd) pass a minimal process env;
         // runtime secrets live in GANTRY_HOME/.env (process env still wins).
         headers: parseOtlpHeaders(
-          runtimeEnvValueDynamic('GANTRY_OTEL_TRACES_HEADERS'),
+          readRuntimeSecretEnv('GANTRY_OTEL_TRACES_HEADERS'),
         ),
         captureContent: tracing.captureContent,
         sampleRate: tracing.sampleRate,

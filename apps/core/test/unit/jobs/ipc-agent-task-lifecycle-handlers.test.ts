@@ -15,6 +15,7 @@ import type {
   AsyncTaskTransitionInput,
 } from '@core/domain/ports/async-tasks.js';
 import { isAsyncTaskTerminal } from '@core/domain/ports/async-tasks.js';
+import { DEFAULT_ASYNC_RESOURCE_LIMITS } from '@core/jobs/async-command-sandbox-runner.js';
 import { readEncryptedAsyncTaskPayload } from '@core/jobs/async-task-execution-payload.js';
 import type { RunnerSandboxProvider } from '@core/shared/runner-sandbox-provider.js';
 
@@ -379,6 +380,53 @@ describe('agent task lifecycle IPC handlers', () => {
       code: 'invalid_request',
       error:
         'todo_update requires 1-50 unique items with id, title, and status.',
+    });
+  });
+
+  it('provides task lifecycle service without an enforcing sandbox', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-task-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const {
+      agentTaskLifecycleHandlers,
+      taskData,
+      registerAsyncCommandSandboxPolicy,
+    } = await loadTaskLifecycleHandlers(runtimeHome);
+    const repository = new MemoryAsyncTaskRepository();
+    registerAsyncCommandSandboxPolicy({
+      sourceAgentFolder: 'main_agent',
+      runHandle: 'run-1',
+      policy: {
+        appId: 'app:test',
+        agentId: 'agent:main_agent',
+        conversationId: 'sl:C123',
+        threadId: 'thread-1',
+        runId: 'run-id-1',
+        protectedReadPaths: [],
+        protectedWritePaths: [],
+        allowedNetworkHosts: [],
+        resourceLimits: DEFAULT_ASYNC_RESOURCE_LIMITS,
+      },
+    });
+
+    await agentTaskLifecycleHandlers.task_list(
+      contextFor({
+        data: taskData('direct-task-list', 'task_list'),
+        deps: {
+          getAsyncTaskRepository: () => repository,
+          runnerSandboxProvider: {
+            id: 'direct',
+            enforcing: false,
+            start: vi.fn(),
+          },
+        },
+      }),
+    );
+
+    expect(readResponse(runtimeHome, 'direct-task-list')).toMatchObject({
+      ok: true,
+      data: { tasks: [] },
     });
   });
 

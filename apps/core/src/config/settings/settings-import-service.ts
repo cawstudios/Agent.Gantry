@@ -10,8 +10,10 @@ import type {
 import { applyRuntimeSettingsDesiredState } from './restart-sync.js';
 import {
   activateRuntimeModelAliases,
+  parseRuntimeSettings,
   withRuntimeModelAliases,
 } from './runtime-settings.js';
+import { renderRuntimeSettingsYaml } from './runtime-settings-renderer.js';
 import { normalizeConfiguredCapabilitiesInSettings } from './configured-capability-normalization.js';
 import { parseRuntimeSettingsObject } from './runtime-settings-parser.js';
 import { validateLoadedRuntimeSettings } from './runtime-settings-validation.js';
@@ -390,6 +392,19 @@ export async function importFleetSettingsRevision(
  * lossless.
  */
 export function settingsToRevisionDocument(
+  settings: RuntimeSettings,
+): Record<string, unknown> {
+  // Canonicalize via a render→parse round-trip: the parser materializes
+  // defaults (persona, requires_trigger, kind aliases, default model) that
+  // in-memory objects omit, so documents built from memory and documents
+  // built from parsed files would otherwise never compare equal — feeding
+  // endless settings.yaml:auto-import echo revisions and stale-base errors.
+  return buildRevisionDocument(
+    parseRuntimeSettings(renderRuntimeSettingsYaml(settings)),
+  );
+}
+
+function buildRevisionDocument(
   settings: RuntimeSettings,
 ): Record<string, unknown> {
   return stripUndefinedDeep({

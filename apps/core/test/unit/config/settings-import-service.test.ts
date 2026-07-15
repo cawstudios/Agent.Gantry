@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -8,6 +10,8 @@ import type {
 import type { ProviderAccountRepository } from '@core/domain/ports/repositories.js';
 import type { ProviderAccount } from '@core/domain/provider/provider.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
+import { parseRuntimeSettings } from '@core/config/settings/runtime-settings.js';
+import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 import {
   CURRENT_SETTINGS_READER_VERSION,
   importFleetSettingsRevision,
@@ -975,6 +979,52 @@ describe('importFleetSettingsRevision', () => {
       restored.conversations.shared_channel.installedAgents['researcher_171.1']
         ?.permissionMode,
     ).toBe('auto');
+  });
+
+  it('guards settings.yaml revision identity', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.runtime.deploymentMode = 'fleet';
+    settings.agent.name = 'Revision Guard';
+    settings.agents.researcher = {
+      name: 'Researcher',
+      folder: 'researcher',
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.providerAccounts.telegram_main = {
+      agentId: 'researcher',
+      provider: 'telegram',
+      label: 'Telegram Main',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    settings.conversations.shared_channel = {
+      providerConnection: 'telegram_main',
+      providerAccount: 'telegram_main',
+      externalId: 'telegram:C123',
+      kind: 'group',
+      displayName: 'Shared Channel',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: [],
+      installedAgents: {
+        researcher: {
+          agentId: 'researcher',
+          providerAccountId: 'telegram_main',
+          status: 'active',
+          addedAt: new Date(0).toISOString(),
+          memoryScope: 'conversation',
+        },
+      },
+    };
+
+    const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
+    expect(
+      isDeepStrictEqual(
+        settingsToRevisionDocument(parsed),
+        settingsToRevisionDocument(settings),
+      ),
+    ).toBe(true);
   });
 
   it('migrates legacy per-agent bindings when reading settings revisions', () => {

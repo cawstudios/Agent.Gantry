@@ -223,6 +223,10 @@ function channelControlApproverId(
 ): string {
   return `channel-control:${safeIdPart(conversationId)}:${safeIdPart(externalUserId)}`;
 }
+
+// Real approver IDs cannot be empty, so this row durably records a clear.
+const AUTHORITATIVE_EMPTY_APPROVER = '';
+
 function externalRef<Kind extends string>(
   value: unknown,
   fallbackKind: Kind,
@@ -949,7 +953,9 @@ export class PostgresConversationRepository implements ConversationRepository {
   async listConversationApprovers(
     conversationId: Conversation['id'],
   ): Promise<ConversationApprover[]> {
-    return this.listConversationApproverRows([conversationId]);
+    return (await this.listConversationApproverRows([conversationId])).filter(
+      (approver) => approver.externalUserId !== AUTHORITATIVE_EMPTY_APPROVER,
+    );
   }
   async listConversationApproversForConversations(
     conversationIds: readonly Conversation['id'][],
@@ -999,9 +1005,11 @@ export class PostgresConversationRepository implements ConversationRepository {
             ),
           ),
         );
-      if (input.externalUserIds.length === 0) return;
       await tx.insert(pgSchema.conversationApproversPostgres).values(
-        input.externalUserIds.map((externalUserId) => ({
+        (input.externalUserIds.length
+          ? input.externalUserIds
+          : [AUTHORITATIVE_EMPTY_APPROVER]
+        ).map((externalUserId) => ({
           id: channelControlApproverId(input.conversationId, externalUserId),
           appId: input.appId,
           conversationId: input.conversationId,
