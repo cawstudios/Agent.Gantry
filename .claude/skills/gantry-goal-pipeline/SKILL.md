@@ -38,7 +38,7 @@ note in the assumptions ledger so the decision is recorded.
 
 ## 2. Implementation handoffs
 
-One WRITER handoff (stage) at a time — never two writers in the same worktree. READ-ONLY Codex tasks (plan validations, surveys, reviews of committed state) SHOULD run in parallel with a writer and with each other whenever queued — do not serialize read-only work. Stage
+READ-ONLY Codex tasks (plan validations, surveys, reviews of committed state) always run in parallel with writers and each other — never serialize them. WRITER handoffs may run in parallel ONLY when their bounded write scopes are provably disjoint (source, tests, docs, AND the assumptions ledger — give the ledger to one task or write its rows yourself); overlapping or unclear scopes serialize. After parallel writers land, run one unified verification pass before committing. Stage
 size is bounded by packet separability (see §1), not serial run length —
 Codex fans packets out to its subagents. For each stage, spawn an Agent with
 `subagent_type: codex:codex-rescue` whose prompt contains:

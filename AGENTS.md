@@ -43,10 +43,14 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
 - Do the work, critique the work, and make sure the task is completed properly end-to-end.
 - Do not take shortcuts. Keep work well-structured, neat, and clean.
 - Do not overcomplicate. Make a plan, seal the flaws, and execute that plan through completion.
-- Parallelize Codex tasks where possible: at most ONE writer task in the
-  worktree at a time, but read-only Codex tasks (plan validations, surveys,
-  audits, reviews of committed state) run in parallel with the writer and with
-  each other. Never serialize read-only work behind a writer.
+- Parallelize Codex tasks where possible: read-only tasks (plan validations,
+  surveys, audits) always run in parallel with writers and each other. Writer
+  tasks may ALSO run in parallel when their bounded write scopes are provably
+  disjoint — including tests, docs, and the assumptions ledger (assign shared
+  files like the ledger to exactly one task, or the orchestrator writes those
+  rows itself). Overlapping or unclear scopes = serialize. The orchestrator
+  runs unified verification (tsc, suites, gates) once after parallel writers
+  land, before any commit.
 - Do not bias toward the user's ideas or the agent's first idea. Be logical, push back when warranted, and prefer the simplest correct solution.
 - Review-loop escalation rule: when review rounds or live testing surface the
   SAME class of issue more than twice in one area, stop patching findings
