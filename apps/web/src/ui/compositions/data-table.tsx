@@ -44,15 +44,12 @@ export function DataTable<TData>({
   const pageCount = Math.max(1, Math.ceil(data.length / pageSize));
   const pageIndex = Math.min(Math.max(0, page - 1), pageCount - 1);
   const table = useReactTable({
+    autoResetPageIndex: false,
     columns,
     data,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    onSortingChange: (updater) => {
-      const next = typeof updater === 'function' ? updater(sorting) : updater;
-      if (next[0]) onSortChange(next[0].id, next[0].desc);
-    },
     state: {
       pagination: { pageIndex, pageSize },
       sorting,
@@ -80,7 +77,12 @@ export function DataTable<TData>({
                       <button
                         className="inline-flex min-h-8 items-center gap-1.5 rounded px-1 hover:text-text"
                         type="button"
-                        onClick={header.column.getToggleSortingHandler()}
+                        onClick={() =>
+                          onSortChange(
+                            header.column.id,
+                            header.column.getIsSorted() === 'asc',
+                          )
+                        }
                       >
                         {flexRender(
                           header.column.columnDef.header,
