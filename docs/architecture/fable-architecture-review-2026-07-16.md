@@ -73,3 +73,15 @@ cleanup phase) caps growth but nothing burns it down.
 Suggested sequencing by payoff-per-cost: 8 → 3a/3b → 4 → 6 → 7 → 5 → 2 → 1
 (1's small reliability fixes — durable send_message, IPC backpressure —
 shippable immediately).
+
+## Queueing decision (user-approved 2026-07-17)
+
+- NEAR-TERM (after current C+D/audit/permission cycles, before other arch
+  work): finding 8 (retention job, error counters, per-turn child logger) +
+  finding 1's quick fixes (durable send_message via outbound queue; IPC
+  overload defer-not-archive + per-folder cap). Days-class, protects
+  everything else.
+- Finding 6 (composition/appId injection) executes BEFORE the planned
+  tenant-isolation hardening — it is its prerequisite.
+- Remaining cycles as validated goal-prompts in review order:
+  3a/3b → 4 → 7 → 5 → 2 → 1(full). Each through the Codex validation gate.
