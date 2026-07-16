@@ -14,6 +14,13 @@ subagents, verify, review, restart, smoke test, and publish.
 1. Load and follow `ponytail` before implementation. Prefer the smallest
    correct change, delete obsolete paths for single-cut work, and avoid
    compatibility shims unless the user explicitly asks for them.
+2. Plan validation is mandatory before implementation: when handed a
+   goal-prompt validation task, check the plan against current repo truth —
+   gaps, simpler implementation shapes, stale/incorrect seams and refs,
+   ignored risks — and report findings without modifying anything. No
+   implementation stage starts until the orchestrator has resolved the
+   validation findings in the goal-prompt doc.
+
 2. Claude Code is the orchestrator. Implementation stages go through the
    Codex plugin (`codex:codex-rescue` → companion background task) at
    `--effort xhigh` with write access. The orchestrator owns repo grounding,

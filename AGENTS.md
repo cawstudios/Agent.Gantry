@@ -30,7 +30,9 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
 
 - Feature implementation follows the Gantry goal pipeline — always, not optionally:
   approved plan → a goal-prompt doc in `docs/architecture/` (basename
-  ending in -goal-prompt.md) → staged Codex handoffs (Claude orchestrates, Codex
+  ending in -goal-prompt.md) → MANDATORY Codex validation pass of the plan
+  (gaps, simpler shapes, repo-reality mismatches, ignored risks — findings
+  fixed in the doc before any implementation) → staged Codex handoffs (Claude orchestrates, Codex
   implements) → per-stage focused checks + local autoreview before each commit →
   branch-wide autoreview + runtime smoke at closeout → PR. The orchestrator
   contract lives in `.claude/skills/gantry-goal-pipeline/SKILL.md` (Codex twin:
@@ -41,7 +43,22 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
 - Do the work, critique the work, and make sure the task is completed properly end-to-end.
 - Do not take shortcuts. Keep work well-structured, neat, and clean.
 - Do not overcomplicate. Make a plan, seal the flaws, and execute that plan through completion.
+- Parallelize Codex tasks where possible: at most ONE writer task in the
+  worktree at a time, but read-only Codex tasks (plan validations, surveys,
+  audits, reviews of committed state) run in parallel with the writer and with
+  each other. Never serialize read-only work behind a writer.
 - Do not bias toward the user's ideas or the agent's first idea. Be logical, push back when warranted, and prefer the simplest correct solution.
+- Review-loop escalation rule: when review rounds or live testing surface the
+  SAME class of issue more than twice in one area, stop patching findings
+  individually. Step back and re-examine the architecture and the feature's
+  implementation shape: write the invariant/spec the area must satisfy, look
+  for a simplification that removes the failure class structurally (fewer
+  states, one authorization point, one canonical id, plain-text rendering,
+  narrower feature scope), audit every call site against the spec in one pass,
+  and pin the invariants with tests. Recurring findings are a design signal,
+  not a fix queue. Precedents: the batch-claim state machine, canonical
+  revision-document round-trip, and export compare-then-restore in
+  `docs/architecture/runtime-permission-ux-assumptions.md`.
 
 ## Runtime Modes
 

@@ -22,9 +22,23 @@ Gate gotcha: every backticked file path must exist and resolve from repo root
 (`check_task_completion.py` Active Doc References). For files a later stage
 will create, write the bare basename plus prose ("new module in `apps/core/src/runtime/`").
 
+
+## 1a. MANDATORY: Codex plan validation before any implementation handoff
+
+After writing (or updating) the goal-prompt doc and BEFORE the first
+implementation handoff, send Codex a read-only validation handoff: "Validate
+docs/architecture/<name>-goal-prompt.md against the current repository. Report:
+(1) gaps or missing stages, (2) simpler or better implementation shapes,
+(3) claims that contradict repo reality (wrong seams, stale line refs,
+nonexistent files), (4) risks the plan ignores. Do not modify anything." Fix
+every accepted finding in the goal-prompt doc (and surface plan-changing ones
+to the user) before dispatching stage 1. Re-run this validation whenever the
+plan changes materially mid-pipeline. Findings rejected as wrong get a one-line
+note in the assumptions ledger so the decision is recorded.
+
 ## 2. Implementation handoffs
 
-One handoff (stage) at a time — never two writers in the same worktree. Stage
+One WRITER handoff (stage) at a time — never two writers in the same worktree. READ-ONLY Codex tasks (plan validations, surveys, reviews of committed state) SHOULD run in parallel with a writer and with each other whenever queued — do not serialize read-only work. Stage
 size is bounded by packet separability (see §1), not serial run length —
 Codex fans packets out to its subagents. For each stage, spawn an Agent with
 `subagent_type: codex:codex-rescue` whose prompt contains:
