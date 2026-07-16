@@ -89,8 +89,7 @@ export function WorkflowBuilder({
   function removeStep(id: string) {
     const next = steps.filter((step) => step.id !== id);
     setSteps(next);
-    if (selectedId === id)
-      setSelectedId(next[0]?.id ?? '');
+    if (selectedId === id) setSelectedId(next[0]?.id ?? '');
   }
 
   return (
