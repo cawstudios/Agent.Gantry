@@ -267,6 +267,15 @@ PROVIDER_BOUNDARY_DISALLOWED_BROAD_PATHS = (
     "apps/core/src/memory",
     "apps/core/src/shared",
 )
+PROVIDER_PRESENTATION_FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "credential identifier",
+        re.compile(
+            r"\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|GOOGLE_API_KEY|"
+            r"CLAUDE_CODE_OAUTH_TOKEN|SLACK_[A-Z_]+|TELEGRAM_[A-Z_]+)\b"
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -889,6 +898,20 @@ def check_architecture_map_hygiene(root: Path, architecture_map: dict[str, Any])
                     "use exact architecture exceptions for current debt."
                 )
 
+    presentation_paths = architecture_map.get("providerPresentationPaths", [])
+    if isinstance(presentation_paths, list):
+        for raw_path in presentation_paths:
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                issues.append("providerPresentationPaths includes an invalid path.")
+                continue
+            rel = normalize_repo_relative(raw_path)
+            if not path_matches_prefix(rel, "apps/web/src"):
+                issues.append(
+                    f"providerPresentationPaths may only approve browser presentation code: {rel}"
+                )
+            elif not (root / rel).exists():
+                issues.append(f"providerPresentationPaths path does not exist: {rel}")
+
     return sorted(issues)
 
 
@@ -1054,6 +1077,7 @@ def check_provider_specific_paths(
     active_counts: dict[tuple[str, str], int] = {}
     patterns = map_dict(architecture_map, "providerSpecificPatterns")
     approved_paths = map_list(architecture_map, "approvedProviderSpecificPaths")
+    presentation_paths = map_list(architecture_map, "providerPresentationPaths")
     if not patterns:
         return [], active_counts
 
@@ -1067,6 +1091,20 @@ def check_provider_specific_paths(
         if any(path_matches_prefix(source_rel, prefix) for prefix in approved_paths):
             continue
         source_text = source_file.read_text()
+        if any(path_matches_prefix(source_rel, prefix) for prefix in presentation_paths):
+            for name, pattern in PROVIDER_PRESENTATION_FORBIDDEN_PATTERNS:
+                for match in pattern.finditer(source_text):
+                    line = source_text.count("\n", 0, match.start()) + 1
+                    issue = exception_or_issue(
+                        exceptions,
+                        active_counts,
+                        source_rel,
+                        "provider_specific_path",
+                        f"{source_rel}:{line}: provider presentation contains forbidden {name} `{match.group(0)}`.",
+                    )
+                    if issue:
+                        issues.add(issue)
+            continue
         for name, pattern in compiled:
             for match in pattern.finditer(source_text):
                 line = source_text.count("\n", 0, match.start()) + 1
@@ -1141,6 +1179,7 @@ def check_provider_boundary(
 ) -> list[str]:
     issues: list[str] = []
     approved_paths = provider_boundary_approved_paths(architecture_map)
+    presentation_paths = map_list(architecture_map, "providerPresentationPaths")
     if not approved_paths:
         issues.append(
             "approvedProviderBoundaryPaths must include at least one provider adapter path."
@@ -1172,6 +1211,8 @@ def check_provider_boundary(
         source_rel = source_file.relative_to(root).as_posix()
         source_text = source_file.read_text()
         matches = count_provider_boundary_tokens(source_text)
+        if any(path_matches_prefix(source_rel, prefix) for prefix in presentation_paths):
+            matches.pop("anthropic_sdk", None)
         if not matches:
             continue
         if any(path_matches_prefix(source_rel, prefix) for prefix in approved_paths):

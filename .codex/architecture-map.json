@@ -193,6 +193,9 @@
     "apps/core/src/cli",
     "apps/core/src/runner/mcp"
   ],
+  "providerPresentationPaths": [
+    "apps/web/src"
+  ],
   "approvedProviderBoundaryPaths": [
     "apps/core/src/adapters/llm/anthropic-claude-agent",
     "apps/core/src/adapters/llm/deepagents-langchain"
