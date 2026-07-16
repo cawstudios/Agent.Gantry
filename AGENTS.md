@@ -28,12 +28,41 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
 
 ## Execution Standards
 
+- Feature implementation follows the Gantry goal pipeline — always, not optionally:
+  approved plan → a goal-prompt doc in `docs/architecture/` (basename
+  ending in -goal-prompt.md) → MANDATORY Codex validation pass of the plan
+  (gaps, simpler shapes, repo-reality mismatches, ignored risks — findings
+  fixed in the doc before any implementation) → staged Codex handoffs (Claude orchestrates, Codex
+  implements) → per-stage focused checks + local autoreview before each commit →
+  branch-wide autoreview + runtime smoke at closeout → PR. The orchestrator
+  contract lives in `.claude/skills/gantry-goal-pipeline/SKILL.md` (Codex twin:
+  `.codex/skills/gantry-goal-pipeline/SKILL.md`). Do not implement feature work
+  inline outside this pipeline.
 - Always choose the best proven performance technique for the task and context.
 - Do not use laid-back approaches or loose thinking; reason precisely and verify assumptions.
 - Do the work, critique the work, and make sure the task is completed properly end-to-end.
 - Do not take shortcuts. Keep work well-structured, neat, and clean.
 - Do not overcomplicate. Make a plan, seal the flaws, and execute that plan through completion.
+- Parallelize Codex tasks where possible: read-only tasks (plan validations,
+  surveys, audits) always run in parallel with writers and each other. Writer
+  tasks may ALSO run in parallel when their bounded write scopes are provably
+  disjoint — including tests, docs, and the assumptions ledger (assign shared
+  files like the ledger to exactly one task, or the orchestrator writes those
+  rows itself). Overlapping or unclear scopes = serialize. The orchestrator
+  runs unified verification (tsc, suites, gates) once after parallel writers
+  land, before any commit.
 - Do not bias toward the user's ideas or the agent's first idea. Be logical, push back when warranted, and prefer the simplest correct solution.
+- Review-loop escalation rule: when review rounds or live testing surface the
+  SAME class of issue more than twice in one area, stop patching findings
+  individually. Step back and re-examine the architecture and the feature's
+  implementation shape: write the invariant/spec the area must satisfy, look
+  for a simplification that removes the failure class structurally (fewer
+  states, one authorization point, one canonical id, plain-text rendering,
+  narrower feature scope), audit every call site against the spec in one pass,
+  and pin the invariants with tests. Recurring findings are a design signal,
+  not a fix queue. Precedents: the batch-claim state machine, canonical
+  revision-document round-trip, and export compare-then-restore in
+  `docs/architecture/runtime-permission-ux-assumptions.md`.
 
 ## Runtime Modes
 

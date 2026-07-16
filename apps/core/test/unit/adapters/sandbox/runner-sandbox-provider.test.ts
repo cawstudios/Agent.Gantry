@@ -10,6 +10,10 @@ import {
   buildSandboxRuntimeWarmTemplate,
   createRunnerSandboxProvider,
 } from '@core/adapters/sandbox/runner-sandbox-provider.js';
+import {
+  allowSandboxRuntimeDestination,
+  sandboxRuntimeAskCallback,
+} from '@core/adapters/sandbox/sandbox-runtime-runner.js';
 
 const mockChildKill = vi.hoisted(() => vi.fn(() => true));
 
@@ -224,8 +228,7 @@ describe('runner sandbox provider', () => {
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
       expect.arrayContaining([
-        expect.stringMatching(/sandbox-runtime\/dist\/cli\.js$/),
-        '--settings',
+        expect.stringMatching(/sandbox-runtime-runner\.(?:js|ts)$/),
         '/work/agent/.gantry/sandbox.json',
       ]),
       expect.objectContaining({
@@ -257,6 +260,50 @@ describe('runner sandbox provider', () => {
     } else {
       expect(config.network.allowMachLookup).toBeUndefined();
     }
+  });
+
+  it('lets undeclared public destinations reach the Gantry egress proxy', async () => {
+    const callback = sandboxRuntimeAskCallback({
+      network: {
+        allowedDomains: [],
+        deniedDomains: [],
+        parentProxy: { http: 'http://127.0.0.1:18789' },
+      },
+    });
+
+    await expect(
+      callback?.({
+        host: 'registry.npmjs.org',
+        port: 443,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('denies unmatched destinations without a Gantry parent proxy', async () => {
+    const callback = sandboxRuntimeAskCallback({
+      network: { allowedDomains: [], deniedDomains: [] },
+    });
+
+    expect(callback).toBeUndefined();
+    expect(
+      (await callback?.({ host: 'registry.npmjs.org', port: 443 })) ?? false,
+    ).toBe(false);
+  });
+
+  it.each([
+    'localhost',
+    'api.localhost',
+    '127.42.0.1',
+    '::1',
+    '10.0.0.1',
+    '172.16.0.1',
+    '192.168.0.1',
+    '169.254.169.254',
+    'fe80::1',
+  ])('rejects direct loopback or private destination %s', async (host) => {
+    await expect(
+      allowSandboxRuntimeDestination({ host, port: 443 }),
+    ).resolves.toBe(false);
   });
 
   it('allows Claude SDK generated config state inside the runtime config dir', () => {

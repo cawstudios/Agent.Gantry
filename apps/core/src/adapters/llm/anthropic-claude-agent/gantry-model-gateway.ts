@@ -1,6 +1,5 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-
 import { ModelCredentialService } from '../../../application/model-credentials/model-credential-service.js';
 import type { AppId } from '../../../domain/app/app.js';
 import type { RuntimeEventPublishInput } from '../../../domain/events/events.js';
@@ -33,6 +32,12 @@ import {
 import { logger } from '../../../infrastructure/logging/logger.js';
 import { normalizeModelUsage } from '../../../shared/model-usage.js';
 import {
+  beginGatewayObservation,
+  failGatewayObservation,
+  finishGatewayNonStreaming,
+  resolveGatewayTap,
+} from './gantry-model-gateway-observability.js';
+import {
   assertProviderPathAllowed,
   injectProviderAuth,
   resolveGatewayUpstream,
@@ -49,19 +54,19 @@ import {
   normalizeGatewayBindHost,
   pipeUpstreamBody,
   readBearerToken,
+  readGatewayResponsePayload,
   readRequestBody,
+  usageFromGatewayPayload,
   sanitizeProxyHeaders,
   sendGatewayJson,
   shouldForwardGatewayResponseHeader,
 } from './gantry-model-gateway-http.js';
-
 const TOKEN_PREFIX = 'gtw_';
 const DEFAULT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_TOKEN_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_TOKENS = 1024;
 const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 10 * 60 * 1000;
-
 interface GatewayTokenRecord {
   token: string;
   appId: AppId;
@@ -80,7 +85,6 @@ interface GatewayTokenRecord {
   conversationId?: RuntimeEventPublishInput['conversationId'];
   threadId?: RuntimeEventPublishInput['threadId'];
 }
-
 export class GantryModelGatewayBroker implements AgentCredentialBroker {
   private readonly credentialService: ModelCredentialService;
   private server?: http.Server;
@@ -100,7 +104,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
   // In-memory per-(app, provider) sliding-window rate limiter. The settings
   // getter is read live so a reload applies without rebuilding the broker.
   private readonly rateLimiter: GatewayRateLimiter;
-
   constructor(
     private readonly credentials: ModelCredentialRepository,
     options: {
@@ -129,7 +132,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
     this.audit = options.audit;
     this.rateLimiter = new GatewayRateLimiter(options.limits);
   }
-
   async getInjection(
     input: AgentCredentialBrokerInput,
   ): Promise<AgentCredentialInjection> {
@@ -198,7 +200,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       brokerAuthMode: credential.authMode,
     };
   }
-
   async healthCheck(
     input?: AgentCredentialBrokerInput,
   ): Promise<CredentialBrokerHealth> {
@@ -234,7 +235,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       details: [`fingerprint=${credential.fingerprint}`],
     };
   }
-
   getCapabilities(): AgentCredentialBrokerCapabilities {
     return {
       profile: 'gantry',
@@ -246,7 +246,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       projectedSecretEnvKeys: projectedModelCredentialEnvKeys(),
     };
   }
-
   async revokeInjection(input: AgentCredentialBrokerInput): Promise<void> {
     const provider = gatewayProviderFor(
       input.binding.modelCredentialProviderId ??
@@ -271,7 +270,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       }
     }
   }
-
   async close(): Promise<void> {
     const server = this.server;
     this.server = undefined;
@@ -288,7 +286,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       server.close((error) => (error ? reject(error) : resolve()));
     });
   }
-
   private ensureListening(): Promise<void> {
     if (this.port > 0) return Promise.resolve();
     this.listenPromise ??= new Promise<void>((resolve, reject) => {
@@ -333,7 +330,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
     });
     return this.listenPromise;
   }
-
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -374,7 +370,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       });
       return;
     }
-
     const credential = await this.credentialService.getActiveCredential({
       appId: tokenRecord.appId,
       providerId,
@@ -402,7 +397,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       });
       return;
     }
-
     const upstream = resolveGatewayUpstream(
       provider,
       credential.authMode,
@@ -419,7 +413,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       upstreamUrl.pathname,
       upstream.pathPrefix,
     );
-
     // In-memory per-(app, provider) sliding-window rate cap. Enforced AFTER
     // credential/path validation and BEFORE body read, auth injection, and
     // upstream fetch, so a rejected request never triggers provider auth work.
@@ -440,19 +433,28 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
         }),
     });
     if (rateLimited) return;
-
     const body = await readRequestBody(req, this.requestBodyLimitBytes);
-    const headers = sanitizeProxyHeaders(req.headers);
-    await injectProviderAuth({
-      headers,
-      provider,
-      authMode: credential.authMode,
-      payload: credential.payload,
-      method: req.method ?? 'POST',
+    const { observation, requestBody } = beginGatewayObservation({
+      token: tokenRecord,
+      providerId,
       upstreamUrl,
       body,
     });
-
+    const headers = sanitizeProxyHeaders(req.headers);
+    try {
+      await injectProviderAuth({
+        headers,
+        provider,
+        authMode: credential.authMode,
+        payload: credential.payload,
+        method: req.method ?? 'POST',
+        upstreamUrl,
+        body: requestBody,
+      });
+    } catch (error) {
+      failGatewayObservation(observation, error);
+      throw error;
+    }
     const upstreamAbort = new AbortController();
     const timeout = setTimeout(
       () =>
@@ -473,32 +475,57 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       response = await fetch(upstreamUrl, {
         method: req.method ?? 'POST',
         headers,
-        body,
+        body: requestBody,
         signal: upstreamAbort.signal,
       });
+    } catch (error) {
+      failGatewayObservation(observation, error);
+      throw error;
     } finally {
       clearTimeout(timeout);
       req.off('aborted', onClientAbort);
       res.off('close', onClientAbort);
     }
-    const usage = await extractGatewayResponseUsage(response, body);
+    const parsedResponse = await readGatewayResponsePayload(
+      response,
+      requestBody,
+    );
+    const usage = usageFromGatewayPayload(parsedResponse);
+    const status = response.status;
+    finishGatewayNonStreaming(
+      observation,
+      status,
+      response,
+      parsedResponse?.payload,
+      usage,
+    );
     await this.publishGatewayUseAudit(tokenRecord, {
       outcome: response.ok ? 'forwarded' : 'upstream_error',
       method: req.method ?? 'GET',
-      status: response.status,
+      status,
       upstreamHost: upstreamUrl.host,
       upstreamPath: upstreamUrl.pathname,
       credentialFingerprint: credential.fingerprint,
       usage,
     });
-    res.statusCode = response.status;
+    res.statusCode = status;
     response.headers.forEach((value, key) => {
       if (!shouldForwardGatewayResponseHeader(key)) return;
       res.setHeader(key, value);
     });
-    await pipeUpstreamBody(response, res);
+    const tap = resolveGatewayTap(observation, response);
+    try {
+      await pipeUpstreamBody(response, res, tap);
+      if (observation?.isStreaming) observation.finish({ status });
+    } catch (error) {
+      if (observation?.isStreaming)
+        observation.finish({
+          status,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      throw error;
+    }
   }
-
   private async publishGatewayUseAudit(
     tokenRecord: GatewayTokenRecord,
     input: {
@@ -552,7 +579,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       logger.warn({ err }, 'Gantry Model Gateway usage audit failed');
     }
   }
-
   private async publishGatewayTokenAudit(
     tokenRecord: GatewayTokenRecord,
     outcome: 'token_issued' | 'token_rejected',
@@ -586,7 +612,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
       logger.warn({ err }, 'Gantry Model Gateway token audit failed');
     }
   }
-
   private startTokenSweep(): void {
     if (this.tokenSweepTimer || this.tokenSweepIntervalMs <= 0) return;
     this.tokenSweepTimer = setInterval(
@@ -595,7 +620,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
     );
     this.tokenSweepTimer.unref?.();
   }
-
   private sweepExpiredTokens(nowMs = Date.now()): void {
     for (const [token, record] of this.tokens.entries()) {
       if (nowMs >= record.expiresAtMs) {
@@ -604,40 +628,20 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
     }
   }
 }
-
 export async function extractGatewayResponseUsage(
   response: Response,
   requestBody: Buffer,
 ) {
-  if (!response.ok) return undefined;
-  if (response.headers.get('content-type')?.includes('text/event-stream'))
-    return undefined;
-  try {
-    const requestJson = requestBody.toString('utf8');
-    const request = JSON.parse(requestJson) as Record<string, unknown>;
-    if (request.stream === true) return undefined;
-    const payload = (await response.clone().json()) as Record<string, unknown>;
-    return normalizeModelUsage({
-      message: payload,
-      fallbackModel:
-        typeof payload.model === 'string'
-          ? payload.model
-          : typeof request.model === 'string'
-            ? request.model
-            : undefined,
-    });
-  } catch {
-    return undefined;
-  }
+  return usageFromGatewayPayload(
+    await readGatewayResponsePayload(response, requestBody),
+  );
 }
-
 function gatewayProviderFor(providerId: string): ModelProviderDefinition {
   const normalized = normalizeModelProviderId(providerId);
   const provider = getModelProviderDefinition(normalized);
   if (provider?.executable && provider.gateway) return provider;
   throw new Error(`Unsupported model gateway provider: ${providerId}`);
 }
-
 function runtimeEventRunIdFor(
   tokenRecord: GatewayTokenRecord,
 ): RuntimeEventPublishInput['runId'] | undefined {
@@ -648,7 +652,6 @@ function runtimeEventRunIdFor(
     ? undefined
     : tokenRecord.runId;
 }
-
 function gatewayTokenScope(
   binding: AgentCredentialBrokerInput['binding'],
 ): string {
@@ -660,11 +663,9 @@ function gatewayTokenScope(
   if (binding.runId) return `run:${String(binding.runId)}`;
   return 'unscoped';
 }
-
 function isRevocableGatewayTokenScope(scope: string): boolean {
   return scope.startsWith('run:') || scope.startsWith('api_key:');
 }
-
 function defaultGatewayProviderId(): string {
   const provider = getDefaultModelRouteProvider();
   if (!provider) {
@@ -672,20 +673,17 @@ function defaultGatewayProviderId(): string {
   }
   return provider.id;
 }
-
 function gatewayProviderForPath(pathSegment: string): ModelProviderDefinition {
   const provider = getModelProviderByGatewayPath(pathSegment);
   if (provider?.executable && provider.gateway) return provider;
   throw new Error(`Unsupported model gateway provider: ${pathSegment}`);
 }
-
 function requireBindingAppId(input: AgentCredentialBrokerInput): AppId {
   if (!input.binding.appId) {
     throw new Error('Gantry Model Gateway credential binding requires appId.');
   }
   return input.binding.appId;
 }
-
 function projectGatewayTokenEnv(input: {
   provider: ModelProviderDefinition;
   baseUrl: string;
@@ -700,7 +698,6 @@ function projectGatewayTokenEnv(input: {
       : {}),
   };
 }
-
 function projectedModelCredentialEnvKeys(): string[] {
   return [
     ...new Set([

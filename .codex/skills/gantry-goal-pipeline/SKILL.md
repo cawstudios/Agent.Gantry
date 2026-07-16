@@ -14,6 +14,13 @@ subagents, verify, review, restart, smoke test, and publish.
 1. Load and follow `ponytail` before implementation. Prefer the smallest
    correct change, delete obsolete paths for single-cut work, and avoid
    compatibility shims unless the user explicitly asks for them.
+2. Plan validation is mandatory before implementation: when handed a
+   goal-prompt validation task, check the plan against current repo truth —
+   gaps, simpler implementation shapes, stale/incorrect seams and refs,
+   ignored risks — and report findings without modifying anything. No
+   implementation stage starts until the orchestrator has resolved the
+   validation findings in the goal-prompt doc.
+
 2. Claude Code is the orchestrator. Implementation stages go through the
    Codex plugin (`codex:codex-rescue` → companion background task) at
    `--effort xhigh` with write access. The orchestrator owns repo grounding,
@@ -78,8 +85,18 @@ For any non-trivial plan or feature:
 2. Give each Codex handoff the exact files or surfaces it owns. Do not ask
    Codex to make product decisions.
 3. Require Codex to use existing repo patterns and to keep diffs surgical.
+3a. Record every assumption made because information was missing (ambiguous
+   contract, undocumented behavior, unverifiable external fact) in the plan's
+   assumptions ledger — the file next to the goal prompt with the
+   `-assumptions.md` suffix, under the current stage's section, one table row
+   per assumption: what was assumed, the missing info that forced it, the
+   choice taken, impact if wrong. Leave the `Validated` column empty (the
+   orchestrator fills it). No assumptions → write "None." under the stage
+   heading. Never make a silent product decision: if the assumption changes
+   user-visible behavior, stop and report it as a blocker instead.
 4. After each handoff returns, the orchestrator must inspect the diff, reject
-   overbuilt code, and run the smallest relevant checks.
+   overbuilt code, validate the stage's assumptions-ledger rows against the
+   code, and run the smallest relevant checks.
 5. For single-cut or no-legacy work, search for old active names, imports,
    table names, config keys, routes, docs, and tests before calling the cutover
    complete.

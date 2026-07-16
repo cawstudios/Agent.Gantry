@@ -413,7 +413,7 @@ describe('inline core tool bootstrap', () => {
       appId: 'default',
       agentFolder: 'main_agent',
       suggestionKey: 'main_agent|RunCommand(git status)',
-      allowCount: 3,
+      allowCount: 2,
       lastOfferedAt: null,
       deniedAt: null,
       createdAt: '2026-07-12T00:00:00.000Z',
@@ -421,7 +421,7 @@ describe('inline core tool bootstrap', () => {
     };
     const incrementAndGet = vi.fn(async () => ({
       ...counter,
-      allowCount: 4,
+      allowCount: 3,
     }));
     wire({
       getPermissionPromotionRepository: () => ({
@@ -445,7 +445,10 @@ describe('inline core tool bootstrap', () => {
     });
 
     expect(requestPermissionApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ promotionHintCount: 3 }),
+      expect.objectContaining({
+        promotionHintCount: 2,
+        decisionOptions: ['allow_persistent_rule', 'allow_once', 'cancel'],
+      }),
     );
     await vi.waitFor(() => expect(incrementAndGet).toHaveBeenCalledOnce());
   });
@@ -468,7 +471,7 @@ describe('inline core tool bootstrap', () => {
     expect(requestPermissionApproval).not.toHaveBeenCalled();
   });
 
-  it('auto-allows an eligible remote MCP tool without rendering a prompt and audits the verdict', async () => {
+  it('auto-allows a deterministic-safe remote MCP tool after classifier consultation', async () => {
     const classifierConsult = vi.fn(async () => ({
       decision: 'allow' as const,
       reason: 'Read-only lookup matches the turn intent.',
@@ -506,11 +509,7 @@ describe('inline core tool bootstrap', () => {
       tools.authorizeThirdPartyMcpTool('mcp__crm__read', { id: 'crm-1' }),
     ).resolves.toEqual({ allowed: true });
     expect(classifierConsult).toHaveBeenCalledWith(
-      expect.objectContaining({
-        turnIntentSummary: 'hello',
-        canonicalToolName: 'mcp__crm__read',
-        approvedCapabilityIds: ['mcp.crm.access'],
-      }),
+      expect.objectContaining({ posture: 'allow_leaning' }),
     );
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(input.emitOutput).not.toHaveBeenCalled();
@@ -562,7 +561,7 @@ describe('inline core tool bootstrap', () => {
     );
 
     await expect(
-      tools.authorizeThirdPartyMcpTool('mcp__crm__read', { id: 'crm-1' }),
+      tools.authorizeThirdPartyMcpTool('mcp__crm__lookup', { id: 'crm-1' }),
     ).resolves.toEqual({ allowed: true });
     expect(classifierConsult).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -666,7 +665,7 @@ describe('inline core tool bootstrap', () => {
     );
 
     await expect(
-      tools.authorizeThirdPartyMcpTool('mcp__crm__read', { id: 'crm-1' }),
+      tools.authorizeThirdPartyMcpTool('mcp__crm__lookup', { id: 'crm-1' }),
     ).resolves.toEqual({
       allowed: false,
       reason:
@@ -721,7 +720,7 @@ describe('inline core tool bootstrap', () => {
         })) as never),
       );
 
-      await tools.authorizeThirdPartyMcpTool('mcp__crm__read', {
+      await tools.authorizeThirdPartyMcpTool('mcp__crm__lookup', {
         id: 'crm-1',
       });
 
@@ -738,6 +737,7 @@ describe('inline core tool bootstrap', () => {
   it.each([
     ['ask', 'mcp__crm__read'],
     ['auto', 'mcp__gantry__request_access'],
+    ['auto_strict', 'mcp__gantry__request_access'],
   ] as const)(
     'does not consult in mode %s for ineligible/non-auto tool %s',
     async (permissionMode, toolName) => {

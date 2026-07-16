@@ -32,7 +32,7 @@ export const RuntimeSettingsConfiguredAgentBindingSchema = z
     addedAt: z.string().trim().min(1),
     requiresTrigger: z.boolean(),
     model: z.string().optional(),
-    permissionMode: z.enum(['ask', 'auto']).optional(),
+    permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
   })
   .strict();
 
@@ -122,7 +122,7 @@ export const RuntimeSettingsConfiguredAgentSchema = z
     relationshipMode: AgentRelationshipModeSchema.optional(),
     model: z.string().optional(),
     agentHarness: AgentHarnessSchema.optional(),
-    permissionMode: z.enum(['ask', 'auto']).optional(),
+    permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
     runtime: z.enum(['worker', 'inline']).optional(),
     maxTurns: z.number().int().positive().optional(),
     maxRunTokens: z.number().int().positive().optional(),
@@ -202,7 +202,7 @@ export const RuntimeSettingsConversationSchema = z
           trigger: z.string().optional(),
           requiresTrigger: z.boolean().optional(),
           model: z.string().optional(),
-          permissionMode: z.enum(['ask', 'auto']).optional(),
+          permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
         })
         .strict(),
     ),
@@ -221,7 +221,7 @@ export const RuntimeSettingsBindingSchema = z
     requiresTrigger: z.boolean(),
     memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
     model: z.string().optional(),
-    permissionMode: z.enum(['ask', 'auto']).optional(),
+    permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
   })
   .strict();
 
@@ -263,7 +263,7 @@ export const RuntimeSettingsPublicSchema = z
           trigger: z.string().optional(),
           requiresTrigger: z.boolean().optional(),
           model: z.string().optional(),
-          permissionMode: z.enum(['ask', 'auto']).optional(),
+          permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
         })
         .strict(),
     ),

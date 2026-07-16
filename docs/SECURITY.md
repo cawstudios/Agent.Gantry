@@ -109,7 +109,11 @@ inventory only the current agent's persistent Gantry MCP grants, and
 `admin_permission_revoke` can revoke only a current-agent grant. They do not
 create new authority or expose cross-agent grant state.
 
-In `auto` permission mode, an inline LLM classifier may resolve an otherwise
+Two auto postures exist: `auto` (allow-leaning — the classifier allows
+unless it identifies concrete risk; the denylist and sanitized-input rails
+always force ask) and `auto_strict` (deterministic-proof-only — unproven
+commands always ask and the classifier is never consulted). In `auto`
+permission mode, an inline LLM classifier may resolve an otherwise
 prompt-bound tool permission without interrupting a human. Deterministic
 policy tiers always run first; the classifier is consulted only for requests
 those tiers already routed to a human prompt, and only for eligible tools

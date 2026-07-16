@@ -121,12 +121,13 @@ export async function startGantryRuntime(
     isControlApproverAllowed: channelWiring.isControlApproverAllowed,
   });
 
-  let { runtimeSettings } = await runStartup(app, {
-    settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
-    validateSettingsImportPreflight: options.skipPreflight
-      ? () => ({ ok: true })
-      : validateRuntimePreflight,
-  });
+  let { runtimeSettings, closeTracing, initTracingFromSettings } =
+    await runStartup(app, {
+      settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
+      validateSettingsImportPreflight: options.skipPreflight
+        ? () => ({ ok: true })
+        : validateRuntimePreflight,
+    });
   const storage = getRuntimeStorage();
   channelWiring.setRuntimeSecrets(
     createRepositoryRuntimeSecretProvider({
@@ -159,6 +160,12 @@ export async function startGantryRuntime(
     if (!validation.ok && validation.failure) {
       throw new Error(formatRuntimePreflightFailure(validation.failure));
     }
+  }
+  // Settings are final on every path here (workstation revision authority, or
+  // fleet after prepareFleetSettings). A fleet worker with no revision yet
+  // skips init: tracing must never configure from a stale local mirror.
+  if (fleetSettingsLoaded) {
+    initTracingFromSettings(runtimeSettings);
   }
   // P2 guard: a fleet worker with no settings revision must not claim
   // scheduled jobs under bundled default settings (/readyz red only protects
@@ -224,6 +231,7 @@ export async function startGantryRuntime(
     },
     closeLiveTurnAuthority: shutdownLiveTurnAuthority,
     closeSettingsWatcher: settingsWatcher.close,
+    closeTracing,
     closeLiveRecoveryCoordinatorLease: async () => {
       await liveRecoveryCoordinatorLeaseManager.stop();
     },
@@ -349,6 +357,17 @@ export async function startGantryRuntime(
         capabilityReconciliation: roleCaps.workerRegistration,
         settingsLoaded: fleetSettingsLoaded,
         onSettingsReady: async () => {
+          // Tracing was skipped at boot (no revision yet); initialize from
+          // the first authoritative revision BEFORE the scheduler guard —
+          // control/live-worker roles never hold a scheduler start.
+          try {
+            initTracingFromSettings(loadRuntimeSettings(GANTRY_HOME));
+          } catch (err) {
+            logger.warn(
+              { err },
+              'Failed to initialize tracing on first settings revision',
+            );
+          }
           const start = heldSchedulerStart;
           heldSchedulerStart = undefined;
           if (!start) return;

@@ -163,7 +163,7 @@ describe('contracts package', () => {
         maxTurns: 12,
         maxRunTokens: 8192,
         effort: 'xhigh',
-        permissionMode: 'auto',
+        permissionMode: 'auto_strict',
         thinking: { mode: 'on', budgetTokens: 4096 },
         maxOutputTokens: 2048,
         toolRules: [
@@ -185,7 +185,7 @@ describe('contracts package', () => {
       maxTurns: 12,
       maxRunTokens: 8192,
       effort: 'xhigh',
-      permissionMode: 'auto',
+      permissionMode: 'auto_strict',
       thinking: { mode: 'on', budgetTokens: 4096 },
       maxOutputTokens: 2048,
       toolRules: expect.arrayContaining([
@@ -596,7 +596,7 @@ describe('contracts package', () => {
             relationshipMode: 'organization',
             model: 'sonnet',
             agentHarness: 'deepagents',
-            permissionMode: 'auto',
+            permissionMode: 'auto_strict',
             oneTimeJobDefaultModel: 'inherit',
             recurringJobDefaultModel: 'inherit',
             bindings: {
@@ -609,6 +609,7 @@ describe('contracts package', () => {
                 trigger: '@main',
                 addedAt: iso,
                 requiresTrigger: true,
+                permissionMode: 'auto_strict',
               },
             },
             sources: { skills: [], mcpServers: [], tools: [] },
@@ -644,6 +645,7 @@ describe('contracts package', () => {
                 memoryScope: 'conversation',
                 trigger: '@main',
                 requiresTrigger: true,
+                permissionMode: 'auto_strict',
               },
             },
           },
@@ -659,6 +661,7 @@ describe('contracts package', () => {
             addedAt: iso,
             requiresTrigger: true,
             memoryScope: 'conversation',
+            permissionMode: 'auto_strict',
           },
         },
         conversationInstalls: {
@@ -672,6 +675,7 @@ describe('contracts package', () => {
             memoryScope: 'conversation',
             trigger: '@main',
             requiresTrigger: true,
+            permissionMode: 'auto_strict',
           },
         },
         memory: { enabled: true, dreaming: { enabled: false } },
@@ -720,7 +724,24 @@ describe('contracts package', () => {
     );
     expect(parsed.settings.agent.agentHarness).toBe('auto');
     expect(parsed.settings.agents.main_agent?.agentHarness).toBe('deepagents');
-    expect(parsed.settings.agents.main_agent?.permissionMode).toBe('auto');
+    expect(parsed.settings.agents.main_agent?.permissionMode).toBe(
+      'auto_strict',
+    );
+    expect(
+      parsed.settings.agents.main_agent?.bindings.main_agent_shared_channel
+        ?.permissionMode,
+    ).toBe('auto_strict');
+    expect(
+      parsed.settings.conversations.shared_channel?.installedAgents.main_agent
+        ?.permissionMode,
+    ).toBe('auto_strict');
+    expect(
+      parsed.settings.bindings.main_agent_shared_channel?.permissionMode,
+    ).toBe('auto_strict');
+    expect(
+      parsed.settings.conversationInstalls.main_agent_shared_channel
+        ?.permissionMode,
+    ).toBe('auto_strict');
     expect(parsed.settings.permissions.autoMode).toEqual({ model: 'sonnet' });
     expectInvalid(RuntimeSettingsResponseSchema, {
       settings: {

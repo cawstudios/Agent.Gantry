@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type {
   RunnerSandboxProvider,
@@ -58,7 +59,6 @@ const MACOS_FSEVENTS_MACH_SERVICE = 'com.apple.FSEvents';
 let cachedSandboxRuntimeWarmTemplate:
   | Readonly<SandboxRuntimeWarmTemplate>
   | undefined;
-let cachedSandboxRuntimeCli: string | undefined;
 
 export function createRunnerSandboxProvider(
   settings: RunnerSandboxProviderSelection,
@@ -137,22 +137,15 @@ class SandboxRuntimeRunnerSandboxProvider implements RunnerSandboxProvider {
       JSON.stringify(buildSandboxRuntimeConfig(input), null, 2),
       { mode: 0o600 },
     );
-    const cli = resolveSandboxRuntimeCli();
+    const runner = resolveSandboxRuntimeRunner();
     const limited = applyResourceLimits(
       input.command,
       input.args,
       input.resourceLimits ?? this.resourceLimits,
     );
     const child = spawn(
-      process.execPath,
-      [
-        cli,
-        '--settings',
-        input.configFilePath,
-        '--',
-        limited.command,
-        ...limited.args,
-      ],
+      runner.command,
+      [...runner.args, input.configFilePath, limited.command, ...limited.args],
       {
         cwd: input.cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -629,10 +622,19 @@ function uniquePaths(paths: readonly string[]): string[] {
   return [...new Set(paths.filter((item) => item.trim().length > 0))];
 }
 
-function resolveSandboxRuntimeCli(): string {
-  if (cachedSandboxRuntimeCli) return cachedSandboxRuntimeCli;
+function resolveSandboxRuntimeRunner(): PreparedCommand {
+  const currentPath = fileURLToPath(import.meta.url);
+  const extension = path.extname(currentPath);
+  const runnerPath = path.join(
+    path.dirname(currentPath),
+    `sandbox-runtime-runner${extension}`,
+  );
+  if (extension === '.js') {
+    return { command: process.execPath, args: [runnerPath] };
+  }
   const require = createRequire(import.meta.url);
-  const pkgPath = require.resolve('@anthropic-ai/sandbox-runtime/package.json');
-  cachedSandboxRuntimeCli = path.join(path.dirname(pkgPath), 'dist', 'cli.js');
-  return cachedSandboxRuntimeCli;
+  return {
+    command: process.execPath,
+    args: [require.resolve('tsx/cli'), runnerPath],
+  };
 }

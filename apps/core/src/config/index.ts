@@ -64,6 +64,11 @@ export type ControlEnvKey =
 export function getControlEnvValue(key: ControlEnvKey): string {
   return envValueDynamic(key);
 }
+// Registered runtime secrets (source-classification.ts) read from process env
+// first, then GANTRY_HOME/.env — managed services pass a minimal process env.
+export function readRuntimeSecretEnv(key: string): string {
+  return envValueDynamic(key);
+}
 const GANTRY_HOME_RAW =
   process.env.GANTRY_HOME?.trim() || envConfig.GANTRY_HOME?.trim() || '';
 export const GANTRY_HOME = getGantryHome(GANTRY_HOME_RAW);

@@ -113,7 +113,7 @@ import {
   createTelegramChannel,
   TelegramChannel,
   TelegramChannelOpts,
-} from '@core/channels/telegram.js';
+} from '@core/channels/telegram/channel-adapter.js';
 import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
 import { writeTelegramFetchResponseToFile } from '@core/channels/telegram-file-download.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
@@ -3512,7 +3512,7 @@ describe('TelegramChannel', () => {
       expect(decision.approved).toBe(true);
     });
 
-    it('DMs oversized permission full view files to approvers instead of the group', async () => {
+    it('sends oversized permission full view files to the group next to the prompt', async () => {
       const opts = createTelegramGroupApprovalOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -3551,19 +3551,16 @@ describe('TelegramChannel', () => {
       await flushPromises();
 
       const calls = currentBot().api.sendMessage.mock.calls;
-      expect(currentBot().api.sendDocument).toHaveBeenCalled();
-      for (const call of currentBot().api.sendDocument.mock.calls) {
-        expect(call[0]).not.toBe('-100200300');
-      }
-      const uploaded = currentBot()
-        .api.sendDocument.mock.calls.map((call) =>
-          String((call[1] as any).data),
-        )
-        .join('');
-      expect(uploaded).toContain(tail);
+      expect(currentBot().api.sendDocument).toHaveBeenCalledTimes(1);
+      const documentCall = currentBot().api.sendDocument.mock.calls[0];
+      expect(documentCall[0]).toBe('-100200300');
+      expect(String((documentCall[2] as any)?.caption)).toContain(
+        'Full details for:',
+      );
+      expect(String((documentCall[1] as any).data)).toContain(tail);
       const promptCall = calls.at(-1);
       expect(promptCall?.[0]).toBe('-100200300');
-      expect(promptCall?.[1]).toContain('View diff: sent to approver DM.');
+      expect(promptCall?.[1]).toContain('View diff: sent above for review.');
       expect(promptCall?.[2]).toMatchObject({
         parse_mode: 'HTML',
         reply_markup: expect.objectContaining({
@@ -3579,176 +3576,6 @@ describe('TelegramChannel', () => {
       });
       const decision = await decisionPromise;
       expect(decision.approved).toBe(true);
-    });
-
-    it('sends oversized permission full view files only to that Telegram conversation approvers', async () => {
-      const base = createTestOpts().runtimeSettings!();
-      const opts = createTestOpts({
-        runtimeSettings: vi.fn(() => ({
-          ...base,
-          conversations: {
-            wrong_conversation: {
-              ...base.conversations.whatsapp_main_conversation,
-              externalId: '-100999',
-              controlApprovers: ['999'],
-            },
-            right_conversation: {
-              ...base.conversations.whatsapp_main_conversation,
-              externalId: '-100200300',
-              controlApprovers: ['12345'],
-            },
-          },
-          bindings: {
-            wrong_binding: {
-              ...base.bindings.whatsapp_main_binding,
-              conversation: 'wrong_conversation',
-            },
-            right_binding: {
-              ...base.bindings.whatsapp_main_binding,
-              conversation: 'right_conversation',
-            },
-          },
-        })),
-      });
-      const channel = new TelegramChannel('test-token', opts);
-      await channel.connect();
-
-      const decisionPromise = channel.requestPermissionApproval(
-        'tg:-100200300',
-        {
-          requestId: 'perm-profile-right-approvers',
-          sourceAgentFolder: 'whatsapp_main',
-          toolName: 'request_agent_profile_update',
-          title: 'Update AGENTS.md',
-          interaction: {
-            id: 'perm-profile-right-approvers',
-            title: 'Update AGENTS.md',
-            body: 's'.repeat(1000),
-            requestContext: {
-              requestId: 'perm-profile-right-approvers',
-              sourceAgentFolder: 'whatsapp_main',
-              targetJid: 'tg:-100200300',
-              toolName: 'request_agent_profile_update',
-            },
-            files: [
-              {
-                path: 'AGENTS.md',
-                preview: 'x'.repeat(7000),
-                truncated: false,
-                sizeBytes: 7000,
-                contentHash: 'abc123',
-              },
-            ],
-          },
-        },
-      );
-      await flushPromises();
-
-      const targets = currentBot().api.sendDocument.mock.calls.map(
-        (call) => call[0],
-      );
-      expect(targets).toEqual(['12345']);
-      expect(targets).not.toContain('999');
-
-      await triggerCallbackQuery({
-        callbackQuery: { data: 'perm:allow_once:perm-profile-right-approvers' },
-        chat: { id: -100200300 },
-        from: { id: 12345, first_name: 'Ravi' },
-        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
-      });
-      await decisionPromise;
-    });
-
-    it('sends oversized permission full view files only to this Telegram provider account approvers', async () => {
-      const base = createTestOpts().runtimeSettings!();
-      const opts = createTestOpts({
-        runtimeSettings: vi.fn(() => ({
-          ...base,
-          providerAccounts: {
-            ...base.providerAccounts,
-            telegram_other: {
-              ...base.providerAccounts.telegram_default,
-              label: 'Telegram Other',
-            },
-          },
-          conversations: {
-            other_account_conversation: {
-              ...base.conversations.whatsapp_main_conversation,
-              providerConnection: 'telegram_other',
-              providerAccount: 'telegram_other',
-              externalId: '-100200300',
-              controlApprovers: ['999'],
-            },
-            this_account_conversation: {
-              ...base.conversations.whatsapp_main_conversation,
-              providerConnection: 'telegram_default',
-              providerAccount: 'telegram_default',
-              externalId: '-100200300',
-              controlApprovers: ['12345'],
-            },
-          },
-          bindings: {
-            other_account_binding: {
-              ...base.bindings.whatsapp_main_binding,
-              conversation: 'other_account_conversation',
-            },
-            this_account_binding: {
-              ...base.bindings.whatsapp_main_binding,
-              conversation: 'this_account_conversation',
-            },
-          },
-        })),
-      });
-      const channel = new TelegramChannel('test-token', opts);
-      await channel.connect();
-
-      const decisionPromise = channel.requestPermissionApproval(
-        'tg:-100200300',
-        {
-          requestId: 'perm-profile-provider-account',
-          providerAccountId: 'telegram_default',
-          sourceAgentFolder: 'whatsapp_main',
-          toolName: 'request_agent_profile_update',
-          title: 'Update AGENTS.md',
-          interaction: {
-            id: 'perm-profile-provider-account',
-            title: 'Update AGENTS.md',
-            body: 's'.repeat(1000),
-            requestContext: {
-              requestId: 'perm-profile-provider-account',
-              sourceAgentFolder: 'whatsapp_main',
-              targetJid: 'tg:-100200300',
-              toolName: 'request_agent_profile_update',
-            },
-            files: [
-              {
-                path: 'AGENTS.md',
-                preview: 'x'.repeat(7000),
-                truncated: false,
-                sizeBytes: 7000,
-                contentHash: 'abc123',
-              },
-            ],
-          },
-        },
-      );
-      await flushPromises();
-
-      const targets = currentBot().api.sendDocument.mock.calls.map(
-        (call) => call[0],
-      );
-      expect(targets).toEqual(['12345']);
-      expect(targets).not.toContain('999');
-
-      await triggerCallbackQuery({
-        callbackQuery: {
-          data: 'perm:allow_once:perm-profile-provider-account',
-        },
-        chat: { id: -100200300 },
-        from: { id: 12345, first_name: 'Ravi' },
-        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
-      });
-      await decisionPromise;
     });
 
     it('fails closed when oversized permission full view delivery fails', async () => {

@@ -34,6 +34,8 @@ vi.mock('@core/app/bootstrap/channel-wiring.js', () => ({
 vi.mock('@core/app/bootstrap/startup.js', () => ({
   runStartup: vi.fn(async () => ({
     runtimeSettings: { runtime: { liveTurns: { enabled: true } } },
+    initTracingFromSettings: vi.fn(),
+    closeTracing: vi.fn(async () => {}),
   })),
 }));
 vi.mock('@core/app/bootstrap/runtime-services.js', () => ({

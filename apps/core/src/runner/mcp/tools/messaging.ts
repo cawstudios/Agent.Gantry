@@ -31,7 +31,7 @@ import {
 } from '../context.js';
 import { truncateText } from '../formatting.js';
 import { hasValidIpcResponseSignature, writeIpcFile } from '../ipc.js';
-import { createSignedIpcRequestEnvelope } from '../signing.js';
+import { createSignedIpcRequestEnvelope } from '../../../shared/ipc-signing.js';
 import { makeIpcId } from '../ipc-ids.js';
 
 const USER_QUESTION_TIMEOUT_MS = 5 * 60 * 1000;

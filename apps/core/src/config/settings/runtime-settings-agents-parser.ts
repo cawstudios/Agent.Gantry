@@ -53,8 +53,8 @@ function parseOptionalPermissionModeValue(
   pathPrefix: string,
 ): PermissionMode | undefined {
   if (raw === undefined) return undefined;
-  if (raw !== 'ask' && raw !== 'auto') {
-    throw new Error(`${pathPrefix} must be one of ask or auto`);
+  if (raw !== 'ask' && raw !== 'auto' && raw !== 'auto_strict') {
+    throw new Error(`${pathPrefix} must be one of ask, auto, or auto_strict`);
   }
   return raw;
 }

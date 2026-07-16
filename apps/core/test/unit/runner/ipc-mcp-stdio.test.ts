@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildSync } from 'esbuild';
 
-import { schedulerJobConfirmationToken } from '@core/jobs/job-plan-formatter.js';
+import { schedulerJobConfirmationToken } from '@core/shared/scheduler-job-plan.js';
 import { ALL_GANTRY_MCP_TOOL_NAMES } from '@agent-runner-src/gantry-mcp-tool-surface.js';
 
 const MCP_FIXTURE_TIMEOUT_MS = 60_000;
@@ -92,7 +92,6 @@ function createMcpFixture(): {
     .toString();
   const runnerDir = path.join(root, 'runner');
   const runnerMcpDir = path.join(runnerDir, 'mcp');
-  const jobsDir = path.join(root, 'jobs');
   const channelsDir = path.join(root, 'channels');
   const applicationMcpDir = path.join(root, 'application', 'mcp');
   const sharedDir = path.join(root, 'shared');
@@ -111,7 +110,6 @@ function createMcpFixture(): {
 
   fs.mkdirSync(runnerDir, { recursive: true });
   fs.mkdirSync(runnerMcpDir, { recursive: true });
-  fs.mkdirSync(jobsDir, { recursive: true });
   fs.mkdirSync(channelsDir, { recursive: true });
   fs.mkdirSync(applicationMcpDir, { recursive: true });
   fs.mkdirSync(guidedActionsDir, { recursive: true });
@@ -126,6 +124,10 @@ function createMcpFixture(): {
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/canonical-json.ts'),
     path.join(sharedDir, 'canonical-json.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/ipc-signing.ts'),
+    path.join(sharedDir, 'ipc-signing.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/model-catalog.ts'),
@@ -284,10 +286,6 @@ function createMcpFixture(): {
   fs.copyFileSync(
     path.resolve('apps/core/src/runner/gantry-mcp-tool-surface.ts'),
     path.join(runnerDir, 'gantry-mcp-tool-surface.ts'),
-  );
-  fs.copyFileSync(
-    path.resolve('apps/core/src/jobs/job-plan-formatter.ts'),
-    path.join(jobsDir, 'job-plan-formatter.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/private-fs.ts'),

@@ -10,8 +10,10 @@ import type {
 import { applyRuntimeSettingsDesiredState } from './restart-sync.js';
 import {
   activateRuntimeModelAliases,
+  parseRuntimeSettings,
   withRuntimeModelAliases,
 } from './runtime-settings.js';
+import { renderRuntimeSettingsYaml } from './runtime-settings-renderer.js';
 import { normalizeConfiguredCapabilitiesInSettings } from './configured-capability-normalization.js';
 import { parseRuntimeSettingsObject } from './runtime-settings-parser.js';
 import { validateLoadedRuntimeSettings } from './runtime-settings-validation.js';
@@ -32,7 +34,7 @@ import { migrateLegacyAgentBindings } from './settings-revision-legacy-bindings.
  * applied) by an older worker until it is upgraded (ADR-3 skew safety contract).
  * Bump this whenever a settings-schema change would break older readers.
  */
-export const CURRENT_SETTINGS_READER_VERSION = 12;
+export const CURRENT_SETTINGS_READER_VERSION = 13;
 
 export interface SettingsImportValidationResult {
   ok: boolean;
@@ -55,6 +57,15 @@ export interface SettingsRevisionMirror {
   createdBy: string;
   note?: string | null;
   logWarn?: (context: Record<string, unknown>, message: string) => void;
+}
+
+export class SettingsStaleMutationError extends Error {
+  constructor() {
+    super(
+      'Settings mutation is based on stale settings; reload latest desired state and retry.',
+    );
+    this.name = 'SettingsStaleMutationError';
+  }
 }
 
 export class SettingsRevisionConflictError extends Error {
@@ -176,9 +187,7 @@ export async function importWorkstationSettings(
         previousRevisionSettings,
       )
     ) {
-      throw new Error(
-        'Settings mutation is based on stale settings; reload latest desired state and retry.',
-      );
+      throw new SettingsStaleMutationError();
     }
     if (
       latest &&
@@ -385,6 +394,19 @@ export async function importFleetSettingsRevision(
 export function settingsToRevisionDocument(
   settings: RuntimeSettings,
 ): Record<string, unknown> {
+  // Canonicalize via a render→parse round-trip: the parser materializes
+  // defaults (persona, requires_trigger, kind aliases, default model) that
+  // in-memory objects omit, so documents built from memory and documents
+  // built from parsed files would otherwise never compare equal — feeding
+  // endless settings.yaml:auto-import echo revisions and stale-base errors.
+  return buildRevisionDocument(
+    parseRuntimeSettings(renderRuntimeSettingsYaml(settings)),
+  );
+}
+
+function buildRevisionDocument(
+  settings: RuntimeSettings,
+): Record<string, unknown> {
   return stripUndefinedDeep({
     desired_state: snakeRecord(settings.desiredState),
     providers: mapRecord(settings.providers, snakeRecord),
@@ -504,6 +526,7 @@ export function settingsToRevisionDocument(
       },
     },
     permissions: snakeRecord(settings.permissions),
+    observability: snakeRecord(settings.observability),
     model_aliases: mapRecord(settings.modelAliases, snakeRecord),
     limits: mapRecord(settings.limits.providers, snakeRecord),
     model_families: settings.modelFamilies,

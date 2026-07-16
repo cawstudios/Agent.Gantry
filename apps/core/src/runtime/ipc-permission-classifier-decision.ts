@@ -1,4 +1,7 @@
-import { decisionForMode } from '../domain/permission-decision.js';
+import {
+  decisionForMode,
+  firstPersistentRule,
+} from '../domain/permission-decision.js';
 import type {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
@@ -86,7 +89,7 @@ export async function resolvePermissionIpcDecision(input: {
   const shouldConsultClassifier =
     input.deps.publishRuntimeEvent &&
     classifierConfig &&
-    permissionMode === 'auto';
+    (permissionMode === 'auto' || permissionMode === 'auto_strict');
   const toolRepository = input.deps.getToolRepository?.();
   const reviewedMcpReadBindings =
     shouldConsultClassifier &&
@@ -145,7 +148,10 @@ export async function resolvePermissionIpcDecision(input: {
   if (classifierDecision?.decision === 'allow') {
     return decisionForMode(input.request, 'allow_once', 'auto_classifier');
   }
-  if (permissionMode === 'auto' && input.request.unattended) {
+  if (
+    (permissionMode === 'auto' || permissionMode === 'auto_strict') &&
+    input.request.unattended
+  ) {
     return {
       ...decisionForMode(input.request, 'cancel', 'runtime'),
       reason: classifierDecision
@@ -170,5 +176,20 @@ export async function resolvePermissionIpcDecision(input: {
       toolInput: input.request.toolInput,
       suggestions: input.request.suggestions,
     }));
+  const effectiveDecisionOptions = input.request.decisionOptions?.length
+    ? input.request.decisionOptions
+    : firstPersistentRule(input.request)
+      ? ['allow_once', 'allow_persistent_rule', 'cancel']
+      : ['allow_once', 'cancel'];
+  if (
+    input.request.promotionHintCount &&
+    effectiveDecisionOptions.includes('allow_persistent_rule')
+  ) {
+    input.request.decisionOptions = [
+      'allow_persistent_rule',
+      'allow_once',
+      'cancel',
+    ];
+  }
   return input.deps.requestPermissionApproval(input.request);
 }

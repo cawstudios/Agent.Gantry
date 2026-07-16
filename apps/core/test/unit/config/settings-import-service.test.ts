@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -8,6 +10,8 @@ import type {
 import type { ProviderAccountRepository } from '@core/domain/ports/repositories.js';
 import type { ProviderAccount } from '@core/domain/provider/provider.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
+import { parseRuntimeSettings } from '@core/config/settings/runtime-settings.js';
+import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 import {
   CURRENT_SETTINGS_READER_VERSION,
   importFleetSettingsRevision,
@@ -649,7 +653,7 @@ describe('importFleetSettingsRevision', () => {
   });
 
   it('appends a revision stamped with the current reader version', async () => {
-    expect(CURRENT_SETTINGS_READER_VERSION).toBe(12);
+    expect(CURRENT_SETTINGS_READER_VERSION).toBe(13);
     capabilityErrors = [];
     const repo = new FakeRevisionRepo();
     const outcome = await importFleetSettingsRevision(
@@ -732,6 +736,13 @@ describe('importFleetSettingsRevision', () => {
     settings.agent.agentHarness = 'deepagents';
     settings.memory.llm.extractorMinConfidence = 0.73;
     settings.permissions.autoMode.model = 'sonnet';
+    settings.observability.tracing = {
+      enabled: true,
+      endpoint: 'https://otel.example.test/v1/traces',
+      captureContent: false,
+      sampleRate: 0.25,
+      environment: 'test',
+    };
     settings.modelAliases['fast-job'] = {
       provider: 'groq',
       providerModelId: 'llama-3.1-8b-instant',
@@ -876,6 +887,15 @@ describe('importFleetSettingsRevision', () => {
         >
       ).model,
     ).toBe('sonnet');
+    expect(document.observability).toEqual({
+      tracing: {
+        enabled: true,
+        endpoint: 'https://otel.example.test/v1/traces',
+        capture_content: false,
+        sample_rate: 0.25,
+        environment: 'test',
+      },
+    });
     expect(
       (
         (document.agents as Record<string, Record<string, unknown>>).researcher
@@ -922,6 +942,7 @@ describe('importFleetSettingsRevision', () => {
     expect(restored.agents.researcher.agentHarness).toBe('anthropic_sdk');
     expect(restored.agents.researcher.permissionMode).toBe('auto');
     expect(restored.permissions.autoMode).toEqual({ model: 'sonnet' });
+    expect(restored.observability).toEqual(settings.observability);
     expect(restored.agents.researcher).toMatchObject({
       maxTurns: 14,
       maxRunTokens: 32_000,
@@ -958,6 +979,52 @@ describe('importFleetSettingsRevision', () => {
       restored.conversations.shared_channel.installedAgents['researcher_171.1']
         ?.permissionMode,
     ).toBe('auto');
+  });
+
+  it('guards settings.yaml revision identity', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.runtime.deploymentMode = 'fleet';
+    settings.agent.name = 'Revision Guard';
+    settings.agents.researcher = {
+      name: 'Researcher',
+      folder: 'researcher',
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.providerAccounts.telegram_main = {
+      agentId: 'researcher',
+      provider: 'telegram',
+      label: 'Telegram Main',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    settings.conversations.shared_channel = {
+      providerConnection: 'telegram_main',
+      providerAccount: 'telegram_main',
+      externalId: 'telegram:C123',
+      kind: 'group',
+      displayName: 'Shared Channel',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: [],
+      installedAgents: {
+        researcher: {
+          agentId: 'researcher',
+          providerAccountId: 'telegram_main',
+          status: 'active',
+          addedAt: new Date(0).toISOString(),
+          memoryScope: 'conversation',
+        },
+      },
+    };
+
+    const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
+    expect(
+      isDeepStrictEqual(
+        settingsToRevisionDocument(parsed),
+        settingsToRevisionDocument(settings),
+      ),
+    ).toBe(true);
   });
 
   it('migrates legacy per-agent bindings when reading settings revisions', () => {

@@ -22,9 +22,23 @@ Gate gotcha: every backticked file path must exist and resolve from repo root
 (`check_task_completion.py` Active Doc References). For files a later stage
 will create, write the bare basename plus prose ("new module in `apps/core/src/runtime/`").
 
+
+## 1a. MANDATORY: Codex plan validation before any implementation handoff
+
+After writing (or updating) the goal-prompt doc and BEFORE the first
+implementation handoff, send Codex a read-only validation handoff: "Validate
+docs/architecture/<name>-goal-prompt.md against the current repository. Report:
+(1) gaps or missing stages, (2) simpler or better implementation shapes,
+(3) claims that contradict repo reality (wrong seams, stale line refs,
+nonexistent files), (4) risks the plan ignores. Do not modify anything." Fix
+every accepted finding in the goal-prompt doc (and surface plan-changing ones
+to the user) before dispatching stage 1. Re-run this validation whenever the
+plan changes materially mid-pipeline. Findings rejected as wrong get a one-line
+note in the assumptions ledger so the decision is recorded.
+
 ## 2. Implementation handoffs
 
-One handoff (stage) at a time — never two writers in the same worktree. Stage
+READ-ONLY Codex tasks (plan validations, surveys, reviews of committed state) always run in parallel with writers and each other — never serialize them. WRITER handoffs may run in parallel ONLY when their bounded write scopes are provably disjoint (source, tests, docs, AND the assumptions ledger — give the ledger to one task or write its rows yourself); overlapping or unclear scopes serialize. After parallel writers land, run one unified verification pass before committing. Stage
 size is bounded by packet separability (see §1), not serial run length —
 Codex fans packets out to its subagents. For each stage, spawn an Agent with
 `subagent_type: codex:codex-rescue` whose prompt contains:
@@ -45,6 +59,16 @@ Codex fans packets out to its subagents. For each stage, spawn an Agent with
   scopes; your main thread grounds the task, decomposes it, reviews subagent
   diffs, and runs the focused checks. Parallelize only clearly separable
   files/domains.`
+- The assumptions-ledger instruction (every stage, verbatim shape): `Record
+  every assumption you make due to missing information in
+  docs/architecture/<name>-assumptions.md under your stage's section, using the
+  file's table format (assumption, missing info that forced it, what you chose,
+  impact if wrong). If you made no assumptions, write "None." under your stage
+  heading. The assumptions file is part of your write scope.` The orchestrator
+  seeds this file next to the goal prompt (same `<name>` stem) BEFORE the first
+  handoff — one `## Stage <X>` section per stage plus a `Validated` column the
+  orchestrator fills in (see §3). Backticked-path gate applies here too: seed
+  the file so it exists before any handoff references it.
 - MANDATORY closing lines, verbatim in every implementation handoff:
   `Use ponytail. No commentary. Return changed files, checks run, and blockers only.`
   "No commentary" suppresses Codex's progress narration during generation —
@@ -70,6 +94,14 @@ until node "$COMPANION" status <task-id> | grep -qE '\| (completed|failed|error|
 
 1. Inspect the diff; reject overbuilt code — send the same agent a follow-up
    (or a `--resume` handoff) to trim rather than fixing by hand.
+1a. **Validate the stage's assumptions ledger.** Read the stage's section in the
+   assumptions file (same stem as the goal prompt, `-assumptions.md` suffix).
+   For each row: check the assumption against the actual code/plan; mark the
+   `Validated` column `ok` (assumption holds), `fixed` (wrong — corrected via a
+   follow-up handoff before commit), or `escalate` (needs a user decision —
+   surface it instead of committing). An empty/missing stage section when the
+   diff clearly embodies choices the contract didn't specify is itself a
+   finding — send a follow-up asking Codex to backfill the ledger.
 2. Run the smallest relevant checks: focused vitest files, `npm run build`,
    `python3 .codex/scripts/check_task_completion.py`.
 3. **Autoreview the stage's LOCAL diff BEFORE committing** (not the whole branch

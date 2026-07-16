@@ -6,19 +6,6 @@ export type FinalProgressState =
   | 'delivery_incomplete'
   | 'stopped';
 
-export function buildDoneProgressOptions(
-  threadId?: string,
-  replaceOnly?: boolean,
-  generation?: number,
-): ProgressUpdateOptions {
-  return {
-    ...(threadId ? { threadId } : {}),
-    done: true,
-    ...(replaceOnly ? { replaceOnly: true } : {}),
-    ...(generation !== undefined ? { generation } : {}),
-  };
-}
-
 export function buildReplaceOnlyProgressOptions(
   threadId?: string,
   generation?: number,

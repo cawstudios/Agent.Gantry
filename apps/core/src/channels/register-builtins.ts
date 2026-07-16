@@ -8,14 +8,14 @@ import {
 async function createTelegramBuiltInChannel(
   opts: ChannelOpts,
 ): Promise<ChannelAdapter | null> {
-  const mod = await import('./telegram.js');
+  const mod = await import('./telegram/channel-adapter.js');
   return await mod.createTelegramChannel(opts);
 }
 
 async function createSlackBuiltInChannel(
   opts: ChannelOpts,
 ): Promise<ChannelAdapter | null> {
-  const mod = await import('./slack.js');
+  const mod = await import('./slack/channel-adapter.js');
   return await mod.createSlackChannel(opts);
 }
 

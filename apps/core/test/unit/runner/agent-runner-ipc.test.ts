@@ -202,6 +202,10 @@ function createRunnerFixture(): {
     path.join(sharedDir, 'canonical-json.ts'),
   );
   fs.copyFileSync(
+    path.resolve('apps/core/src/shared/ipc-signing.ts'),
+    path.join(sharedDir, 'ipc-signing.ts'),
+  );
+  fs.copyFileSync(
     path.resolve('apps/core/src/shared/no-proxy.ts'),
     path.join(sharedDir, 'no-proxy.ts'),
   );
@@ -362,6 +366,10 @@ function createRunnerFixture(): {
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/yolo-mode-policy.ts'),
     path.join(sharedDir, 'yolo-mode-policy.ts'),
+  );
+  fs.copyFileSync(
+    path.resolve('apps/core/src/shared/runtime-env-command.ts'),
+    path.join(sharedDir, 'runtime-env-command.ts'),
   );
   fs.copyFileSync(
     path.resolve('apps/core/src/shared/sensitive-material.ts'),

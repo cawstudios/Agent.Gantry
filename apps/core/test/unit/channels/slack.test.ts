@@ -131,7 +131,10 @@ vi.mock('@slack/bolt', () => ({
   },
 }));
 
-import { createSlackChannel, SlackChannel } from '@core/channels/slack.js';
+import {
+  createSlackChannel,
+  SlackChannel,
+} from '@core/channels/slack/channel-adapter.js';
 import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
 import { slackRateLimitRetryDelayMs } from '@core/channels/slack/channel-retry-delay.js';

@@ -671,11 +671,9 @@ describe('ipc-interaction-handler', () => {
         canonicalToolName: GITHUB_REPOS_LIST_TOOL_NAME,
         turnIntentSummary: 'Inspect the current worktree.',
         approvedCapabilityIds: [GITHUB_REPOS_READ_CAPABILITY_ID],
+        posture: 'allow_leaning',
       }),
     );
-    expect(classifierConsult.mock.calls[0]?.[0].toolInput).toEqual({
-      owner: 'cawstudios',
-    });
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(
       JSON.parse(
@@ -793,7 +791,7 @@ describe('ipc-interaction-handler', () => {
     });
   });
 
-  it('consults for an unattended job without requester gating', async () => {
+  it('consults for a deterministic-safe unattended job without requester gating', async () => {
     const classifierConsult = vi.fn(async () => ({
       decision: 'allow' as const,
       reason: 'Approved capability read.',
@@ -863,6 +861,7 @@ describe('ipc-interaction-handler', () => {
     expect(classifierConsult).toHaveBeenCalledWith(
       expect.objectContaining({
         turnIntentSummary: '',
+        posture: 'allow_leaning',
       }),
     );
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
@@ -878,8 +877,12 @@ describe('ipc-interaction-handler', () => {
     });
   });
 
-  it('denies an unattended gray-zone mutation without consulting or prompting', async () => {
-    const classifierConsult = vi.fn();
+  it('denies an unattended gray-zone mutation after classifier consultation', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'ask' as const,
+      reason: 'Destructive filesystem mutation.',
+      latencyMs: 1,
+    }));
     const requestPermissionApproval = vi.fn();
     const publishRuntimeEvent = vi.fn(async () => undefined);
 
@@ -917,7 +920,7 @@ describe('ipc-interaction-handler', () => {
       } as never,
     });
 
-    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(classifierConsult).toHaveBeenCalledOnce();
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(decision).toMatchObject({
       approved: false,
@@ -992,7 +995,7 @@ describe('ipc-interaction-handler', () => {
     });
   });
 
-  it('adds the repeated allow hint to an IPC ask prompt', async () => {
+  it('promotes the persistent option when IPC omits decision options', async () => {
     const requestPermissionApproval = vi.fn(async () => ({
       approved: false,
       mode: 'cancel' as const,
@@ -1002,7 +1005,7 @@ describe('ipc-interaction-handler', () => {
       appId: 'app:test',
       agentFolder: 'main_agent',
       suggestionKey: 'main_agent|RunCommand(git status)',
-      allowCount: 3,
+      allowCount: 2,
       lastOfferedAt: null,
       deniedAt: null,
       createdAt: '2026-07-12T00:00:00.000Z',
@@ -1016,6 +1019,13 @@ describe('ipc-interaction-handler', () => {
         sourceAgentFolder: 'main_agent',
         toolName: 'RunCommand',
         toolInput: { command: 'git status' },
+        suggestions: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            rules: [{ toolName: 'RunCommand', ruleContent: 'git status' }],
+          },
+        ],
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -1036,7 +1046,10 @@ describe('ipc-interaction-handler', () => {
     });
 
     expect(requestPermissionApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ promotionHintCount: 3 }),
+      expect.objectContaining({
+        promotionHintCount: 2,
+        decisionOptions: ['allow_persistent_rule', 'allow_once', 'cancel'],
+      }),
     );
   });
 

@@ -1,6 +1,7 @@
-import { createHmac, randomUUID, verify as cryptoVerify } from 'crypto';
-import { nowMs as currentTimeMs, toIso } from '../../shared/time/datetime.js';
-import { canonicalJson } from '../../shared/canonical-json.js';
+import { createHmac, randomUUID, verify as cryptoVerify } from 'node:crypto';
+
+import { canonicalJson } from './canonical-json.js';
+import { nowMs, toIso } from './time/datetime.js';
 
 export function signIpcRequestPayload(
   requestSigningKey: string | undefined,
@@ -18,7 +19,7 @@ export function createSignedIpcRequestEnvelope(
   const expiresAt =
     typeof payload.expiresAt === 'string' && payload.expiresAt.trim()
       ? payload.expiresAt
-      : toIso(currentTimeMs() + 5 * 60_000);
+      : toIso(nowMs() + 5 * 60_000);
   const signedPayload = {
     ...payload,
     requestId:
@@ -39,8 +40,7 @@ export function verifyIpcResponsePayload(
 ): boolean {
   const key = publicKeyPem?.trim();
   const sig = signature?.trim();
-  if (!sig) return false;
-  if (!key) return false;
+  if (!key || !sig) return false;
   try {
     return cryptoVerify(
       null,
@@ -51,4 +51,14 @@ export function verifyIpcResponsePayload(
   } catch {
     return false;
   }
+}
+
+export function hasValidIpcResponseSignature(
+  publicKeyPem: string | undefined,
+  raw: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): boolean {
+  const signature =
+    typeof raw.signature === 'string' ? raw.signature.trim() : '';
+  return verifyIpcResponsePayload(publicKeyPem, payload, signature);
 }

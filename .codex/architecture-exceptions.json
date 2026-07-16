@@ -93,9 +93,9 @@
   {
     "file": "apps/core/src/app/bootstrap/startup.ts",
     "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
+    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception. +1 (2026-07-14): observability tracing bootstrap (initTracing/shutdownTracing from infrastructure/observability) \u2014 settings-adjacent init; move behind a domain port when the boundary slice lands.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 5
+    "maxViolations": 6
   },
   {
     "file": "apps/core/src/app/index.ts",
@@ -1043,30 +1043,6 @@
     "maxViolations": 1
   },
   {
-    "file": "apps/core/src/channels/slack.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
-    "file": "apps/core/src/channels/slack/channel.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
-    "file": "apps/core/src/channels/telegram.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
-    "file": "apps/core/src/channels/telegram/channel.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
     "file": "apps/core/src/application/mcp/mcp-output-schema-validator.ts",
     "rule": "forbidden_external_import_by_layer",
     "reason": "MCP outputSchema validation uses the installed JSON Schema validator until MCP proxy execution is split behind an adapter-owned validation port; capped to the single validator import.",
@@ -1079,18 +1055,6 @@
     "reason": "Current MCP proxy owns direct MCP SDK transport calls until the MCP proxy is split behind an adapter port; capped so additional SDK imports fail.",
     "removeByPhase": "canonical-boundary-cleanup-phase",
     "maxViolations": 4
-  },
-  {
-    "file": "apps/core/src/memory/index.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
-    "file": "apps/core/src/messaging/index.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
   },
   {
     "file": "apps/core/src/messaging/text-styles.ts",
@@ -1133,24 +1097,6 @@
     "reason": "Sibling of model-provider-registry.ts holding the eight OpenAI-compatible DeepAgents-lane provider definitions (groq/deepseek/xai/together/fireworks/cerebras/perplexity/gemini); extracted to keep model-provider-registry.ts under its line budget. Same intentional provider-registry source-of-truth debt, capped to its exact provider set.",
     "removeByPhase": "provider-registry-boundary-rule",
     "maxViolations": 22
-  },
-  {
-    "file": "apps/core/src/platform/index.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
-    "file": "apps/core/src/runtime/index.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
-  },
-  {
-    "file": "apps/core/src/session/index.ts",
-    "rule": "wrapper_only_file",
-    "reason": "Baseline wrapper-only export surface kept temporarily for package/import compatibility during the canonical module cleanup.",
-    "removeByPhase": "canonical-boundary-cleanup-phase"
   },
   {
     "file": "apps/core/src/cli/settings.ts",

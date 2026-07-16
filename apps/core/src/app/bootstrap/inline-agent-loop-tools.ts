@@ -395,7 +395,7 @@ export function createInlineCoreTools(
         });
         if (classifierDecision?.decision === 'allow') return { allowed: true };
       }
-      if (run.permissionMode === 'auto' && run.isScheduledJob === true) {
+      if (run.permissionMode !== 'ask' && run.isScheduledJob === true) {
         return {
           allowed: false,
           reason: classifierDecision
@@ -446,7 +446,9 @@ export function createInlineCoreTools(
         suggestions: effectiveSuggestions,
         ...(promotionHintCount ? { promotionHintCount } : {}),
         decisionOptions: effectiveSuggestions
-          ? ['allow_once', 'allow_persistent_rule', 'cancel']
+          ? promotionHintCount
+            ? ['allow_persistent_rule', 'allow_once', 'cancel']
+            : ['allow_once', 'allow_persistent_rule', 'cancel']
           : ['allow_once', 'cancel'],
       };
       const interaction = await runDurablePermissionInteraction({

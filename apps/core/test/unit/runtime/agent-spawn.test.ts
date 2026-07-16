@@ -267,7 +267,7 @@ import {
   getHostRuntimeCredentialEnv,
   prepareHostRuntimeContext,
 } from '@core/runtime/agent-spawn-host.js';
-import { createSignedIpcRequestEnvelope } from '@core/runner/mcp/signing.js';
+import { createSignedIpcRequestEnvelope } from '@core/shared/ipc-signing.js';
 import { parseMemoryIpcRequest } from '@core/runtime/ipc-parsing.js';
 import type {
   AgentMcpServerBinding,
@@ -1119,6 +1119,27 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.GANTRY_DEPLOYMENT_MODE).toBe('workstation');
   });
 
+  it('enables async task tools with a direct runner when the repository is available', async () => {
+    const resultPromise = spawnTestAgent(
+      testGroup,
+      testInput,
+      () => {},
+      undefined,
+      { asyncTaskRepositoryAvailable: true },
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'started' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.GANTRY_ASYNC_TASK_TOOLS_ENABLED).toBe('1');
+  });
+
   it('projects the fleet deployment mode into the runner env', async () => {
     vi.mocked(getDeploymentMode).mockReturnValueOnce('fleet');
     const resultPromise = spawnTestAgent(testGroup, testInput, () => {});
@@ -1619,7 +1640,7 @@ describe('agent-spawn timeout behavior', () => {
     const writeSpy = vi.spyOn(fakeProc.stdin, 'write');
     const group = {
       ...testGroup,
-      agentConfig: { permissionMode: 'auto' },
+      agentConfig: { permissionMode: 'auto_strict' },
     } as ConversationRoute;
 
     const resultPromise = spawnTestAgent(
@@ -1633,7 +1654,7 @@ describe('agent-spawn timeout behavior', () => {
     await resultPromise;
 
     expect(JSON.parse(String(writeSpy.mock.calls[0]?.[0]))).toMatchObject({
-      permissionMode: 'auto',
+      permissionMode: 'auto_strict',
     });
     const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env;
     expect(env?.GANTRY_PERMISSION_MODE).toBe('auto');
@@ -3616,6 +3637,7 @@ describe('agent-spawn timeout behavior', () => {
       undefined,
       {
         purpose: 'model_runtime',
+        runId: expect.stringMatching(/^credential-run:/),
         runContext: expect.objectContaining({
           chatJid: 'test@g.us',
         }),
