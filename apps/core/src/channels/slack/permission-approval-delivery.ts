@@ -4,6 +4,7 @@ import type {
   PermissionApprovalRequest,
 } from '../../domain/types.js';
 import { logger } from '../../infrastructure/logging/logger.js';
+import { incrementOperationalError } from '../../shared/operational-error-counters.js';
 import {
   buildPermissionPromptParts,
   formatPermissionPromptPartsText,
@@ -170,6 +171,7 @@ export async function requestSlackPermissionApproval(input: {
       });
     });
   } catch (err) {
+    incrementOperationalError('channels', 'permission_prompt');
     logger.error(
       { jid: input.jid, requestId: input.request.requestId, err },
       'Failed to send Slack permission prompt',

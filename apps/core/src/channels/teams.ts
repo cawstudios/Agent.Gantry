@@ -17,6 +17,7 @@ import type {
 } from '../domain/types.js';
 import type { AgentTodoRender } from '../domain/ports/task-lifecycle.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { incrementOperationalError } from '../shared/operational-error-counters.js';
 import { PERMISSION_APPROVAL_TIMEOUT_MS } from '../shared/permission-timeout.js';
 import { nowIso } from '../shared/time/datetime.js';
 import {
@@ -443,6 +444,7 @@ export class TeamsChannel implements ChannelAdapter {
         });
       });
     } catch (err) {
+      incrementOperationalError('channels', 'permission_prompt');
       logger.error(
         { jid, requestId: request.requestId, err },
         'Failed to send Teams permission prompt',

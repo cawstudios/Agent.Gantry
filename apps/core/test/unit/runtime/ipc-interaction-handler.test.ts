@@ -11,6 +11,7 @@ import { createIpcAuthEnvelope } from '@core/runtime/ipc-auth.js';
 import { agentIdForFolder } from '@core/domain/agent/agent-folder-id.js';
 import { semanticCapabilityInputSchema } from '@core/shared/semantic-capabilities.js';
 import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { getOperationalErrorCount } from '@core/shared/operational-error-counters.js';
 
 import {
   processPermissionIpcRequest,
@@ -1534,6 +1535,10 @@ describe('ipc-interaction-handler', () => {
   });
 
   it('does not write a scheduled permission response when durable resolution fails', async () => {
+    const before = getOperationalErrorCount(
+      'interaction',
+      'permission_request',
+    );
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(
       tempDir,
@@ -1600,9 +1605,16 @@ describe('ipc-interaction-handler', () => {
         ),
       ),
     ).toBe(false);
+    expect(getOperationalErrorCount('interaction', 'permission_request')).toBe(
+      before + 1,
+    );
   });
 
   it('does not write scheduled question answers when durable resolution fails', async () => {
+    const before = getOperationalErrorCount(
+      'interaction',
+      'user_question_request',
+    );
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-unresolved-question.json');
     fs.writeFileSync(claimedPath, '{}');
@@ -1673,6 +1685,9 @@ describe('ipc-interaction-handler', () => {
         ),
       ),
     ).toBe(false);
+    expect(
+      getOperationalErrorCount('interaction', 'user_question_request'),
+    ).toBe(before + 1);
   });
 
   it('does not write scheduled question answers after lease recovery', async () => {
