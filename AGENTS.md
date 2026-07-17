@@ -70,6 +70,22 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
   incompatible, need you to decide/clarify); EXCLUDE benign section headers
   (`grep -viE 'blockers?:? *(none|n/a)?$'`) or it floods; dedup via a seen-file
   keyed on `<task>:<line>`. Keep it session-length (persistent).
+- Review-process liveness: judge a detached review by its LOG mtime (`stat`),
+  never by `ps | grep` — a crashed/finished review leaves a process the grep
+  still matches while the log went stale; a COMPLETE verdict can then sit
+  unprocessed for hours. If a review's log hasn't advanced but the verdict is
+  present, process it; if it died mid-run (model-capacity error, truncated
+  verdict), relaunch. Background waiters get culled by this environment
+  constantly — that is expected; the detached work survives, so just re-arm,
+  and prefer a single combined waiter that re-checks state over many fragile
+  per-task ones.
+- Forwarder task ids drift: the codex:codex-rescue wrapper sometimes reports a
+  task id that differs from the one actually running. Don't chase the reported
+  id — verify by the worktree/tree diff and test results directly, or find the
+  newest running task via `codex-companion status`.
+- Verify each parallel writer IN ITS OWN worktree (symlink node_modules from
+  the primary checkout: `ln -sfn <primary>/node_modules <wt>/node_modules`,
+  then `./node_modules/.bin/tsc` and `npm run test:unit` in that dir).
 - Prefer git WORKTREES for parallel writer streams: whenever independent work
   can branch off `main` (a separate PR-to-be — different subsystem, own review,
   own commit), run it in its own `git worktree` off `origin/main` so it never
@@ -98,6 +114,30 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
   not a fix queue. Precedents: the batch-claim state machine, canonical
   revision-document round-trip, and export compare-then-restore in
   `docs/architecture/runtime-permission-ux-assumptions.md`.
+- Two distinct escalation OUTCOMES — pick by whether the complexity is
+  reducible on the current foundation: (a) CONSOLIDATE when the churning
+  subsystem is self-contained and the reviewer has effectively specified the
+  correct invariant (e.g. the claim state machine, the settlement contract,
+  the IPC correct-design attempt) — write the invariant once and audit all
+  sites; (b) SPLIT OUT when the churn is because the item is entangled with
+  other subsystems or is simply cycle-sized wearing a "quick win" label (e.g.
+  retention entangled with scheduler/lease/agent machinery; IPC backpressure
+  as a durable filesystem queue needing cursor/pagination) — remove it from
+  the current PR, revert its changes to main, and defer it to the proper
+  cycle with a ledger note. Set the tripwire in advance ("if round N still
+  churns X, split it") and HONOR it.
+- Scope skeptically: an upstream review/audit labelling something a "small
+  reliability fix" or "quick win" is a hypothesis, not a fact. Before batching
+  items as quick wins, sanity-check each against what it actually touches —
+  anything touching data deletion, durable queues, lease/fencing, scheduler
+  run-recording, or concurrent writers is cycle-sized regardless of the label.
+  Two of five "arch quick wins" (retention, IPC backpressure) had to be split
+  back out; that was a scoping miss to avoid repeating.
+- Distinguish a recurring CLASS (same failure shape respawning — the dangerous
+  signal that demands consolidation) from a converging TAIL (distinct real
+  findings each round, severity/count trending down — healthy, keep going).
+  Do not over-escalate a converging tail; do not under-escalate a recurring
+  class.
 
 ## Runtime Modes
 
