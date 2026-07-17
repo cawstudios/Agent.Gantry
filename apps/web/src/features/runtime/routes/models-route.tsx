@@ -1,27 +1,50 @@
-import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { Boxes, Settings2 } from 'lucide-react';
+import {
+  Boxes,
+  KeyRound,
+  LoaderCircle,
+  RefreshCw,
+  Settings2,
+  TriangleAlert,
+  WifiOff,
+} from 'lucide-react';
+import { useState } from 'react';
 
-import { useConnectionGate } from '../../../ui/compositions/connection-gate';
+import { useRuntimeConnection } from '../../../lib/api/runtime-connection';
 import { MetricTile } from '../../../ui/compositions/metric-tile';
 import { PageHeader } from '../../../ui/compositions/page-header';
+import { PageState } from '../../../ui/compositions/page-state';
 import { Panel } from '../../../ui/compositions/panel';
 import { StatusBadge } from '../../../ui/compositions/status-badge';
 import { Badge } from '../../../ui/primitives/badge';
 import { Button } from '../../../ui/primitives/button';
-import { modelPreviewQuery } from '../runtime-queries';
+import { ModelCredentialsDialog } from '../components/model-credentials-dialog';
+import { ModelDefaultsDialog } from '../components/model-defaults-dialog';
+import { useModelDashboard } from '../use-model-dashboard';
 
 const families = ['all', 'Anthropic', 'OpenAI', 'OpenRouter'] as const;
 
 export function ModelsRoute() {
   const search = useSearch({ from: '/runtime/models' });
   const navigate = useNavigate({ from: '/runtime/models' });
-  const { data } = useQuery(modelPreviewQuery);
-  const { requestConnection } = useConnectionGate();
-  const visible = data.filter(
+  const connection = useRuntimeConnection();
+  const query = useModelDashboard();
+  const [defaultsOpen, setDefaultsOpen] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
+  const data = query.data;
+  const visible = (data?.models ?? []).filter(
     (model) => search.family === 'all' || model.family === search.family,
   );
-  const totalRequests = data.reduce((sum, model) => sum + model.requests24h, 0);
+  const totalRequests = (data?.models ?? []).reduce(
+    (sum, model) => sum + model.requests24h,
+    0,
+  );
+  const readyModels = (data?.models ?? []).filter(
+    (model) => model.readiness === 'ready',
+  ).length;
+  const readyCredentials = (data?.credentials ?? []).filter(
+    (credential) => credential.health === 'ready',
+  ).length;
 
   return (
     <div className="mx-auto grid w-full max-w-[1120px] gap-6">
@@ -30,34 +53,123 @@ export function ModelsRoute() {
         title="Models"
         description="Friendly aliases, harness compatibility, readiness, and usage."
         action={
-          <Button onClick={() => requestConnection('Change model defaults')}>
-            <Settings2 size={16} aria-hidden="true" />
-            Model defaults
-          </Button>
+          data ? (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setCredentialsOpen(true)}>
+                <KeyRound size={16} aria-hidden="true" /> Credentials
+              </Button>
+              <Button onClick={() => setDefaultsOpen(true)}>
+                <Settings2 size={16} aria-hidden="true" /> Defaults
+              </Button>
+            </div>
+          ) : undefined
         }
       />
+      {!connection.transport ? (
+        <PageState
+          description="Start Gantry with local-owner UI linkage to load models and credentials."
+          icon={<WifiOff size={18} aria-hidden="true" />}
+          kind="offline"
+          title="Runtime not connected"
+        />
+      ) : query.isPending ? (
+        <PageState
+          description="Loading aliases, defaults, credential readiness, and recent usage."
+          icon={
+            <LoaderCircle
+              className="animate-spin"
+              size={18}
+              aria-hidden="true"
+            />
+          }
+          kind="loading"
+          title="Loading models"
+        />
+      ) : query.isError ? (
+        <PageState
+          action={
+            <Button onClick={() => void query.refetch()}>
+              <RefreshCw size={16} aria-hidden="true" /> Retry
+            </Button>
+          }
+          description={query.error.message}
+          icon={<TriangleAlert size={18} aria-hidden="true" />}
+          kind="error"
+          title="Models could not be loaded"
+        />
+      ) : data ? (
+        <ModelContent
+          data={data}
+          visible={visible}
+          totalRequests={totalRequests}
+          readyModels={readyModels}
+          readyCredentials={readyCredentials}
+          family={search.family}
+          onFamilyChange={(family) => void navigate({ search: { family } })}
+        />
+      ) : null}
+      {data ? (
+        <>
+          <ModelDefaultsDialog
+            defaults={data.defaults}
+            models={data.models}
+            open={defaultsOpen}
+            onOpenChange={setDefaultsOpen}
+          />
+          <ModelCredentialsDialog
+            credentials={data.credentials}
+            open={credentialsOpen}
+            onOpenChange={setCredentialsOpen}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ModelContent({
+  data,
+  visible,
+  totalRequests,
+  readyModels,
+  readyCredentials,
+  family,
+  onFamilyChange,
+}: {
+  data: NonNullable<ReturnType<typeof useModelDashboard>['data']>;
+  visible: NonNullable<ReturnType<typeof useModelDashboard>['data']>['models'];
+  totalRequests: number;
+  readyModels: number;
+  readyCredentials: number;
+  family: (typeof families)[number];
+  onFamilyChange: (family: (typeof families)[number]) => void;
+}) {
+  return (
+    <>
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricTile
           label="Aliases"
-          value={String(data.length)}
-          detail="registered preview routes"
+          value={String(data.models.length)}
+          detail={`${readyModels} currently ready`}
         />
         <MetricTile
           label="Requests · 24h"
           value={String(totalRequests)}
           detail="across all aliases"
         />
-        <MetricTile label="Cost · 24h" value="$12.40" detail="of $50 budget" />
+        <MetricTile
+          label="Credentials"
+          value={`${readyCredentials}/${data.credentials.length}`}
+          detail="providers ready"
+        />
       </div>
       <label className="grid max-w-[240px] gap-1.5 text-xs font-semibold text-text">
         Model family
         <select
           className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text"
-          value={search.family}
+          value={family}
           onChange={(event) =>
-            void navigate({
-              search: { family: event.target.value as typeof search.family },
-            })
+            onFamilyChange(event.target.value as typeof family)
           }
         >
           {families.map((family) => (
@@ -84,8 +196,14 @@ export function ModelsRoute() {
                     {model.alias}
                   </strong>
                   <Badge>{model.family}</Badge>
+                  {model.experimental ? (
+                    <Badge tone="attention">Experimental</Badge>
+                  ) : null}
                   <StatusBadge status={model.readiness} />
                 </div>
+                <p className="mt-1.5 mb-0 text-sm text-text-secondary">
+                  {model.displayName}
+                </p>
                 <p className="mt-3 mb-0 text-xs text-text-secondary">
                   Compatible harnesses
                 </p>
@@ -95,16 +213,15 @@ export function ModelsRoute() {
                   ))}
                 </div>
               </div>
-              <dl className="m-0 grid grid-cols-3 gap-5 text-right text-xs">
+              <dl className="m-0 grid grid-cols-2 gap-5 text-right text-xs">
                 <Usage label="Requests" value={String(model.requests24h)} />
                 <Usage label="Tokens" value={model.tokens24h} />
-                <Usage label="Cost" value={model.cost24h} />
               </dl>
             </article>
           ))}
         </div>
       </Panel>
-    </div>
+    </>
   );
 }
 
