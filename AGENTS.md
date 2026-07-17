@@ -54,9 +54,14 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
   length; do not rely on polling or the terminal notification alone. After a
   task ends, still scan its result for buried questions/deviations AND read
   that stage's assumptions ledger, ratifying anything that changes behavior.
-  Monitor command shape (jobs dir under
-  ~/.claude/plugins/data/codex-openai-codex/state/<repo>/jobs):
-  grep -inE '<question/blocker markers>' each log, dedup via a seen-file.
+  Monitor shape (jobs dir under
+  ~/.claude/plugins/data/codex-openai-codex/state/<repo>/jobs): scan only logs
+  modified recently (`find -mmin -25`) — NOT all history; grep for real
+  question/decision phrasing (decision required, which option should, please
+  confirm, awaiting input/approval, cannot proceed without, mutually
+  incompatible, need you to decide/clarify); EXCLUDE benign section headers
+  (`grep -viE 'blockers?:? *(none|n/a)?$'`) or it floods; dedup via a seen-file
+  keyed on `<task>:<line>`. Keep it session-length (persistent).
 - Prefer git WORKTREES for parallel writer streams: whenever independent work
   can branch off `main` (a separate PR-to-be — different subsystem, own review,
   own commit), run it in its own `git worktree` off `origin/main` so it never

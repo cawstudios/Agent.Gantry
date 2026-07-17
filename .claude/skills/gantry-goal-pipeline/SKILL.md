@@ -39,8 +39,11 @@ note in the assumptions ledger so the decision is recorded.
 ## 2. Implementation handoffs
 
 MANDATORY MONITOR FOR CODEX QUESTIONS: whenever Codex handoffs run, arm a
-persistent Monitor over the Codex job logs that emits on question/blocker/
-decision markers (with seen-file dedup) — this is the event-driven way to catch
+persistent Monitor over RECENTLY-MODIFIED Codex job logs (find -mmin -25, not
+all history) that emits on real question/decision phrasing (decision required,
+which option, please confirm, awaiting input/approval, mutually incompatible,
+need you to decide/clarify) — EXCLUDE benign 'Blockers: none' headers or it
+floods — with seen-file dedup — this is the event-driven way to catch
 a handoff blocked MID-RUN on a clarification, since Codex has no back-channel.
 Answer surfaced questions by resuming that task; do not rely only on the
 completion notification. After completion, scan the result for buried
