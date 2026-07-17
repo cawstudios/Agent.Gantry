@@ -1,39 +1,48 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { MessageSquarePlus, Search } from 'lucide-react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import {
+  LoaderCircle,
+  MessageSquarePlus,
+  RefreshCw,
+  Search,
+  TriangleAlert,
+  WifiOff,
+} from 'lucide-react';
 import { type FormEvent } from 'react';
 
-import { useConnectionGate } from '../../../ui/compositions/connection-gate';
+import { useRuntimeConnection } from '../../../lib/api/runtime-connection';
 import { PageHeader } from '../../../ui/compositions/page-header';
+import { PageState } from '../../../ui/compositions/page-state';
 import { Panel } from '../../../ui/compositions/panel';
 import { StatusBadge } from '../../../ui/compositions/status-badge';
 import { TextField } from '../../../ui/compositions/text-field';
-import { Badge } from '../../../ui/primitives/badge';
 import { Button } from '../../../ui/primitives/button';
-import { sessionPreviewQuery } from '../chat-queries';
-
-const statuses = ['all', 'active', 'waiting', 'completed'] as const;
-const agents = [
-  'all',
-  'Support triage',
-  'Research assistant',
-  'Operations analyst',
-] as const;
+import type { ConversationView } from '../../operations/conversation-api';
+import { useConversationDashboard } from '../../operations/use-conversations';
+import { useEnsureChatSession } from '../use-chat';
 
 export function ChatRoute() {
   const search = useSearch({ from: '/chat' });
   const navigate = useNavigate({ from: '/chat' });
-  const { data } = useQuery(sessionPreviewQuery);
-  const { requestConnection } = useConnectionGate();
-  const query = search.q.toLowerCase();
-  const visible = data.filter(
-    (session) =>
-      (search.status === 'all' || session.status === search.status) &&
-      (search.agent === 'all' || session.agent === search.agent) &&
-      (!query ||
-        `${session.title} ${session.agent} ${session.preview}`
+  const connection = useRuntimeConnection();
+  const query = useConversationDashboard();
+  const ensureSession = useEnsureChatSession();
+  const needle = search.q.trim().toLowerCase();
+  const agents = [
+    'all',
+    ...new Set(
+      (query.data?.conversations ?? [])
+        .map((conversation) => conversation.agent)
+        .filter((agent) => agent !== 'Not installed'),
+    ),
+  ];
+  const visible = (query.data?.conversations ?? []).filter(
+    (conversation) =>
+      (search.status === 'all' || conversation.status === search.status) &&
+      (search.agent === 'all' || conversation.agent === search.agent) &&
+      (!needle ||
+        `${conversation.name} ${conversation.agent} ${conversation.provider}`
           .toLowerCase()
-          .includes(query)),
+          .includes(needle)),
   );
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
@@ -42,91 +51,137 @@ export function ChatRoute() {
     void navigate({ search: { ...search, q: String(form.get('q') ?? '') } });
   }
 
+  async function openChat(conversation: ConversationView) {
+    const result = await ensureSession.mutateAsync(conversation);
+    await navigate({
+      to: '/chat/$sessionId',
+      params: { sessionId: result.sessionId },
+      search: { inspector: 'thread' },
+    });
+  }
+
   return (
     <div className="mx-auto grid w-full max-w-[1100px] gap-6">
       <PageHeader
         eyebrow="Conversations"
         title="Chat"
-        description="Recent sessions and owner-visible interaction state."
+        description="Open a durable Gantry session from a discovered conversation."
         action={
-          <Button onClick={() => requestConnection('Create chat session')}>
-            <MessageSquarePlus size={16} aria-hidden="true" />
-            New chat
-          </Button>
+          connection.transport ? (
+            <Button variant="secondary" onClick={() => void query.refetch()}>
+              <RefreshCw size={16} aria-hidden="true" /> Reload
+            </Button>
+          ) : undefined
         }
       />
 
-      <form
-        className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_170px_190px_auto]"
-        onSubmit={submitSearch}
-      >
-        <TextField
-          defaultValue={search.q}
-          id="chat-search"
-          label="Search sessions"
-          name="q"
-          placeholder="Title, agent, or content"
+      {!connection.transport ? (
+        <PageState
+          description="Start Gantry with local-owner UI linkage to open chat sessions."
+          icon={<WifiOff size={18} aria-hidden="true" />}
+          kind="offline"
+          title="Runtime not connected"
         />
-        <FilterSelect
-          label="Status"
-          options={statuses}
-          value={search.status}
-          onChange={(status) =>
-            void navigate({ search: { ...search, status } })
+      ) : query.isPending ? (
+        <PageState
+          description="Loading available conversations and installed agents."
+          icon={
+            <LoaderCircle
+              className="animate-spin"
+              size={18}
+              aria-hidden="true"
+            />
           }
+          kind="loading"
+          title="Loading chat entry points"
         />
-        <FilterSelect
-          label="Agent"
-          options={agents}
-          value={search.agent}
-          onChange={(agent) => void navigate({ search: { ...search, agent } })}
+      ) : query.isError ? (
+        <PageState
+          action={<Button onClick={() => void query.refetch()}>Retry</Button>}
+          description={query.error.message}
+          icon={<TriangleAlert size={18} aria-hidden="true" />}
+          kind="error"
+          title="Chat entry points could not be loaded"
         />
-        <Button variant="secondary" type="submit">
-          <Search size={15} aria-hidden="true" />
-          Search
-        </Button>
-      </form>
+      ) : (
+        <>
+          <form
+            className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_170px_190px_auto]"
+            onSubmit={submitSearch}
+          >
+            <TextField
+              defaultValue={search.q}
+              id="chat-search"
+              label="Search conversations"
+              name="q"
+              placeholder="Name, agent, or provider"
+            />
+            <FilterSelect
+              label="Status"
+              options={['all', 'active', 'inactive', 'archived']}
+              value={search.status}
+              onChange={(status) =>
+                void navigate({ search: { ...search, status } })
+              }
+            />
+            <FilterSelect
+              label="Agent"
+              options={agents}
+              value={search.agent}
+              onChange={(agent) =>
+                void navigate({ search: { ...search, agent } })
+              }
+            />
+            <Button variant="secondary" type="submit">
+              <Search size={15} aria-hidden="true" /> Search
+            </Button>
+          </form>
 
-      <Panel
-        title="Sessions"
-        description={`${visible.length} matching sessions`}
-      >
-        <div className="divide-y divide-border">
-          {visible.map((session) => (
-            <Link
-              className="grid gap-3 px-5 py-4 text-text no-underline hover:bg-surface-muted sm:grid-cols-[minmax(0,1fr)_auto]"
-              key={session.id}
-              params={{ sessionId: session.id }}
-              search={{ inspector: 'thread' }}
-              to="/chat/$sessionId"
-            >
-              <span className="min-w-0">
-                <span className="flex flex-wrap items-center gap-2">
-                  <strong className="text-sm">{session.title}</strong>
-                  <StatusBadge status={session.status} />
-                  {session.unread ? (
-                    <Badge tone="attention">{session.unread} new</Badge>
-                  ) : null}
-                </span>
-                <span className="mt-1 block text-xs text-text-secondary">
-                  {session.agent} · {session.conversation}
-                </span>
-                <span className="mt-2 block truncate text-[13px] text-text-secondary">
-                  {session.preview}
-                </span>
-              </span>
-              <span className="text-xs text-text-muted">
-                {session.activity}
-              </span>
-            </Link>
-          ))}
-          {visible.length === 0 ? (
-            <p className="m-0 px-5 py-12 text-center text-sm text-text-secondary">
-              No sessions match these filters.
-            </p>
-          ) : null}
-        </div>
-      </Panel>
+          <Panel
+            title="Available conversations"
+            description={`${visible.length} conversations can open a durable session`}
+          >
+            <div className="divide-y divide-border">
+              {visible.map((conversation) => (
+                <article
+                  className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                  key={conversation.id}
+                >
+                  <span className="min-w-0">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <strong className="text-sm text-text">
+                        {conversation.name}
+                      </strong>
+                      <StatusBadge status={conversation.status} />
+                    </span>
+                    <span className="mt-1 block text-xs text-text-secondary">
+                      {conversation.agent} · {conversation.provider} ·{' '}
+                      {conversation.kind}
+                    </span>
+                  </span>
+                  <Button
+                    disabled={ensureSession.isPending}
+                    onClick={() => void openChat(conversation)}
+                  >
+                    <MessageSquarePlus size={15} aria-hidden="true" />
+                    Open chat
+                  </Button>
+                </article>
+              ))}
+              {visible.length === 0 ? (
+                <p className="m-0 px-5 py-12 text-center text-sm text-text-secondary">
+                  No conversations match these filters.
+                </p>
+              ) : null}
+            </div>
+            {ensureSession.isError ? (
+              <p className="m-0 border-t border-border px-5 py-3 text-xs text-status-danger">
+                {ensureSession.error.message}
+              </p>
+            ) : null}
+          </Panel>
+        </>
+      )}
     </div>
   );
 }

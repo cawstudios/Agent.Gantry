@@ -3,7 +3,7 @@ import { AlertTriangle, CircleCheck, Image } from 'lucide-react';
 import { useConnectionGate } from '../../../ui/compositions/connection-gate';
 import { StatusBadge } from '../../../ui/compositions/status-badge';
 import { Button } from '../../../ui/primitives/button';
-import type { InteractionPreview } from '../chat-preview';
+import type { InteractionPreview } from '../interaction-preview';
 import { InteractionFrame } from './interaction-frame';
 
 type ContentDescriptor = Extract<

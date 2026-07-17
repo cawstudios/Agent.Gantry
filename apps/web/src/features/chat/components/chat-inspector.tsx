@@ -1,128 +1,74 @@
-import { CheckCircle2, Clock3, FileText, Info } from 'lucide-react';
+import { CheckCircle2, Clock3, XCircle } from 'lucide-react';
 
-import { useConnectionGate } from '../../../ui/compositions/connection-gate';
 import { StatusBadge } from '../../../ui/compositions/status-badge';
-import { Button } from '../../../ui/primitives/button';
-import type {
-  ChatMessagePreview,
-  ChatSessionPreview,
-  InteractionPreview,
-} from '../chat-preview';
+import type { ChatRun, ChatSession } from '../chat-api';
 
-export type ChatInspectorTab = 'thread' | 'timeline' | 'files';
-type TimelineItem = Extract<
-  InteractionPreview,
-  { kind: 'todo' | 'progress' | 'receipt' }
->;
+export type ChatInspectorTab = 'thread' | 'timeline';
 
 export function ChatInspector({
-  messages,
   session,
   tab,
 }: {
-  messages: ChatMessagePreview[];
-  session: ChatSessionPreview;
+  session: ChatSession;
   tab: ChatInspectorTab;
 }) {
-  const { requestConnection } = useConnectionGate();
-  const descriptors = messages.flatMap((message) => message.descriptors ?? []);
-
   if (tab === 'thread') {
     return (
       <div className="grid gap-4 p-4">
         <Detail label="Agent" value={session.agent} />
         <Detail label="Conversation" value={session.conversation} />
         <Detail
-          label="Status"
+          label="Session status"
           value={<StatusBadge status={session.status} />}
         />
-        <Detail label="Last activity" value={session.activity} />
-        <div className="border-t border-border pt-4">
-          <Button
-            className="w-full"
-            variant="secondary"
-            onClick={() =>
-              requestConnection(`Open runtime detail for ${session.title}`)
-            }
-          >
-            <Info size={15} aria-hidden="true" /> Runtime detail
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (tab === 'files') {
-    const files = descriptors.filter(
-      (descriptor) => descriptor.kind === 'file',
-    );
-    return (
-      <div className="grid gap-2 p-4">
-        {files.length ? (
-          files.map((file) => (
-            <button
-              className="grid min-h-14 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border border-border px-3 text-left hover:bg-surface-muted"
-              key={file.name}
-              type="button"
-              onClick={() => requestConnection(`Download ${file.name}`)}
-            >
-              <FileText size={17} aria-hidden="true" />
-              <span className="min-w-0">
-                <span className="block truncate text-[13px] font-semibold text-text">
-                  {file.name}
-                </span>
-                <span className="font-mono text-[10px] text-text-muted">
-                  {file.mediaType} · {file.size}
-                </span>
+        <Detail
+          label="Provider session"
+          value={
+            session.providerSession ? (
+              <span className="inline-flex flex-wrap items-center gap-2">
+                {session.providerSession.provider}
+                <StatusBadge status={session.providerSession.status} />
               </span>
-            </button>
-          ))
-        ) : (
-          <p className="m-0 py-8 text-center text-xs text-text-secondary">
-            No files in this session.
-          </p>
-        )}
+            ) : (
+              'Not established'
+            )
+          }
+        />
+        <Detail label="Thread ID" value={session.threadId ?? 'None'} />
+        <Detail label="Created" value={formatDate(session.createdAt)} />
+        <Detail label="Updated" value={formatDate(session.updatedAt)} />
       </div>
     );
   }
 
-  const timeline = descriptors.filter(isTimelineItem);
+  return <RunTimeline runs={session.runs} />;
+}
+
+function RunTimeline({ runs }: { runs: ChatRun[] }) {
   return (
     <div className="grid gap-4 p-4">
-      {timeline.length ? (
-        timeline.map((item, index) => (
-          <div
-            className="grid grid-cols-[20px_minmax(0,1fr)] gap-3"
-            key={`${item.kind}-${index}`}
-          >
-            <span
-              className={
-                item.kind === 'receipt'
-                  ? 'text-status-success'
-                  : 'text-status-attention'
-              }
-            >
-              {item.kind === 'receipt' ? (
-                <CheckCircle2 size={16} aria-hidden="true" />
-              ) : (
-                <Clock3 size={16} aria-hidden="true" />
-              )}
+      {runs.map((run) => (
+        <div className="grid grid-cols-[20px_minmax(0,1fr)] gap-3" key={run.id}>
+          <span className={runTone(run.status)}>
+            <RunIcon status={run.status} />
+          </span>
+          <span>
+            <strong className="block text-[13px] text-text">
+              {run.status}
+            </strong>
+            <span className="mt-1 block text-xs leading-5 text-text-secondary">
+              {run.resultSummary ??
+                run.errorSummary ??
+                `Started ${formatDate(run.startedAt ?? run.createdAt)}`}
             </span>
-            <span>
-              <strong className="block text-[13px] text-text">
-                {timelineTitle(item)}
-              </strong>
-              <span className="mt-1 block text-xs leading-5 text-text-secondary">
-                {timelineDetail(item)}
-              </span>
-            </span>
-          </div>
-        ))
-      ) : (
+          </span>
+        </div>
+      ))}
+      {runs.length === 0 ? (
         <p className="m-0 py-8 text-center text-xs text-text-secondary">
-          No run timeline is represented.
+          No runs are stored for this session.
         </p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -136,21 +82,23 @@ function Detail({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function isTimelineItem(item: InteractionPreview): item is TimelineItem {
-  return (
-    item.kind === 'todo' || item.kind === 'progress' || item.kind === 'receipt'
-  );
+function RunIcon({ status }: { status: ChatRun['status'] }) {
+  if (status === 'completed') {
+    return <CheckCircle2 size={16} aria-hidden="true" />;
+  }
+  if (status === 'failed' || status === 'canceled') {
+    return <XCircle size={16} aria-hidden="true" />;
+  }
+  return <Clock3 size={16} aria-hidden="true" />;
 }
 
-function timelineTitle(item: TimelineItem) {
-  if (item.kind === 'todo') return item.title;
-  if (item.kind === 'progress') return item.label;
-  return 'Result receipt';
+function runTone(status: ChatRun['status']): string {
+  if (status === 'completed') return 'text-status-success';
+  if (status === 'failed' || status === 'canceled') return 'text-status-danger';
+  return 'text-status-attention';
 }
 
-function timelineDetail(item: TimelineItem) {
-  if (item.kind === 'todo')
-    return `${item.items.filter((entry) => entry.status === 'done').length} of ${item.items.length} steps complete`;
-  if (item.kind === 'progress') return item.detail;
-  return item.outcome;
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }

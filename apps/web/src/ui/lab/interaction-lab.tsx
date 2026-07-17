@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 
 import { InteractionRenderer } from '../../features/chat/components/interaction-renderer';
-import type { InteractionPreview } from '../../features/chat/chat-preview';
+import type { InteractionPreview } from '../../features/chat/interaction-preview';
 import { PageHeader } from '../compositions/page-header';
 import { Panel } from '../compositions/panel';
 

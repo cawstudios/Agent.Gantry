@@ -13,7 +13,7 @@ import { useConnectionGate } from '../../../ui/compositions/connection-gate';
 import { ResultReceipt } from '../../../ui/compositions/result-receipt';
 import { Badge } from '../../../ui/primitives/badge';
 import { Button } from '../../../ui/primitives/button';
-import type { InteractionPreview } from '../chat-preview';
+import type { InteractionPreview } from '../interaction-preview';
 import { ContentInteractionRenderer } from './content-interaction-renderer';
 import { InteractionFrame } from './interaction-frame';
 
