@@ -521,6 +521,7 @@ const delegateTaskHandler: TaskHandler = async (context) => {
     target,
     trustedProviderAccountId: scope.sandboxPolicy.providerAccountId,
     trustedJobId: scope.sandboxPolicy.jobId,
+    trustedParentRunId: scope.sandboxPolicy.correlationRunId,
     payload,
     objective,
     requestedTargetAgentId: targetAgentId,

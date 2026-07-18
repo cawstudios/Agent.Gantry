@@ -79,6 +79,7 @@ export interface AgentInput {
   jobId?: string;
   jobName?: string;
   runId?: string;
+  parentRunId?: string;
   parentTaskId?: string;
   callableAgentManifest?: CallableAgentToolManifestEntry[];
   runLeaseToken?: string;

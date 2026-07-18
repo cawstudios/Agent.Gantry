@@ -38,6 +38,7 @@ export async function executeResolvedDelegation(input: {
   target: ResolvedDelegationTarget;
   trustedProviderAccountId?: string | null;
   trustedJobId?: string;
+  trustedParentRunId?: string;
   payload: Record<string, unknown>;
   objective: string;
   requestedTargetAgentId?: string;
@@ -50,7 +51,9 @@ export async function executeResolvedDelegation(input: {
     authorityToolName: target.callableAgentEntry
       ? 'AgentDelegation'
       : undefined,
-    parentRunId: input.trustedJobId ? null : (context.data.runId ?? null),
+    parentRunId: input.trustedJobId
+      ? null
+      : (input.trustedParentRunId ?? null),
     workspaceFolder: target.group.folder,
     runDelegatedAgent: async ({
       task,
@@ -73,6 +76,8 @@ export async function executeResolvedDelegation(input: {
           threadId: input.owner.threadId ?? undefined,
           workspaceFolder: target.group.folder,
           parentTaskId: task.id,
+          parentRunId:
+            input.trustedParentRunId ?? task.parentRunId ?? undefined,
           persona: target.group.agentConfig?.persona,
           thinking: target.group.agentConfig?.thinking,
           toolPolicyRules: target.toolPolicy.toolPolicyRules,

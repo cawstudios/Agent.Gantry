@@ -120,7 +120,6 @@ export async function spawnAgent(
       spawnAgentWithContext(group, spawnInput, onProcess, options, turnTracker),
   );
 }
-
 async function spawnAgentWithContext(
   group: ConversationRoute,
   input: AgentInput,
@@ -687,6 +686,7 @@ async function spawnAgentWithContext(
       providerAccountId: group.providerAccountId,
       threadId: input.threadId,
       runId: input.runId,
+      correlationRunId: turnTracker.correlationId,
       jobId: input.jobId,
       protectedReadPaths: protectedFilesystemDenyReadPaths,
       protectedWritePaths: protectedFilesystemDenyWritePaths,

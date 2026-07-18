@@ -993,7 +993,7 @@ describe('agent task lifecycle IPC handlers', () => {
       conversationId: 'sl:C123',
       providerAccountId: 'slack-one',
       threadId: 'thread-1',
-      runId: 'run-id-1',
+      correlationRunId: 'turn-correlation-1',
       protectedReadPaths: [],
       protectedWritePaths: [],
       allowedNetworkHosts: [],
@@ -1102,15 +1102,20 @@ describe('agent task lifecycle IPC handlers', () => {
     await waitForStatus(repository, 'completed');
     expect(sendMessage).not.toHaveBeenCalled();
 
+    const {
+      runId: runnerSuppliedRunId,
+      ...syntheticDelegationData
+    } = taskData('delegate-synthetic', 'delegate_task', {
+      objective: 'Research lead sources',
+      targetAgentId: 'agent:reviewer',
+      callableAgentToolName: syntheticToolName,
+      syncWaitTimeoutMs: 60_000,
+    });
+    expect(runnerSuppliedRunId).toBe('run-id-1');
     await agentTaskLifecycleHandlers.delegate_task(
       contextFor({
         data: {
-          ...taskData('delegate-synthetic', 'delegate_task', {
-            objective: 'Research lead sources',
-            targetAgentId: 'agent:reviewer',
-            callableAgentToolName: syntheticToolName,
-            syncWaitTimeoutMs: 60_000,
-          }),
+          ...syntheticDelegationData,
           providerAccountId: 'slack-one',
         },
         deps,
@@ -1126,6 +1131,13 @@ describe('agent task lifecycle IPC handlers', () => {
       ok: true,
       data: { status: 'completed' },
     });
+    expect(runAgent).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ parentRunId: 'turn-correlation-1' }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Object),
+    );
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
     expect(sendMessage).toHaveBeenNthCalledWith(
       1,

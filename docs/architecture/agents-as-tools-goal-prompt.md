@@ -383,3 +383,31 @@ handler seams and can run first independently.
 - Decisions and assumptions: none. Locked-mode suppression is defense in depth
   at host preload, lane projection, stdio manifest parsing, and the existing
   locked IPC denial boundary.
+
+## Stage 6 implementation ledger
+
+- Scope: implemented per-hop trace nesting for callable-agent delegation only.
+  Counted depth and all other runtime, configuration, persistence, API, CLI,
+  MCP inventory, channel/provider, and audit behavior remain unchanged.
+- Trace contract: `startTurnSpan` accepts an optional OTel parent context and
+  records `gantry.parent_run_id` when the child carries a parent run id. A live
+  parent produces the same trace with the child turn span nested directly under
+  the delegating turn span.
+- Propagation contract: inline and worker lanes capture the host-owned turn
+  correlation id before delegation. Non-job tasks persist it as `parentRunId`
+  for child spawn and recovery; scheduled tasks keep the existing null durable
+  parent for job/FK semantics, while their live child receives the host-only
+  correlation directly. The spawn turn tracker resolves the child input through
+  the existing in-process turn-span registry and OTel child-context helper.
+- Failure contract: tracing disabled remains a no-op. A missing host correlation
+  id or registry miss starts the child as a root turn span; runner input cannot
+  supply or override the trusted trace link. Recovered scheduled delegations
+  remain roots because they intentionally persist no parent turn. Tracing
+  failures remain isolated from delegation and spawn.
+- Verification: TypeScript completed with exit 0; focused trace/propagation
+  coverage passed 3 files / 37 tests; the requested broad unit command passed
+  129 files / 1,791 tests. The architecture gate reported 0 non-text-style
+  findings and only the accepted `text-styles.ts` findings at lines 13, 64, and
+  75.
+- Decisions and assumptions: none. This remains v1 per-hop nesting; no parallel
+  trace registry or counted-depth mechanism was added.

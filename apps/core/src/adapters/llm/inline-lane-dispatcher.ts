@@ -81,6 +81,7 @@ export interface AdapterInlineControlPort {
 
 export interface AdapterInlineAgentLoopLaneInput {
   group: ConversationRoute;
+  correlationRunId?: string;
   input: AdapterInlineAgentInput;
   signal: AbortSignal;
   controlPort: AdapterInlineControlPort;

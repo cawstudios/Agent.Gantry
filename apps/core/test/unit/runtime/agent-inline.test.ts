@@ -165,7 +165,11 @@ describe('runInlineAgent', () => {
   });
 
   it('binds inline credentials to turn correlation without adding lease identity', async () => {
-    const lane = vi.fn<InlineAgentLoopLane>(async ({ input }) => {
+    const lane = vi.fn<InlineAgentLoopLane>(async ({
+      correlationRunId,
+      input,
+    }) => {
+      expect(correlationRunId).toBe('turn-correlation-1');
       expect(input).not.toHaveProperty('runId');
       expect(input).not.toHaveProperty('runLeaseToken');
       expect(input).not.toHaveProperty('runLeaseFencingVersion');

@@ -77,7 +77,9 @@ export function createInlineAgentTaskLifecycle(input: {
     service,
     owner,
     parentTaskId: run.parentTaskId,
-    parentRunId: run.jobId ? null : run.runId,
+    parentRunId: run.jobId
+      ? null
+      : (input.laneInput.correlationRunId ?? run.runId),
     workspaceFolder: input.laneInput.group.folder,
     ...(run.parentTaskId
       ? {}
@@ -154,6 +156,10 @@ export function createInlineAgentTaskLifecycle(input: {
                   threadId: owner.threadId ?? undefined,
                   workspaceFolder: targetGroup.folder,
                   parentTaskId: delegated.task.id,
+                  parentRunId:
+                    input.laneInput.correlationRunId ??
+                    delegated.task.parentRunId ??
+                    undefined,
                   ...(childRunId ? { runId: childRunId } : {}),
                   persona: targetGroup.agentConfig?.persona,
                   thinking: targetGroup.agentConfig?.thinking,

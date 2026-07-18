@@ -323,6 +323,7 @@ function createRecoveredDelegatedAgentRun(
         threadId: runInput.task.threadId ?? undefined,
         workspaceFolder: group.folder,
         parentTaskId: runInput.task.id,
+        parentRunId: runInput.task.parentRunId ?? undefined,
         persona: group.agentConfig?.persona,
         thinking: group.agentConfig?.thinking,
         toolPolicyRules: toolPolicy.toolPolicyRules,
