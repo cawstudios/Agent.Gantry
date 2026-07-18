@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import type {
   GroupJoinOnboardingRecord,
@@ -78,7 +78,15 @@ export class PostgresGroupJoinOnboardingRepository implements GroupJoinOnboardin
         dismissedAt: input.now,
         updatedAt: input.now,
       })
-      .where(and(eq(table.id, input.id), eq(table.status, 'prompted')))
+      // leftAt guard: once the bot was removed from the group, the stale
+      // prompt's buttons must settle as "no longer active", not act.
+      .where(
+        and(
+          eq(table.id, input.id),
+          eq(table.status, 'prompted'),
+          isNull(table.leftAt),
+        ),
+      )
       .returning();
     return row ? mapRow(row) : null;
   }
@@ -94,7 +102,13 @@ export class PostgresGroupJoinOnboardingRepository implements GroupJoinOnboardin
         registeredAt: input.now,
         updatedAt: input.now,
       })
-      .where(and(eq(table.id, input.id), eq(table.status, 'prompted')))
+      .where(
+        and(
+          eq(table.id, input.id),
+          eq(table.status, 'prompted'),
+          isNull(table.leftAt),
+        ),
+      )
       .returning();
     return row ? mapRow(row) : null;
   }

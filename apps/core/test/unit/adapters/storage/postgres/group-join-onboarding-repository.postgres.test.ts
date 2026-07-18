@@ -109,6 +109,8 @@ describe('PostgresGroupJoinOnboardingRepository', () => {
     const predicate = where.mock.calls[0]?.[0];
     expect(flattenSqlShape(predicate)).toContain('opaque-2');
     expect(flattenSqlShape(predicate)).toContain('prompted');
+    // A row whose group the bot already left must not settle via stale buttons.
+    expect(flattenSqlShape(predicate)).toContain('left_at');
   });
 
   it('reverts only a registered claim to a retryable prompt', async () => {

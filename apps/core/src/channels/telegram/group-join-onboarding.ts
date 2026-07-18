@@ -112,7 +112,6 @@ export async function handleTelegramGroupMembershipUpdate(input: {
     promptConversationJid: promptTarget.jid,
     promptAgentFolder: promptTarget.agentFolder,
   });
-  if (record.status === 'registered') return;
 
   const adderLabel = update.from.username
     ? `@${update.from.username}`
@@ -143,6 +142,9 @@ export async function handleTelegramGroupMembershipUpdate(input: {
       },
       'Telegram group join onboarding prompt delivery failed',
     );
+    // No prompt reached the approver, so no callback can ever settle this row.
+    // Dismiss it so the state matches reality; an approver re-add re-prompts.
+    await input.opts.groupJoinOnboarding.dismiss(record.id).catch(() => {});
   }
 }
 

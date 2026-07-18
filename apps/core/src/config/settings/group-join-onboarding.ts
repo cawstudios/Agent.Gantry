@@ -66,8 +66,11 @@ export function createGroupJoinOnboardingCoordinator(
       });
       if (!record) return null;
 
-      // V1 accepts that a process crash after this durable claim and before the
-      // settings write can leave the row registered without the installation.
+      // ponytail: v1 accepts the crash window between this durable claim and
+      // the settings write (row 'registered', no installation). It is
+      // RECOVERABLE, not dead state: recordPrompt resets any stale row on the
+      // next approver re-add, which re-prompts and re-registers. Upgrade path
+      // if it ever matters: a 'registering' intent state + startup sweep.
       try {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const settings = await resolved.loadSettings();
