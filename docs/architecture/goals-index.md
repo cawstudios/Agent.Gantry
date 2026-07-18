@@ -22,7 +22,7 @@ the goal doc before stage 1, per AGENTS.md.
 **Next — high-leverage, blocked only on the above:**
 4. **July-16 ponytail legacy audit** — ~19,400 lines; DB reset approved. `ponytail-audit-2026-07-16.md`
 5. **Durable-work primitive** — highest-leverage arch cycle; unifies ~10 bespoke lease/claim/retry copies; absorbs deferred retention + IPC-backpressure + fire-and-forget `send_message`; the umbrella for goals 7–8 below. `fable-architecture-review-2026-07-16.md` (#1)
-6. **Permission durable-storage simplification** — retires the C+D churn root cause (jsonb-key claim → columns/`permission_claims`; envelope → single row; 4×-provider recovery → one orchestrator). `coordination-representation-audit-2026-07-18.md` (Group A)
+6. **Permission durable-storage simplification** — APPROVED 2026-07-19, IN PROGRESS: sweep → one recovery orchestrator → merged envelope-row schema; 12-invariant test contract. `permission-durable-storage-goal-prompt.md` (validated by `permission-durable-storage-plan-validation.md` + `permission-storage-fable-codex-verification.md`)
 
 **Then — medium, scoped:**
 7. **Jobs recovery-intent → columns + CAS.** `coordination-representation-audit-2026-07-18.md` (B1) — may fold into goal 5.
