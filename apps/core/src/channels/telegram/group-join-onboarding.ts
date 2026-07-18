@@ -395,7 +395,11 @@ async function editCallbackMessage(
     // transient edit failure must not fail the callback or misreport the
     // outcome to the approver.
     logger.warn(
-      { provider: 'telegram', chatId, err: err instanceof Error ? err.message : String(err) },
+      {
+        provider: 'telegram',
+        chatId,
+        err: err instanceof Error ? err.message : String(err),
+      },
       'Telegram group join receipt edit failed',
     );
   }
