@@ -196,7 +196,7 @@ async function spawnAgentWithContext(
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
   const credentials = host.getHostRuntimeCredentialEnv;
   const personasByAgentId = Object.fromEntries(
-    Object.entries(runtimeSettings.agents).map(([folder, agent]) => [
+    Object.entries(runtimeSettings.agents ?? {}).map(([folder, agent]) => [
       String(agentIdForFolder(folder)),
       agent.persona,
     ]),
