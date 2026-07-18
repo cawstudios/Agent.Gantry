@@ -421,17 +421,17 @@ describe('callable agent tools', () => {
   it('redacts and bounds objective and failure narration snippets', async () => {
     const sendMessage = vi.fn(async () => undefined);
     const taskBackend = backend();
-    const objectiveSecret = 'objective-secret-value';
-    const failureSecret = 'failure-secret-value';
+    const objectiveMarker = 'objective-marker-value';
+    const failureMarker = 'failure-marker-value';
     vi.mocked(taskBackend.delegate_task).mockResolvedValue({
       ok: false,
-      message: `password=${failureSecret} ${'f'.repeat(300)}`,
+      message: `password=${failureMarker} ${'f'.repeat(300)}`,
       code: 'unavailable',
     });
 
     await dispatchCallableAgentTool({
       args: {
-        objective: `api_key=${objectiveSecret} ${'o'.repeat(300)}`,
+        objective: `api_key=${objectiveMarker} ${'o'.repeat(300)}`,
       },
       entry: {
         toolName: 'reviewer_hash',
@@ -446,8 +446,8 @@ describe('callable agent tools', () => {
 
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
     const narrationTexts = sendMessage.mock.calls.map(([, text]) => text);
-    expect(narrationTexts.join('\n')).not.toContain(objectiveSecret);
-    expect(narrationTexts.join('\n')).not.toContain(failureSecret);
+    expect(narrationTexts.join('\n')).not.toContain(objectiveMarker);
+    expect(narrationTexts.join('\n')).not.toContain(failureMarker);
     expect(narrationTexts).toEqual([
       expect.stringContaining('api_key=[REDACTED_SECRET]'),
       expect.stringContaining('password=[REDACTED_SECRET]'),
