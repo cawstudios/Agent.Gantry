@@ -98,7 +98,10 @@ import {
   buildAndLogRunnerRuntimeDetails,
   type RunnerAgentInput,
 } from './agent-spawn-helpers.js';
-import { prepareAgentSpawn, prepareWorkerAuthorityProjection } from './agent-spawn-preparation.js';
+import {
+  prepareAgentSpawn,
+  prepareWorkerAuthorityProjection,
+} from './agent-spawn-preparation.js';
 import { resolveSpawnExecutionAdapter } from './agent-spawn-execution-adapter.js';
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
 export type { AvailableGroup } from './agent-spawn-types.js';

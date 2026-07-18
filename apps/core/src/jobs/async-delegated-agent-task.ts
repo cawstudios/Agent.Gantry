@@ -110,7 +110,10 @@ export async function startDelegatedAgentTask(input: {
     kind: 'delegated_agent',
     status: 'queued',
     admissionClass: 'task',
-    authoritySnapshotJson: { toolName: input.taskInput.authorityToolName ?? 'delegate_task', maxDepth: 1 },
+    authoritySnapshotJson: {
+      toolName: input.taskInput.authorityToolName ?? 'delegate_task',
+      maxDepth: 1,
+    },
     privateCorrelationJson: asyncDelegatedPrivateCorrelation({
       appId: input.taskInput.appId,
       taskId,

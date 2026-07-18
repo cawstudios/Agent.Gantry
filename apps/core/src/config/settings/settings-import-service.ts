@@ -455,8 +455,7 @@ function buildRevisionDocument(
     agents: mapRecord(settings.agents, (agent) => ({
       name: agent.name,
       persona: agent.persona,
-      delegates:
-        agent.delegates.length > 0 ? agent.delegates : undefined,
+      delegates: agent.delegates.length > 0 ? agent.delegates : undefined,
       relationship_mode:
         agent.relationshipMode && agent.relationshipMode !== 'personal'
           ? agent.relationshipMode

@@ -19,9 +19,7 @@ import {
   callableAgentToolName,
   projectCallableAgentTools,
 } from '@core/application/core-tools/callable-agent-tools.js';
-import {
-  CALLABLE_AGENT_RESPONSE_TIMEOUT_MS,
-} from '@core/shared/callable-agent-manifest.js';
+import { CALLABLE_AGENT_RESPONSE_TIMEOUT_MS } from '@core/shared/callable-agent-manifest.js';
 
 const SAFE_DEFAULT_ALLOWED_TOOLS = [
   'WebSearch',

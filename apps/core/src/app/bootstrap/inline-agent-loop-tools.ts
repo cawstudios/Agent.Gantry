@@ -100,8 +100,7 @@ interface InlineCoreToolHostDeps extends CoreSendMessageDeps {
   getAgentRepository(): AgentRepository | undefined;
   getPermissionPromotionRepository(): PermissionPromotionRepository | undefined;
   createTaskLifecycleBackend(
-    laneInput: InlineAgentLoopLaneInput,
-    authorityToolName?: 'AgentDelegation',
+    laneInput: InlineAgentLoopLaneInput, authorityToolName?: 'AgentDelegation',
   ): CoreTaskLifecycleBackend | undefined;
 }
 
@@ -178,9 +177,7 @@ export function createInlineCoreTools(
     deps.getAgentAccessPreset(laneInput.group.folder) !== 'locked'
       ? callableAgentManifest
       : [];
-  const callableAgentTaskLifecycleBackend = projectedCallableAgents.length
-    ? deps.createTaskLifecycleBackend(laneInput, 'AgentDelegation')
-    : undefined;
+  const callableAgentTaskLifecycleBackend = projectedCallableAgents.length ? deps.createTaskLifecycleBackend(laneInput, 'AgentDelegation') : undefined;
   const registry = createCoreToolRegistry({
     context: {
       sourceAgentFolder: laneInput.group.folder,
@@ -232,11 +229,7 @@ export function createInlineCoreTools(
               args,
               entry,
               backend: callableAgentTaskLifecycleBackend,
-              narration: {
-                sourceAgentFolder: laneInput.group.folder,
-                deps,
-                isScheduledJob: run.isScheduledJob === true,
-              },
+              narration: { sourceAgentFolder: laneInput.group.folder, deps, isScheduledJob: run.isScheduledJob === true },
               revalidate: async (expected) =>
                 (
                   await resolveInlineCallableAgentManifest(
@@ -683,8 +676,7 @@ export function wireInlineAgentLoopTools(input: {
     classifierConsult: input.classifierConsult,
     createTaskLifecycleBackend: (laneInput, authorityToolName) =>
       createInlineAgentTaskLifecycle({
-        laneInput,
-        authorityToolName,
+        laneInput, authorityToolName,
         repository: input.getAsyncTaskRepository?.(),
         runRepository: input.opsRepository,
         getConversationRoutes: input.app.getConversationRoutes,

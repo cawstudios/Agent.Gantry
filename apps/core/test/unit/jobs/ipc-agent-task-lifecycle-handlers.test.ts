@@ -983,7 +983,9 @@ describe('agent task lifecycle IPC handlers', () => {
       getAgentRepository: () =>
         ({ listAgents: async () => callableAgents }) as never,
       getPermissionRuntimeSettings: () =>
-        ({ agents: { main_agent: { delegates: configuredDelegates } } }) as never,
+        ({
+          agents: { main_agent: { delegates: configuredDelegates } },
+        }) as never,
       sendMessage,
       runAgent,
     };
@@ -1060,10 +1062,12 @@ describe('agent task lifecycle IPC handlers', () => {
         conversationBindings,
       }),
     );
-    expect(readResponse(runtimeHome, 'delegate-not-allowlisted')).toMatchObject({
-      ok: false,
-      code: 'forbidden',
-    });
+    expect(readResponse(runtimeHome, 'delegate-not-allowlisted')).toMatchObject(
+      {
+        ok: false,
+        code: 'forbidden',
+      },
+    );
     expect(repository.tasks.size).toBe(0);
     configuredDelegates = ['reviewer'];
 
@@ -1102,15 +1106,16 @@ describe('agent task lifecycle IPC handlers', () => {
     await waitForStatus(repository, 'completed');
     expect(sendMessage).not.toHaveBeenCalled();
 
-    const {
-      runId: runnerSuppliedRunId,
-      ...syntheticDelegationData
-    } = taskData('delegate-synthetic', 'delegate_task', {
-      objective: 'Research lead sources',
-      targetAgentId: 'agent:reviewer',
-      callableAgentToolName: syntheticToolName,
-      syncWaitTimeoutMs: 60_000,
-    });
+    const { runId: runnerSuppliedRunId, ...syntheticDelegationData } = taskData(
+      'delegate-synthetic',
+      'delegate_task',
+      {
+        objective: 'Research lead sources',
+        targetAgentId: 'agent:reviewer',
+        callableAgentToolName: syntheticToolName,
+        syncWaitTimeoutMs: 60_000,
+      },
+    );
     expect(runnerSuppliedRunId).toBe('run-id-1');
     await agentTaskLifecycleHandlers.delegate_task(
       contextFor({

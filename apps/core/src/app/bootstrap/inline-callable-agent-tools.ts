@@ -17,8 +17,7 @@ export async function resolveInlineCallableAgentManifest(
   toolsAvailable = true,
 ) {
   const run = laneInput.input;
-  const delegates =
-    configuredAgents?.[laneInput.group.folder]?.delegates ?? [];
+  const delegates = configuredAgents?.[laneInput.group.folder]?.delegates ?? [];
   if (
     !toolsAvailable ||
     run.disableTools === true ||

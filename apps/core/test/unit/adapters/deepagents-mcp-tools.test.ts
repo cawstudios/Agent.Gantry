@@ -151,10 +151,7 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
       schema: z.object({ objective: z.string() }),
       responseFormat: 'content_and_artifact',
       defaultConfig: undefined as Record<string, unknown> | undefined,
-      invoke: async (input: {
-        id: string;
-        args: { objective: string };
-      }) => {
+      invoke: async (input: { id: string; args: { objective: string } }) => {
         const [content, artifact] = await invokeCallable(input.args, {
           metadata: { timeoutMs: callable.defaultConfig?.timeout },
         });

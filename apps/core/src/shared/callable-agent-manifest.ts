@@ -88,8 +88,7 @@ export function parseCallableAgentManifest(
     const seen = new Set<string>();
     const manifest: CallableAgentToolManifestEntry[] = [];
     for (const value of parsed) {
-      if (!value || typeof value !== 'object' || Array.isArray(value))
-        continue;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
       const entry = value as Record<string, unknown>;
       const toolName = typeof entry.toolName === 'string' ? entry.toolName : '';
       const targetAgentId =
