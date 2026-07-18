@@ -54,7 +54,9 @@ describe('reviewed-capability permission durability', () => {
         listPendingInteractions: vi.fn(async () => rows),
         updatePendingInteractionPayload,
       };
-      configurePendingInteractionDurability({ repository: repository as never });
+      configurePendingInteractionDurability({
+        repository: repository as never,
+      });
       const request: PermissionApprovalRequest = {
         requestId,
         appId: 'app:test' as never,

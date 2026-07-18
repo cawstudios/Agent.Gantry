@@ -1,6 +1,4 @@
-import type {
-  PendingInteractionRepository,
-} from '../../domain/ports/worker-coordination.js';
+import type { PendingInteractionRepository } from '../../domain/ports/worker-coordination.js';
 import type {
   PermissionApprovalDecisionMode,
   PermissionApprovalRequest,
