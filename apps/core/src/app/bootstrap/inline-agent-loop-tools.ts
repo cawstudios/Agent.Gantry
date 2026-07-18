@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import type { CoreSendMessageDeps } from '../../application/core-tools/send-message.js';
-import type { CoreTaskLifecycleBackend } from '../../application/core-tools/task-lifecycle.js';
 import {
   dispatchCallableAgentTool,
   type CallableAgentToolManifestEntry,
@@ -25,10 +24,8 @@ import type {
   ToolCatalogRepository,
 } from '../../domain/ports/repositories.js';
 import type {
-  PermissionApprovalDecision,
   PermissionApprovalRequest,
   UserQuestionRequest,
-  UserQuestionResponse,
 } from '../../domain/types.js';
 import type { InlineAgentLoopLaneInput } from '../../runtime/agent-inline.js';
 import type { RunAgentOptions } from '../../runtime/agent-spawn-types.js';
@@ -46,10 +43,7 @@ import {
   resolveTurnSemanticCapabilities,
   resolveTurnToolPolicy,
 } from '../../runtime/group-run-context.js';
-import {
-  createCoreToolRegistry,
-  type CoreToolRegistryDeps,
-} from '../../runtime/core-tools/registry.js';
+import { createCoreToolRegistry } from '../../runtime/core-tools/registry.js';
 import { createCoreToolSchemas } from '../../runtime/core-tools/schemas.js';
 import {
   permissionDecisionEventType,
@@ -74,44 +68,12 @@ import {
 } from './inline-agent-loop-mcp-activity.js';
 import { publishInlinePermissionEvent } from './inline-agent-loop-permission-events.js';
 import { createInlineAgentTaskLifecycle } from './inline-agent-task-lifecycle.js';
+import type {
+  InlineCoreToolHostDeps,
+  InlineCoreToolSupport,
+} from './inline-agent-loop-tool-types.js';
 import { createInlineToolSuccessLedger } from './inline-tool-success-ledger.js';
 import type { RuntimeApp } from './runtime-app.js';
-
-interface InlineCoreToolHostDeps extends CoreSendMessageDeps {
-  warn(context: Record<string, unknown>, message: string): void;
-  requestUserAnswer(
-    request: UserQuestionRequest,
-  ): Promise<UserQuestionResponse>;
-  requestPermissionApproval: (
-    request: PermissionApprovalRequest,
-  ) => Promise<PermissionApprovalDecision>;
-  publishRuntimeEvent?: (event: RuntimeEventPublishInput) => Promise<void>;
-  classifierConsult?: PermissionClassifierPromptConsultInput['classifierConsult'];
-  getAgentAccessPreset(folder: string): 'full' | 'locked';
-  getPermissionRuntimeSettings(): {
-    agents?: InlineConfiguredAgents;
-    permissions: {
-      autoMode: { model?: string };
-      yoloMode: YoloModeSettings;
-    };
-    memory: { llm: { models: { extractor: string } } };
-  };
-  getMcpServerRepository(): McpServerRepository | undefined;
-  getAgentRepository(): AgentRepository | undefined;
-  getPermissionPromotionRepository(): PermissionPromotionRepository | undefined;
-  createTaskLifecycleBackend(
-    laneInput: InlineAgentLoopLaneInput,
-    authorityToolName?: 'AgentDelegation',
-  ): CoreTaskLifecycleBackend | undefined;
-}
-
-type InlineCoreToolSupport = Pick<
-  CoreToolRegistryDeps,
-  | 'evaluateToolPreChecks'
-  | 'evaluateToolPolicy'
-  | 'formatMemorySearchResponse'
-  | 'formatMemoryWriteResponse'
-> & { schemaFactory: Parameters<typeof createCoreToolSchemas>[0] };
 
 let inlineCoreToolHostDeps: InlineCoreToolHostDeps | undefined;
 

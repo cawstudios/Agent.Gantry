@@ -1,5 +1,4 @@
 import { ChildProcess } from 'child_process';
-import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -103,6 +102,7 @@ import {
   prepareWorkerAuthorityProjection,
 } from './agent-spawn-preparation.js';
 import { resolveSpawnExecutionAdapter } from './agent-spawn-execution-adapter.js';
+import { createRunnerTempDirectories } from './agent-spawn-temp-directories.js';
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
 export type { AvailableGroup } from './agent-spawn-types.js';
 export type { AgentInput, AgentOutput } from './agent-spawn-types.js';
@@ -483,17 +483,10 @@ async function spawnAgentWithContext(
       group.folder,
       'extra',
     );
-    if (runnerSandboxProviderId === 'sandbox_runtime') {
-      const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
-      runnerTempDir = path.join('/tmp', `gantry-srt-${suffix}`);
-      fs.mkdirSync(runnerTempDir, { recursive: false, mode: 0o700 });
-      const providerToolTempDirLeaf =
-        preparedExecution.sandboxRuntime?.toolTempDirLeaf;
-      if (providerToolTempDirLeaf) {
-        providerToolTempDir = path.join(runnerTempDir, providerToolTempDirLeaf);
-        fs.mkdirSync(providerToolTempDir, { recursive: true, mode: 0o700 });
-      }
-    }
+    ({ runnerTempDir, providerToolTempDir } = createRunnerTempDirectories({
+      sandboxProviderId: runnerSandboxProviderId,
+      toolTempDirLeaf: preparedExecution.sandboxRuntime?.toolTempDirLeaf,
+    }));
     // DeepAgents model traffic runs inside the runner process. In
     // OpenRouter's sandbox_runtime lane needs the Gantry egress proxy because
     // it uses raw fetch; child tools still receive only sanitized toolNetworkEnv.

@@ -14,6 +14,7 @@ export type CoreTaskLifecycleName =
 export type CoreTaskLifecycleErrorCode =
   | 'invalid_request'
   | 'unavailable'
+  | 'cancelled'
   | 'not_found'
   | 'forbidden';
 
@@ -212,7 +213,10 @@ export function createCoreTaskLifecycleBackend(input: {
             : {
                 ok: false,
                 message: completion.error || completion.result,
-                code: 'invalid_request',
+                code:
+                  completion.status === 'cancelled'
+                    ? 'cancelled'
+                    : 'unavailable',
                 data: { taskId: completion.taskId, status: completion.status },
               };
         }

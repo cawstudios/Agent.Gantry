@@ -26,6 +26,10 @@ import { createAdmittedAsyncTask } from './async-task-admission.js';
 import { notifyAsyncTaskCompletion } from './async-task-change-waiter.js';
 import { subscribeAsyncTaskCompletion } from './async-task-change-waiter.js';
 import type { AsyncTaskCompletionStartResult } from './async-task-change-waiter.js';
+import {
+  activeChildCount,
+  childTaskResult,
+} from './async-delegated-agent-task-results.js';
 
 const ASYNC_TASK_HEARTBEAT_MS = 15_000;
 const ASYNC_TASK_WAKE_FALLBACK_MS = 15_000;
@@ -558,39 +562,6 @@ async function linkedChildTaskCounts(
     appId: parent.appId,
     parentTaskId: parent.id,
   });
-}
-function activeChildCount(counts: AsyncTaskStatusCount[]): number {
-  return counts.reduce(
-    (total, entry) =>
-      ['queued', 'running', 'needs_attention'].includes(entry.status)
-        ? total + entry.count
-        : total,
-    0,
-  );
-}
-function statusCount(
-  counts: AsyncTaskStatusCount[],
-  status: AsyncTaskRecord['status'],
-): number {
-  return counts.find((entry) => entry.status === status)?.count ?? 0;
-}
-function childTaskResult(
-  counts: AsyncTaskStatusCount[],
-  terminalChildren: ReturnType<typeof toPublicAsyncTaskDto>[],
-): {
-  summary: string;
-  hasFailure: boolean;
-  terminalChildren: ReturnType<typeof toPublicAsyncTaskDto>[];
-} {
-  const completed = 1 + statusCount(counts, 'completed');
-  const failed =
-    statusCount(counts, 'failed') + statusCount(counts, 'timed_out');
-  const cancelled = statusCount(counts, 'cancelled');
-  return {
-    summary: `${completed} completed, ${failed} failed, ${cancelled} cancelled`,
-    hasFailure: failed > 0 || cancelled > 0,
-    terminalChildren,
-  };
 }
 function failureMetadata(
   error: unknown,

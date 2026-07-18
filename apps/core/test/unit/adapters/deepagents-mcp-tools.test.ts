@@ -150,11 +150,11 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
       description: 'Delegate to Reviewer.',
       schema: z.object({ objective: z.string() }),
       responseFormat: 'content_and_artifact',
-      defaultConfig: undefined as Record<string, unknown> | undefined,
-      invoke: async (input: { id: string; args: { objective: string } }) => {
-        const [content, artifact] = await invokeCallable(input.args, {
-          metadata: { timeoutMs: callable.defaultConfig?.timeout },
-        });
+      invoke: async (
+        input: { id: string; args: { objective: string } },
+        config?: { timeout?: number },
+      ) => {
+        const [content, artifact] = await invokeCallable(input.args, config);
         return { content, artifact, tool_call_id: input.id };
       },
     };
@@ -204,11 +204,9 @@ describe('declarative DeepAgents tool-rule wrapper', () => {
     });
     expect(invokeCallable).toHaveBeenCalledWith(
       { objective: 'Review this' },
-      expect.objectContaining({
-        metadata: expect.objectContaining({ timeoutMs: 80_000 }),
-      }),
+      expect.objectContaining({ timeout: 80_000 }),
     );
-    expect(memorySearch).not.toHaveProperty('defaultConfig.timeout');
+    expect(memorySearch.invoke).not.toHaveBeenCalled();
     await connected.close();
   });
 

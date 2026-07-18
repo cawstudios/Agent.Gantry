@@ -205,7 +205,10 @@ export async function connectGantryAndThirdPartyMcpTools(
   const toolEntries: DeclarativeToolEntry[] = [
     ...gantryTools.map((tool) => ({
       tool,
-      canonicalName: () => canonicalGantryToolRuleName(tool.name),
+      canonicalName: () =>
+        canonicalGantryToolRuleName(tool.name, {
+          callableAgentToolNames,
+        }),
     })),
     ...facadeTools.map((tool) => ({
       tool,
@@ -235,13 +238,15 @@ export async function connectGantryAndThirdPartyMcpTools(
 function withCallableAgentTimeout(
   underlying: StructuredToolInterface,
 ): StructuredToolInterface {
-  const configurable = underlying as StructuredToolInterface & {
-    defaultConfig?: Record<string, unknown>;
-  };
-  configurable.defaultConfig = {
-    ...configurable.defaultConfig,
-    timeout: CALLABLE_AGENT_MCP_TOOL_TIMEOUT_MS,
-  };
+  const invoke = underlying.invoke.bind(underlying);
+  underlying.invoke = ((toolInput: unknown, config?: Record<string, unknown>) =>
+    invoke(
+      toolInput as never,
+      {
+        ...config,
+        timeout: CALLABLE_AGENT_MCP_TOOL_TIMEOUT_MS,
+      } as never,
+    )) as StructuredToolInterface['invoke'];
   return underlying;
 }
 

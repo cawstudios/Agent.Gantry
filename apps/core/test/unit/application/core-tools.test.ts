@@ -8,6 +8,7 @@ import {
 } from '@core/runtime/core-tools/registry.js';
 import { createCoreToolSchemas } from '@core/runtime/core-tools/schemas.js';
 import { createCoreTaskLifecycleBackend } from '@core/application/core-tools/task-lifecycle.js';
+import { coreTaskLifecycleMcpResult } from '@core/application/core-tools/callable-agent-tools.js';
 import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 import {
   evaluateNeutralToolPolicy,
@@ -737,6 +738,55 @@ describe('core tool registry', () => {
       expect.objectContaining({ timeoutMs: 123_000 }),
     );
   });
+
+  it.each([
+    ['failed', 'unavailable', 'transient', true],
+    ['timed_out', 'unavailable', 'transient', true],
+    ['cancelled', 'cancelled', 'business', false],
+  ] as const)(
+    'maps delegated %s completion to %s/%s',
+    async (status, code, category, isRetryable) => {
+      const completion = {
+        wait: vi.fn(async () => ({
+          taskId: 'task-terminal',
+          status,
+          result: `${status} result`,
+          error: `${status} error`,
+        })),
+      };
+      const backend = createCoreTaskLifecycleBackend({
+        service: {
+          getScoped: vi.fn(),
+          list: vi.fn(),
+          cancel: vi.fn(),
+          startDelegatedAgent: vi.fn(async () => ({
+            ok: true as const,
+            task: { id: 'task-terminal', summary: 'Investigate' },
+            completion,
+          })),
+          message: vi.fn(),
+        } as never,
+        owner: {
+          appId: 'default',
+          agentId: 'agent-1',
+          conversationId: 'conversation:test',
+        },
+        workspaceFolder: 'main_agent',
+        runDelegatedAgent: vi.fn(),
+      });
+
+      const result = await backend.delegate_task({
+        objective: 'Investigate',
+        syncWaitTimeoutMs: 25,
+      });
+
+      expect(result).toMatchObject({ ok: false, code });
+      expect(coreTaskLifecycleMcpResult(result)).toMatchObject({
+        isError: true,
+        error: { category, isRetryable },
+      });
+    },
+  );
 
   it('falls back to the durable queued task when the sync-wait budget expires', async () => {
     const completion = { wait: vi.fn(async () => null) };
