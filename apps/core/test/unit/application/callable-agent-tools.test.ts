@@ -260,6 +260,38 @@ describe('callable agent tools', () => {
     ]);
   });
 
+  it('narrates a timed-out delegation failure', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const taskBackend = backend();
+    const delegatedResult = {
+      ok: false,
+      message: 'Delegated agent timed out.',
+      code: 'unavailable' as const,
+      data: { taskId: 'task-timeout', status: 'timed_out' },
+    };
+    vi.mocked(taskBackend.delegate_task).mockResolvedValue(delegatedResult);
+
+    await expect(
+      dispatchCallableAgentTool({
+        args: { objective: 'Review this' },
+        entry: {
+          toolName: 'reviewer_hash',
+          targetAgentId: 'agent:reviewer',
+          displayName: 'Reviewer',
+        },
+        backend: taskBackend,
+        revalidate: vi.fn(async () => true),
+        narration: narration(sendMessage),
+      }),
+    ).resolves.toBe(delegatedResult);
+
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    expect(sendMessage.mock.calls.map(([, text]) => text)).toEqual([
+      'Checking with the Reviewer agent…',
+      'Delegation to Reviewer failed.',
+    ]);
+  });
+
   it('warns and keeps delegation fail-open when narration delivery rejects', async () => {
     const sendMessage = vi.fn(async () => {
       throw new Error('delivery unavailable');

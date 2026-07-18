@@ -229,6 +229,8 @@ export async function dispatchCallableAgentTool(input: {
       input,
       `${input.entry.displayName} is still working; I'll follow up.`,
     );
+  } else if (!result.ok) {
+    void narrate(input, `Delegation to ${input.entry.displayName} failed.`);
   }
   return result;
 }

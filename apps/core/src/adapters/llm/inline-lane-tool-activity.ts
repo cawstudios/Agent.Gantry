@@ -1,5 +1,6 @@
 import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
 import type { RunnerOutputFrame } from '../../runner/runner-frame.js';
+import { CALLABLE_AGENT_TOOL_PREFIX } from '../../shared/callable-agent-manifest.js';
 import { canonicalGantryToolRuleName } from '../../shared/gantry-tool-facades.js';
 
 const TOOL_ACTIVITY_INTERVAL_MS = 15_000;
@@ -14,6 +15,7 @@ interface ToolActivityLaneInput {
     chatJid: string;
     threadId?: string;
   };
+  coreTools: { tools: readonly { name: string }[] };
   emitOutput(output: RunnerOutputFrame): Promise<void>;
 }
 
@@ -32,13 +34,20 @@ export function createInlineToolActivity(
   input: ToolActivityLaneInput,
 ): InlineToolActivity {
   const timers = new Map<string, NodeJS.Timeout>();
+  const callableAgentToolNames = new Set(
+    input.coreTools.tools
+      .map((tool) => tool.name)
+      .filter((name) => name.startsWith(CALLABLE_AGENT_TOOL_PREFIX)),
+  );
   let sequence = 0;
   const emit = async (
     toolName: string,
     phase: 'started' | 'running' | 'success' | 'failure',
   ) => {
     if (!input.input.isScheduledJob) return;
-    const canonicalToolName = canonicalGantryToolRuleName(toolName);
+    const canonicalToolName = canonicalGantryToolRuleName(toolName, {
+      callableAgentToolNames,
+    });
     await input
       .emitOutput({
         status: 'success',
