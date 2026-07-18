@@ -341,6 +341,9 @@ function prepareRuntimeEnv(): {
   vi.stubEnv('GANTRY_IPC_AUTH_TOKEN', 'runner-ipc-token');
   vi.stubEnv('GANTRY_IPC_RESPONSE_VERIFY_KEY', 'runner-response-verify-key');
   vi.stubEnv('GANTRY_NO_PERMISSION_TOOLS', '');
+  // Production always projects the run-scoped egress gateway (ensureEgressGateway
+  // is unconditional in spawnAgent); the SDK sandbox fails closed without it.
+  vi.stubEnv('GANTRY_EGRESS_PROXY_URL', 'http://127.0.0.1:18081/');
   vi.stubEnv('ANTHROPIC_API_KEY', 'raw-provider-key');
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'raw-oauth-token');
   vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude-config'));
