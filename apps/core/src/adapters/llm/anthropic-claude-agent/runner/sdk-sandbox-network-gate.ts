@@ -1,4 +1,7 @@
-import { evaluateEgressDenylist } from '../../../../shared/egress-policy.js';
+import {
+  evaluateEgressDenylist,
+  evaluateNonPublicEgressAddress,
+} from '../../../../shared/egress-policy.js';
 import { isSdkSandboxNetworkAccessToolName } from '../../../../shared/agent-tool-references.js';
 
 export function decideSdkSandboxNetworkAccess(input: {
@@ -11,15 +14,27 @@ export function decideSdkSandboxNetworkAccess(input: {
   | null {
   if (!isSdkSandboxNetworkAccessToolName(input.toolName)) return null;
 
-  const host = input.toolInput.host;
+  const host =
+    typeof input.toolInput.host === 'string' ? input.toolInput.host : '';
   const deny = evaluateEgressDenylist({
     settings: { denylist: [...input.denylist] },
-    host: typeof host === 'string' ? host : '',
+    host,
   });
   if (deny) {
     return {
       behavior: 'deny',
       message: deny.reason,
+      interrupt: false,
+    };
+  }
+  const nonPublicDeny = evaluateNonPublicEgressAddress({
+    host,
+    address: host,
+  });
+  if (nonPublicDeny) {
+    return {
+      behavior: 'deny',
+      message: nonPublicDeny.reason,
       interrupt: false,
     };
   }

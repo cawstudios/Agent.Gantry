@@ -23,11 +23,23 @@ afterEach(async () => {
 });
 
 describe('egress gateway', () => {
-  it('allows non-denylisted private CONNECT targets and audits the decision', async () => {
-    const target = await startTargetServer();
+  it.each([
+    '127.0.0.1',
+    '10.0.0.7',
+    '172.16.0.1',
+    '192.168.0.1',
+    '169.254.1.1',
+    '169.254.169.254',
+    '0.0.0.0',
+    '255.255.255.255',
+    '::1',
+    'fe80::1',
+    'fc00::1',
+    '::',
+  ])('blocks literal non-public CONNECT target %s', async (address) => {
     const publishRuntimeEvent = vi.fn();
     const gateway = await ensureEgressGateway({
-      key: 'test:allow',
+      key: `test:block:${address}`,
       settings: { denylist: [] },
       principal: {
         appId: 'default',
@@ -40,10 +52,15 @@ describe('egress gateway', () => {
 
     const response = await connectThroughGateway({
       gatewayPort: gateway.port,
-      authority: `127.0.0.1:${target.port}`,
+      authority: address.includes(':') ? `[${address}]:443` : `${address}:443`,
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(403);
+    expect(JSON.parse(response.body)).toEqual({
+      deniedHost: address,
+      matchedPattern: 'non-public-address',
+      reason: `Host ${address} resolved to non-public address ${address}.`,
+    });
     const auditEvent = publishRuntimeEvent.mock.calls[0]?.[0];
     expect(auditEvent).toEqual(
       expect.objectContaining({
@@ -51,10 +68,10 @@ describe('egress gateway', () => {
         agentId: 'agent:test',
         conversationId: 'conversation:tg:test',
         payload: expect.objectContaining({
-          host: '127.0.0.1',
-          allowed: true,
-          denied: false,
-          reason: 'default_allow',
+          host: address,
+          allowed: false,
+          denied: true,
+          reason: `Host ${address} resolved to non-public address ${address}.`,
           principal: 'agent:test',
           conversationId: 'tg:test',
           runId: 'run-1',
@@ -62,13 +79,12 @@ describe('egress gateway', () => {
       }),
     );
     expect(auditEvent).not.toHaveProperty('runId');
-    await target.close();
   });
 
-  it('allows non-denylisted internal hostnames that resolve privately', async () => {
-    const target = await startTargetServer();
+  it('blocks a hostname when any DNS answer is non-public', async () => {
     const publishRuntimeEvent = vi.fn();
     vi.mocked(dns.lookup).mockResolvedValueOnce([
+      { address: '93.184.216.34', family: 4 },
       { address: '127.0.0.1', family: 4 },
     ]);
     const gateway = await ensureEgressGateway({
@@ -80,21 +96,55 @@ describe('egress gateway', () => {
 
     const response = await connectThroughGateway({
       gatewayPort: gateway.port,
-      authority: `service.internal:${target.port}`,
+      authority: 'service.example:443',
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(403);
+    expect(JSON.parse(response.body)).toEqual({
+      deniedHost: 'service.example',
+      matchedPattern: 'non-public-address',
+      reason: 'Host service.example resolved to non-public address 127.0.0.1.',
+    });
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
-          host: 'service.internal',
-          allowed: true,
-          denied: false,
-          reason: 'default_allow',
+          host: 'service.example',
+          allowed: false,
+          denied: true,
+          reason:
+            'Host service.example resolved to non-public address 127.0.0.1.',
         }),
       }),
     );
-    await target.close();
+  });
+
+  it('returns a controlled denial when DNS lookup fails', async () => {
+    vi.mocked(dns.lookup).mockRejectedValueOnce(new Error('lookup failed'));
+    const unhandled = vi.fn();
+    process.once('unhandledRejection', unhandled);
+    const gateway = await ensureEgressGateway({
+      key: 'test:dns-failure',
+      settings: { denylist: [] },
+      principal: { appId: 'default', agentId: 'agent:test' },
+    });
+
+    try {
+      const response = await connectThroughGateway({
+        gatewayPort: gateway.port,
+        authority: 'unresolvable.example:443',
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(JSON.parse(response.body)).toEqual({
+        deniedHost: 'unresolvable.example',
+        matchedPattern: 'dns-resolution-failed',
+        reason: 'Egress gateway could not safely resolve unresolvable.example.',
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.removeListener('unhandledRejection', unhandled);
+    }
   });
 
   it('still blocks a denylisted private host', async () => {
@@ -278,7 +328,7 @@ describe('egress gateway', () => {
     await upstream.close();
   });
 
-  it('allows IPv6 loopback HTTP requests by default', async () => {
+  it('blocks IPv6 loopback HTTP requests with an empty denylist', async () => {
     const publishRuntimeEvent = vi.fn();
     const gateway = await ensureEgressGateway({
       key: 'test:sandbox-ipv6-model-gateway',
@@ -292,14 +342,19 @@ describe('egress gateway', () => {
       url: 'http://[::1]:18999/v1/messages',
     });
 
-    expect(response.statusCode).toBe(502);
+    expect(response.statusCode).toBe(403);
+    expect(JSON.parse(response.body)).toEqual({
+      deniedHost: '::1',
+      matchedPattern: 'non-public-address',
+      reason: 'Host ::1 resolved to non-public address ::1.',
+    });
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
           host: '::1',
-          allowed: true,
-          denied: false,
-          reason: 'default_allow',
+          allowed: false,
+          denied: true,
+          reason: 'Host ::1 resolved to non-public address ::1.',
         }),
       }),
     );

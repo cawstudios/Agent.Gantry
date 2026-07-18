@@ -4,7 +4,9 @@ import { createHash } from 'crypto';
 import type { Duplex } from 'stream';
 import {
   evaluateEgressDenylist,
+  evaluateNonPublicEgressAddress,
   normalizeEgressHost,
+  type EgressPolicyMatch,
   type EgressSettings,
 } from '../shared/egress-policy.js';
 import type { RuntimeEventPublishInput } from '../domain/events/events.js';
@@ -52,6 +54,15 @@ export interface EgressGatewayPrivateHostMapping {
   authority: string;
   connectHost: string;
 }
+type ResolvedEgressTarget = {
+  host: string;
+  port: number;
+  authority: string;
+  connectHost?: string;
+};
+type EgressTargetResolution =
+  | { target: ResolvedEgressTarget }
+  | { deny: EgressPolicyMatch };
 interface EgressGatewayState {
   key: string;
   port: number;
@@ -222,14 +233,15 @@ async function handleConnectRequest(
     host: target.host,
   });
   if (deny) {
-    await auditConnect(state, {
-      host: deny.host,
-      allowed: false,
-      denied: true,
-      reason: deny.reason,
-      matchedPattern: deny.matchedPattern,
-    });
-    writeDeniedConnect(clientSocket, deny);
+    await denyConnectRequest(state, clientSocket, deny);
+    return;
+  }
+  const literalAddressDeny = evaluateNonPublicEgressAddress({
+    host: target.host,
+    address: target.host,
+  });
+  if (literalAddressDeny) {
+    await denyConnectRequest(state, clientSocket, literalAddressDeny);
     return;
   }
   const mappedTarget = mappedEgressTarget(state, target);
@@ -249,7 +261,12 @@ async function handleConnectRequest(
     });
     return;
   }
-  const resolvedTarget = await resolveEgressTarget(target);
+  const resolution = await resolveEgressTarget(target);
+  if ('deny' in resolution) {
+    await denyConnectRequest(state, clientSocket, resolution.deny);
+    return;
+  }
+  const resolvedTarget = resolution.target;
   await auditConnect(state, {
     host: normalizeEgressHost(target.host),
     port: target.port,
@@ -291,15 +308,15 @@ async function handleHttpProxyRequest(
     host: target.hostname,
   });
   if (deny) {
-    await auditConnect(state, {
-      host: deny.host,
-      allowed: false,
-      denied: true,
-      reason: deny.reason,
-      matchedPattern: deny.matchedPattern,
-    });
-    res.writeHead(403, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(deniedBody(deny)));
+    await denyHttpRequest(state, res, deny);
+    return;
+  }
+  const literalAddressDeny = evaluateNonPublicEgressAddress({
+    host: target.hostname,
+    address: target.hostname,
+  });
+  if (literalAddressDeny) {
+    await denyHttpRequest(state, res, literalAddressDeny);
     return;
   }
   const mappedTarget = mappedEgressTarget(state, {
@@ -327,11 +344,16 @@ async function handleHttpProxyRequest(
     req.pipe(upstream);
     return;
   }
-  const resolvedTarget = await resolveEgressTarget({
+  const resolution = await resolveEgressTarget({
     host: normalizeEgressHost(target.hostname),
     port: urlPort(target),
     authority: target.host,
   });
+  if ('deny' in resolution) {
+    await denyHttpRequest(state, res, resolution.deny);
+    return;
+  }
+  const resolvedTarget = resolution.target;
   await auditConnect(state, {
     host: normalizeEgressHost(target.hostname),
     port: urlPort(target),
@@ -412,6 +434,35 @@ function writeDeniedConnect(
     ].join('\r\n'),
   );
 }
+async function denyConnectRequest(
+  state: EgressGatewayState,
+  socket: Duplex,
+  deny: EgressPolicyMatch,
+): Promise<void> {
+  await auditConnect(state, {
+    host: deny.host,
+    allowed: false,
+    denied: true,
+    reason: deny.reason,
+    matchedPattern: deny.matchedPattern,
+  });
+  writeDeniedConnect(socket, deny);
+}
+async function denyHttpRequest(
+  state: EgressGatewayState,
+  res: http.ServerResponse,
+  deny: EgressPolicyMatch,
+): Promise<void> {
+  await auditConnect(state, {
+    host: deny.host,
+    allowed: false,
+    denied: true,
+    reason: deny.reason,
+    matchedPattern: deny.matchedPattern,
+  });
+  res.writeHead(403, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(deniedBody(deny)));
+}
 function deniedConnectReasonPhrase(deny: {
   host: string;
   matchedPattern: string;
@@ -442,28 +493,40 @@ async function resolveEgressTarget(target: {
   host: string;
   port: number;
   authority: string;
-}): Promise<{
-  host: string;
-  port: number;
-  authority: string;
-  connectHost?: string;
-}> {
+}): Promise<EgressTargetResolution> {
   const host = normalizeEgressHost(target.host);
   if (isIpAddress(host)) {
     const address = host.replace(/^\[/, '').replace(/\]$/, '');
-    return { ...target, host, connectHost: address };
+    return { target: { ...target, host, connectHost: address } };
   }
-  const records = await lookupHostnameWithDeadline({
-    hostname: host,
-    lookupHostname: lookupEgressHostname,
-    timeoutMs: 30_000,
-    timeoutMessage: 'Egress gateway DNS lookup timed out.',
-  });
+  let records: Array<{ address: string; family: 4 | 6 }>;
+  try {
+    records = await lookupHostnameWithDeadline({
+      hostname: host,
+      lookupHostname: lookupEgressHostname,
+      timeoutMs: 30_000,
+      timeoutMessage: 'Egress gateway DNS lookup timed out.',
+    });
+  } catch {
+    return { deny: dnsResolutionDeny(host) };
+  }
   const first = records[0];
-  if (!first) {
-    throw new Error(`Egress gateway could not resolve ${host}.`);
+  if (!first) return { deny: dnsResolutionDeny(host) };
+  for (const record of records) {
+    const deny = evaluateNonPublicEgressAddress({
+      host,
+      address: record.address,
+    });
+    if (deny) return { deny };
   }
-  return { ...target, host, connectHost: first.address };
+  return { target: { ...target, host, connectHost: first.address } };
+}
+function dnsResolutionDeny(host: string): EgressPolicyMatch {
+  return {
+    host,
+    matchedPattern: 'dns-resolution-failed',
+    reason: `Egress gateway could not safely resolve ${host}.`,
+  };
 }
 async function lookupEgressHostname(
   hostname: string,
