@@ -241,6 +241,9 @@ describe('skill registry integration flow', () => {
   let artifactRoot: string;
 
   beforeEach(() => {
+    vi.mocked(syncRuntimeSettingsFromProjection)
+      .mockReset()
+      .mockResolvedValue(undefined);
     fs.rmSync('/tmp/gantry-skills-integration-home', {
       recursive: true,
       force: true,
@@ -825,7 +828,9 @@ describe('skill registry integration flow', () => {
     expect(enabled.map((skill: StoredSkill) => skill.id)).toEqual([
       activeBinding?.skillId,
     ]);
-    expect(syncRuntimeSettingsFromProjection).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => {
+      expect(syncRuntimeSettingsFromProjection).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('coalesces duplicate pending staged skill install reviews', async () => {
