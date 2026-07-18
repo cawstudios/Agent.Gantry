@@ -1148,6 +1148,11 @@ describe('validateIpcAuthRequest', () => {
       'apiToken',
       ...Array.from({ length: 62 }, (_, index) => `extra_${index + 38}`),
     ]);
+    expect(parsed.classifierToolInput).toMatchObject({
+      command: 'x'.repeat(600),
+      apiToken: '[REDACTED]',
+    });
+    expect(parsed.toolInputRedactedPaths).toEqual(['apiToken']);
   });
 
   it('records every altered tool input dot-path', () => {
@@ -1178,6 +1183,7 @@ describe('validateIpcAuthRequest', () => {
       'entries.21',
       'unsupported',
     ]);
+    expect(result.redactedPaths).toEqual(['apiToken', 'authText']);
     expect(result.toolInput).toMatchObject({
       apiToken: '[REDACTED]',
       authText: '[REDACTED]',
@@ -1188,14 +1194,28 @@ describe('validateIpcAuthRequest', () => {
     });
   });
 
+  it('distinguishes display truncation from secret redaction paths', () => {
+    const benign = sanitizeIpcToolInput({ command: 'x'.repeat(501) });
+    const secret = sanitizeIpcToolInput({
+      command: 'curl -H "Authorization: Bearer abcdefgh123456"',
+    });
+
+    expect(benign.alteredPaths).toEqual(['command']);
+    expect(benign.redactedPaths).toEqual([]);
+    expect(secret.alteredPaths).toEqual(['command']);
+    expect(secret.redactedPaths).toEqual(['command']);
+  });
+
   it('records a root alteration for non-object tool input', () => {
     expect(sanitizeIpcToolInput('not-an-object')).toEqual({
       altered: true,
       alteredPaths: ['$'],
+      redactedPaths: [],
     });
     expect(sanitizeIpcToolInput(undefined)).toEqual({
       altered: false,
       alteredPaths: [],
+      redactedPaths: [],
     });
   });
 

@@ -1097,13 +1097,14 @@ describe('ipc-interaction-handler', () => {
     );
   });
 
-  it('publishes an input-truncated ask before preserving the IPC prompt flow', async () => {
+  it('classifies a benign IPC RunCommand beyond the display limit with full input', async () => {
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-auto-ask.json');
     fs.writeFileSync(claimedPath, '{}');
+    const fullCommand = `printf '%s' '${'x'.repeat(600)}'`;
     const classifierConsult = vi.fn(async () => ({
       decision: 'allow' as const,
-      reason: 'Would allow if consulted.',
+      reason: 'Benign command.',
       latencyMs: 1,
     }));
     const requestPermissionApproval = vi.fn(async () => ({
@@ -1124,10 +1125,11 @@ describe('ipc-interaction-handler', () => {
         sourceAgentFolder: 'main_agent',
         targetJid: 'tg:auto',
         senderId: 'approver-1',
-        toolName: 'mcp__crm__read',
-        toolInput: { id: 'crm-1', environment: { HTTP_PROXY: '[truncated]' } },
+        toolName: 'RunCommand',
+        toolInput: { command: `${fullCommand.slice(0, 500)}...[truncated]` },
+        classifierToolInput: { command: fullCommand },
         toolInputSanitized: true,
-        toolInputSanitizedPaths: ['environment.HTTP_PROXY'],
+        toolInputSanitizedPaths: ['command'],
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -1165,24 +1167,22 @@ describe('ipc-interaction-handler', () => {
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     });
 
-    expect(classifierConsult).not.toHaveBeenCalled();
-    expect(requestPermissionApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        suggestions: undefined,
-      }),
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({ toolInput: { command: fullCommand } }),
     );
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'permission.classifier_decision',
         payload: expect.objectContaining({
-          decision: 'ask',
-          failureCode: 'input_truncated',
+          decision: 'allow',
+          latencyMs: 1,
         }),
       }),
     );
   });
 
-  it('turns unattended sanitized auto input into an immediate IPC denial', async () => {
+  it('turns unattended secret-redacted auto input into an immediate IPC denial', async () => {
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-unattended-ask.json');
     fs.writeFileSync(claimedPath, '{}');
@@ -1206,9 +1206,13 @@ describe('ipc-interaction-handler', () => {
         jobId: 'job:auto',
         toolName: 'RunCommand',
         unattended: true,
-        toolInput: { command: `${'x'.repeat(500)}...[truncated]` },
+        toolInput: { command: "curl -H 'Authorization: [REDACTED]'" },
+        classifierToolInput: {
+          command: "curl -H 'Authorization: [REDACTED]'",
+        },
         toolInputSanitized: true,
         toolInputSanitizedPaths: ['command'],
+        toolInputRedactedPaths: ['command'],
       },
       sourceAgentFolder: 'main_agent',
       deps: {

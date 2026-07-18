@@ -45,6 +45,7 @@ import {
 } from '../config/profiles.js';
 import { memoryAgentIdForWorkspaceFolder } from '../memory/app-memory-boundaries.js';
 import type { IpcDeps } from './ipc-domain-types.js';
+import type { ParsedPermissionIpcRequest } from './ipc-parsing.js';
 import {
   processUserQuestionIpcRequest,
   writePermissionIpcResponse,
@@ -109,7 +110,7 @@ export function interactionInFlightKey(input: {
 }
 
 export async function processPermissionInteractionIpc(input: {
-  request: PermissionApprovalRequest;
+  request: ParsedPermissionIpcRequest;
   sourceAgentFolder: string;
   deps: IpcDeps;
   ipcBaseDir: string;

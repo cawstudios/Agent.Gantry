@@ -30,6 +30,7 @@ import type { InlineAgentLoopLaneInput } from '../../runtime/agent-inline.js';
 import type { RunAgentOptions } from '../../runtime/agent-spawn-types.js';
 import { resolveWorkspaceFolderPath } from '../../platform/workspace-folder.js';
 import {
+  PERMISSION_CLASSIFIER_MAX_STRING_LENGTH as CLASSIFIER_MAX,
   consultPermissionClassifierBeforePrompt,
   permissionPromotionHintCount,
   recordHumanPermissionPromotionSignal,
@@ -361,7 +362,8 @@ export function createInlineCoreTools(
       let classifierDecision:
         | Awaited<ReturnType<typeof consultPermissionClassifierBeforePrompt>>
         | undefined;
-      const classifierToolInput = sanitizeIpcToolInput(toolInput);
+      const displayToolInput = sanitizeIpcToolInput(toolInput);
+      const classifierInput = sanitizeIpcToolInput(toolInput, CLASSIFIER_MAX);
       if (deps.publishRuntimeEvent) {
         classifierDecision = await consultPermissionClassifierBeforePrompt({
           permissionMode: run.permissionMode,
@@ -378,9 +380,8 @@ export function createInlineCoreTools(
           intentSource: 'operator_message',
           turnIntentSummary: run.prompt,
           canonicalToolName: name,
-          toolInput: classifierToolInput.toolInput,
-          toolInputSanitized: classifierToolInput.altered,
-          toolInputSanitizedPaths: classifierToolInput.alteredPaths,
+          toolInput: classifierInput.toolInput,
+          toolInputRedactedPaths: classifierInput.redactedPaths,
           policyDecisionReason: decision.reason,
           approvedCapabilityIds,
           workspaceRoot: resolveWorkspaceFolderPath(laneInput.group.folder),
@@ -441,8 +442,8 @@ export function createInlineCoreTools(
         decisionReason: decision.reason,
         closestRule: decision.closestRule,
         toolInput: toolInput as Record<string, unknown>,
-        toolInputSanitized: classifierToolInput.altered,
-        toolInputSanitizedPaths: classifierToolInput.alteredPaths,
+        toolInputSanitized: displayToolInput.altered,
+        toolInputSanitizedPaths: displayToolInput.alteredPaths,
         suggestions: effectiveSuggestions,
         ...(promotionHintCount ? { promotionHintCount } : {}),
         decisionOptions: effectiveSuggestions

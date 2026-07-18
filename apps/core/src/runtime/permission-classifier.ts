@@ -42,6 +42,7 @@ import {
 } from './permission-classifier-prompt.js';
 
 export {
+  PERMISSION_CLASSIFIER_MAX_STRING_LENGTH,
   PERMISSION_CLASSIFIER_MAX_TOOL_INPUT_CHARS,
   redactPermissionClassifierToolInput,
 } from './permission-classifier-prompt.js';
@@ -133,8 +134,7 @@ export interface PermissionClassifierPromptConsultInput {
   turnIntentSummary: string;
   canonicalToolName: string;
   toolInput: unknown;
-  toolInputSanitized?: boolean;
-  toolInputSanitizedPaths?: string[];
+  toolInputRedactedPaths?: string[];
   policyDecisionReason: string;
   approvedCapabilityIds: string[];
   workspaceRoot?: string;
@@ -276,7 +276,7 @@ export async function consultPermissionClassifierBeforePrompt(
       }
     : input.toolInput;
   // prettier-ignore
-  const inputTruncated = shellRequest ? input.toolInputSanitizedPaths?.some((path) => path === 'command' || path === 'cmd') === true : input.toolInputSanitized === true || (input.toolInputSanitizedPaths?.length ?? 0) > 0;
+  const inputTruncated = shellRequest ? input.toolInputRedactedPaths?.some((path) => path === 'command' || path === 'cmd') === true : (input.toolInputRedactedPaths?.length ?? 0) > 0;
   // The denylist must judge the same normalized command the gate and
   // classifier see — host-injected env prefixes must not mask a match.
   // prettier-ignore
