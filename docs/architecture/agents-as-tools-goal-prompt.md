@@ -302,3 +302,44 @@ handler seams and can run first independently.
   `text-styles.ts` Telegram findings at lines 13, 64, and 75.
 - Decisions and assumptions: no product or security decisions were introduced;
   all three plan-validation seams were implemented as pinned.
+
+## Stage 4 implementation ledger
+
+- Scope: implemented handler-driven narration for the existing inline
+  synthetic callable-agent tools only. Remaining projection lanes and trace
+  nesting remain deferred to Stages 5-6.
+- Handler contract: after initial eligibility revalidation, the synthetic
+  handler attempts `Checking with the <displayName> agent…` for up to five
+  seconds, then revalidates eligibility immediately before entering the hybrid
+  delegation wait. A synchronous terminal result sends
+  `<displayName> responded.`; an expired sync-wait budget sends
+  `<displayName> is still working; I'll follow up.` No child transcript is
+  delivered.
+- Routing contract: narration reuses `sendCoreMessage` through the injected
+  `ChannelWiring.sendMessage` dependency and carries the originating
+  conversation id, provider account id, and thread id.
+- Failure contract: narration delivery errors are swallowed with a warning.
+  They cannot prevent delegation, cancel the child, or replace the delegated
+  result. Calls rejected before delegation emit no narration.
+- Ordering contract: the start line is attempted before delegation with
+  best-effort ordering (bounded to five seconds); the result/fallback line
+  follows the handler result, with best-effort ordering relative to buffered or
+  streamed agent output.
+- Autoreview follow-up: result narration now keys on the Stage 3 lifecycle
+  `data.status`: only `completed` posts the responded line, while `queued` or
+  `running` posts the follow-up line even when the payload also has a `taskId`.
+  Missing or unexpected statuses remain fail-open without a false outcome line.
+- Verification: TypeScript completed with exit 0; the focused narration suite
+  passed 1 file / 10 tests; the requested broad unit command passed 153 files /
+  2,409 tests; the architecture gate reported only the accepted
+  `text-styles.ts` Telegram findings at lines 13, 64, and 75.
+- Decisions and assumptions: none. Stages 5 and 6 remain unchanged by design.
+- Authorization follow-up: callable-agent dispatch now revalidates current
+  eligibility after the bounded-awaited start narration and immediately before
+  delegation. A target revoked during narration is not invoked, returns
+  `forbidden`, and receives a best-effort no-longer-available correction in the
+  origin route.
+- Authorization follow-up verification: the focused callable-agent suite passed
+  1 file / 11 tests; TypeScript exited 0; the requested broad unit command
+  passed 153 files / 2,410 tests; the architecture gate reported only the
+  accepted `text-styles.ts` findings at lines 13, 64, and 75.

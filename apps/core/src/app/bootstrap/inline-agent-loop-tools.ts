@@ -78,9 +78,8 @@ import { createInlineToolSuccessLedger } from './inline-tool-success-ledger.js';
 import type { RuntimeApp } from './runtime-app.js';
 
 interface InlineCoreToolHostDeps extends CoreSendMessageDeps {
-  requestUserAnswer: (
-    request: UserQuestionRequest,
-  ) => Promise<UserQuestionResponse>;
+  warn(context: Record<string, unknown>, message: string): void;
+  requestUserAnswer(request: UserQuestionRequest): Promise<UserQuestionResponse>;
   requestPermissionApproval: (
     request: PermissionApprovalRequest,
   ) => Promise<PermissionApprovalDecision>;
@@ -227,6 +226,7 @@ export function createInlineCoreTools(
               args,
               entry,
               backend: taskLifecycleBackend,
+              narration: { sourceAgentFolder: laneInput.group.folder, deps },
               revalidate: async (expected) =>
                 (
                   await resolveInlineCallableAgentManifest(
@@ -652,6 +652,7 @@ export function wireInlineAgentLoopTools(input: {
       ? input.channelWiring.requestUserAnswer(request)
       : Promise.reject(reject('question'));
   inlineCoreToolHostDeps = {
+    warn: input.warn,
     sendMessage: (jid, text, messageOptions) =>
       input.channelWiring.sendMessage(jid, text, {
         durability: 'required',

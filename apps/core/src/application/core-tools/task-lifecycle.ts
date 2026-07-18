@@ -28,6 +28,8 @@ export type CoreTaskLifecycleBackend = {
   [Name in CoreTaskLifecycleName]: (
     input: Record<string, unknown>,
   ) => Promise<CoreTaskLifecycleResult>;
+} & {
+  owner?: CoreTaskOwner;
 };
 
 export interface CoreTaskOwner {
@@ -141,6 +143,7 @@ export function createCoreTaskLifecycleBackend(input: {
     parentTaskId: input.parentTaskId ?? undefined,
   };
   return {
+    owner: input.owner,
     task_get: async (args) => {
       const taskId = requiredString(args.taskId);
       if (!taskId) return invalid('task_get requires taskId.');

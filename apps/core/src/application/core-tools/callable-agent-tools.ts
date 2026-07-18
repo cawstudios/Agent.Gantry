@@ -8,8 +8,13 @@ import type {
   CoreTaskLifecycleBackend,
   CoreTaskLifecycleResult,
 } from './task-lifecycle.js';
+import {
+  sendCoreMessage,
+  type CoreSendMessageDeps,
+} from './send-message.js';
 
 export const CALLABLE_AGENT_TOOL_PREFIX = 'delegate_to_';
+const CALLABLE_AGENT_NARRATION_TIMEOUT_MS = 5_000;
 export const CALLABLE_AGENT_SYNC_WAIT_TIMEOUT_MS = 60_000;
 export const CALLABLE_AGENT_SYNC_WAIT_MAX_MS = 60_000;
 
@@ -74,6 +79,12 @@ export async function dispatchCallableAgentTool(input: {
   entry: CallableAgentToolManifestEntry;
   backend: CoreTaskLifecycleBackend;
   revalidate(entry: CallableAgentToolManifestEntry): Promise<boolean>;
+  narration?: {
+    sourceAgentFolder: string;
+    deps: CoreSendMessageDeps & {
+      warn(context: Record<string, unknown>, message: string): void;
+    };
+  };
 }): Promise<CoreTaskLifecycleResult> {
   if (Object.prototype.hasOwnProperty.call(input.args, 'targetAgentId')) {
     return {
@@ -89,7 +100,16 @@ export async function dispatchCallableAgentTool(input: {
       code: 'forbidden',
     };
   }
-  return input.backend.delegate_task({
+  await narrate(input, `Checking with the ${input.entry.displayName} agent…`);
+  if (!(await input.revalidate(input.entry))) {
+    void narrate(input, `${input.entry.displayName} is no longer available.`);
+    return {
+      ok: false,
+      message: 'Callable agent target is no longer permitted.',
+      code: 'forbidden',
+    };
+  }
+  const result = await input.backend.delegate_task({
     ...input.args,
     targetAgentId: input.entry.targetAgentId,
     syncWaitTimeoutMs:
@@ -97,6 +117,60 @@ export async function dispatchCallableAgentTool(input: {
         ? input.args.syncWaitTimeoutMs
         : CALLABLE_AGENT_SYNC_WAIT_TIMEOUT_MS,
   });
+  const status =
+    typeof result.data === 'object' && result.data !== null
+      ? (result.data as { status?: unknown }).status
+      : undefined;
+  if (result.ok && status === 'completed') {
+    void narrate(input, `${input.entry.displayName} responded.`);
+  } else if (result.ok && (status === 'queued' || status === 'running')) {
+    void narrate(
+      input,
+      `${input.entry.displayName} is still working; I'll follow up.`,
+    );
+  }
+  return result;
+}
+
+async function narrate(
+  input: Parameters<typeof dispatchCallableAgentTool>[0],
+  text: string,
+): Promise<void> {
+  const owner = input.backend.owner;
+  if (!input.narration || !owner) return;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      sendCoreMessage({
+        message: { text },
+        context: {
+          appId: owner.appId,
+          sourceAgentFolder: input.narration.sourceAgentFolder,
+          targetJid: owner.conversationId,
+          providerAccountId: owner.providerAccountId ?? undefined,
+          threadId: owner.threadId ?? undefined,
+        },
+        deps: input.narration.deps,
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Narration delivery timed out.')),
+          CALLABLE_AGENT_NARRATION_TIMEOUT_MS,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+  } catch (error) {
+    input.narration.deps.warn(
+      {
+        toolName: `${CALLABLE_AGENT_TOOL_PREFIX}${input.entry.toolName}`,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'Callable-agent narration delivery failed',
+    );
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function immutableToolName(agentId: string): string {
