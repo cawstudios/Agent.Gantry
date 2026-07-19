@@ -705,8 +705,15 @@
     {
       "idx": 103,
       "version": "7",
-      "when": 1784418410109,
-      "tag": "0103_settings_authority_cutover",
+      "when": 1784430629236,
+      "tag": "0103_permission_durable_storage_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1784430700000,
+      "tag": "0104_settings_authority_cutover",
       "breakpoints": true
     }
   ]
