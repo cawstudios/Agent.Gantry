@@ -55,19 +55,33 @@ Per-lane loop: codex fix lands → independent verify (typecheck + FULL unit +
 throwaway-DB integration when schema touched) → local autoreview to clean →
 commit. Merge only on explicit user "merge NNN".
 
-**Next — high-leverage:** 4. **Durable-work primitive — LOCKED NEXT when a lane frees** (evidence-promoted
-2026-07-19): unifies ~10 bespoke lease/claim/retry copies; absorbs deferred
-retention + IPC-backpressure + fire-and-forget `send_message` + A3
-review-dedup (deferred from the perm-storage cycle) + the NEW callable-agent
-follow-up jsonb-key state (privateCorrelationJson/receiptJson flags from
-#230 — same family-1 disease); the umbrella for goals 6-7 below. Starts with
-a Codex plan-validation pass. `fable-architecture-review-2026-07-16.md` (#1) 5. **Model management: unify then UX** — PROPOSED, queue position awaiting user
-decision; folds in `status-cost-cache-visibility-goal-prompt.md`; Stage B
-rides the V3 phrase seam. `model-management-goal-prompt.md`
+**Next — high-leverage:**
 
-**Then — medium, scoped:** 6. **Jobs recovery-intent → columns + CAS.** `coordination-representation-audit-2026-07-18.md` (B1) — may fold into goal 4. 7. **Coordination hardening batch** — skill-install advisory lock, session-compaction Set, TOCTOU fallback, canonical-serializer unify, stringify dedup keys. `coordination-representation-audit-2026-07-18.md` (B2 + low) — may fold into goal 4. 8. **`desired-state-current-export` rewrite** — schema-driven merge, fail-loud on unknown fields. `coordination-representation-audit-2026-07-18.md` (Group C) 9. **Permission decision simplification** — one sequencer, one mode vocabulary, one authority block, one copy layer. `permission-simplification-goal-prompt.md` 10. **Remaining Fable arch cycles** (#2–#8). `fable-architecture-review-2026-07-16.md`
+4. **Durable-work primitive — LOCKED NEXT when a lane frees** (evidence-promoted
+   2026-07-19): unifies ~10 bespoke lease/claim/retry copies; absorbs deferred
+   retention + IPC-backpressure + fire-and-forget `send_message` + A3
+   review-dedup (deferred from the perm-storage cycle) + the NEW callable-agent
+   follow-up jsonb-key state (privateCorrelationJson/receiptJson flags from
+   #230 — same family-1 disease); the umbrella for goals 6-7 below. Starts with
+   a Codex plan-validation pass. `fable-architecture-review-2026-07-16.md` (#1)
+5. **Model management: unify then UX** — PROPOSED, queue position awaiting user
+   decision; folds in `status-cost-cache-visibility-goal-prompt.md`; Stage B
+   rides the V3 phrase seam. `model-management-goal-prompt.md`
 
-**Roadmap — after the above, needs design:** 13. **KB / document ingestion per workspace.** `platform-roadmap-2026-07.md` (#1) 14. **Tenant isolation hardening** — hostile-tenant review; verified via the E2E harness matrix. `platform-roadmap-2026-07.md` (#3) 15. **E2E persona/topology harness** — goal-prompt drafted in session scratchpad _(promote into this folder as `e2e-harness-goal-prompt.md`)_. 16. **Connector strategy execution** — direct OAuth, `providers.yaml` templates, org-owned GitHub+Google v1 _(design doc in `~/.gstack` projects dir)_.
+**Then — medium, scoped:**
+
+6. **Jobs recovery-intent → columns + CAS.** `coordination-representation-audit-2026-07-18.md` (B1) — may fold into goal 4.
+7. **Coordination hardening batch** — skill-install advisory lock, session-compaction Set, TOCTOU fallback, canonical-serializer unify, stringify dedup keys. `coordination-representation-audit-2026-07-18.md` (B2 + low) — may fold into goal 4.
+8. **`desired-state-current-export` rewrite** — schema-driven merge, fail-loud on unknown fields. `coordination-representation-audit-2026-07-18.md` (Group C)
+9. **Permission decision simplification** — one sequencer, one mode vocabulary, one authority block, one copy layer. `permission-simplification-goal-prompt.md`
+10. **Remaining Fable arch cycles** (#2–#8). `fable-architecture-review-2026-07-16.md`
+
+**Roadmap — after the above, needs design:**
+
+13. **KB / document ingestion per workspace.** `platform-roadmap-2026-07.md` (#1)
+14. **Tenant isolation hardening** — hostile-tenant review; verified via the E2E harness matrix. `platform-roadmap-2026-07.md` (#3)
+15. **E2E persona/topology harness** — goal-prompt drafted in session scratchpad _(promote into this folder as `e2e-harness-goal-prompt.md`)_.
+16. **Connector strategy execution** — direct OAuth, `providers.yaml` templates, org-owned GitHub+Google v1 _(design doc in `~/.gstack` projects dir)_.
 
 **Ideation — not yet scoped (do not auto-start):**
 
