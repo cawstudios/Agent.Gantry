@@ -48,8 +48,10 @@ store copy, unlinked, with a pipe too narrow to sync them), **silent failure**
    `resolveCoreMessageAttachments`; no new tool, no base64 IPC hop.
 3. **Slack upload adapter**: wire `options.files` to
    `files.getUploadURLExternal`/`completeUploadExternal`.
-4. **Teams**: stop rewriting successfully-resolved lines; real fix remains
-   signed artifact links.
+4. **Teams**: degrade all attachment lines honestly to the unavailable stub;
+   the real fix remains signed artifact links.
 5. **Telegram polish (optional)**: pick sendVideo/sendPhoto by contentType.
 
-Status: QUEUED as the next lane-2 cycle after the ponytail audit converges.
+Status: Items 1-4 implemented in the outbound-attachments fix cycle. Teams
+degrades all attachment lines honestly to the unavailable stub until signed
+artifact links add real delivery in future work.
