@@ -27,8 +27,16 @@ the "which model runs this turn" fact has N readers each with its own merge.
 
 - ONE model-resolution service: input = (app, agent, install, purpose:
   turn|job|memory-embed|memory-query|memory-consolidate|classifier), output =
-  concrete model + provider account. One precedence chain, documented in the
-  service, all current call sites route through it.
+  concrete model + provider account **+ capabilities**. One precedence chain,
+  documented in the service, all current call sites route through it.
+- **Capabilities facet** (user question 2026-07-19: "what if user sends an
+  image to a text-only model?"): the resolution result carries what the
+  resolved model can accept/do — `modalities_in` (text/image/audio/document),
+  `tool_use`, context budget. Source: a small built-in map keyed on model-id
+  pattern with a per-model settings override; no giant speculative registry.
+  This is the inbound mirror of the outbound-attachments incident — today a
+  modality mismatch either silently drops the media or surfaces an opaque
+  provider 400; both are the silent-failure family.
 - Settings shape stays; only the READ side unifies. No knob removal in Stage A
   (knob simplification falls out later if the service shows some knobs unread).
 - Invariant tests: precedence fixtures per purpose; a settings round-trip per
@@ -51,6 +59,19 @@ the "which model runs this turn" fact has N readers each with its own merge.
    per-turn thinking level passed through spawn options; no persistence beyond
    the turn unless the user asks to make it the default (then it is a normal
    settings revision via the same seam).
+5. **Modality mismatch handling** (needs the Stage A capabilities facet):
+   pre-flight inbound attachments against the resolved model's `modalities_in`
+   at turn admission — BEFORE the provider call. On mismatch, deterministic
+   ladder: (a) if the install's family has a capable sibling on the same
+   provider account and auto-upgrade is enabled, per-turn switch (disclosed in
+   the reply, same per-turn override seam as the thinking hint); else (b) honest
+   immediate reply naming the limitation and the fix ("I can't view images with
+   my current model X — describe it in text, or say 'switch to a vision model'"),
+   plus a logger.warn. NEVER a silent drop or a raw provider 400. First audit
+   what happens today per channel (Telegram photo/voice, Slack file, Discord,
+   Teams) — one read-only pass before building. Transcription/description
+   sidecar (routing media through a capable model to feed a text-only agent) is
+   explicitly v2 — do not build until asked.
 
 ## Non-goals
 
