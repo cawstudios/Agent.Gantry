@@ -10,7 +10,12 @@ import {
   getRuntimeSettingsForConfig,
   syncRuntimeSettingsFromProjection,
 } from '../config/index.js';
+import {
+  ensureConfiguredConversationBinding,
+  writeDesiredRuntimeSettings,
+} from '../config/settings/runtime-settings.js';
 import { SettingsDesiredStateService } from '../application/settings/desired-state-service.js';
+import { providerForJid } from '../channels/provider-registry.js';
 import { parseDeclaredNetworkHost } from '../shared/network-host-declaration.js';
 import { nowIso } from '../shared/time/datetime.js';
 import { logger } from '../infrastructure/logging/logger.js';
@@ -147,13 +152,15 @@ const registerAgentHandler: TaskHandler = async (context) => {
   const { accept, reject } = createContextTaskResponder(context);
   if (!data.appId) { reject('Agent registration requires signed app scope.', 'forbidden'); return; }
   if (!(await sourceAgentHasAdminToolCapability(context, 'register_agent'))) { logger.warn({ sourceAgentFolder }, 'Unauthorized register_agent attempt blocked'); reject(adminCapabilityRequiredMessage('register_agent'), 'missing_capability'); return; }
-  if (!data.jid || !data.name || !data.folder || !data.trigger) { logger.warn({ data }, 'Invalid register_agent request - missing required fields'); reject('Missing required fields: jid, name, folder, trigger.', 'invalid_request'); return; }
+  if (!data.jid || !data.name || !data.folder || !data.providerAccountId) { logger.warn({ data }, 'Invalid register_agent request - missing required fields'); reject('Missing required fields: jid, name, folder, provider account.', 'invalid_request'); return; }
+  if (!providerForJid(data.jid)) { reject(`Unsupported conversation id: ${data.jid}`, 'invalid_request'); return; }
   const requestedTargetJid = validateSameChannelApprovalTarget({ data, sourceAgentFolderJids, requestKind: 'Agent registration', reject });
   if (!requestedTargetJid) return;
   if (data.jid !== requestedTargetJid) { reject('Agent registration can only bind the originating conversation.', 'forbidden'); return; }
   if (typeof deps.requestPermissionApproval !== 'function' || typeof deps.sendMessage !== 'function') { reject('Agent registration requests require a configured approval surface.', 'preflight_failed'); return; }
   if (!isValidWorkspaceFolder(data.folder)) { logger.warn({ sourceAgentFolder, folder: data.folder }, 'Invalid register_agent request - unsafe folder name'); reject(`Invalid agent folder: ${data.folder}`, 'invalid_request'); return; }
   const reason = toTrimmedString(data.payload?.reason, { maxLen: 2000 }) || `Register ${data.name} for ${data.jid}.`;
+  const providerAccountLabel = getRuntimeSettingsForConfig().providerAccounts[data.providerAccountId]?.label;
   const decision = await deps.requestPermissionApproval({
     requestId: `register-agent-${globalThis.crypto.randomUUID()}`,
     appId: data.appId as never,
@@ -168,11 +175,17 @@ const registerAgentHandler: TaskHandler = async (context) => {
     title: 'Approve agent registration',
     description: 'Approving binds this agent to the originating conversation and writes the desired-state settings projection.',
     decisionReason: reason,
-    toolInput: { jid: data.jid, name: data.name, folder: data.folder, trigger: data.trigger, requiresTrigger: data.requiresTrigger, activation: 'current_and_future_sessions' },
+    toolInput: { jid: data.jid, name: data.name, folder: data.folder, providerAccountId: data.providerAccountId, ...(providerAccountLabel ? { accountLabel: providerAccountLabel } : {}), requiresTrigger: data.requiresTrigger, activation: 'current_and_future_sessions' },
   });
   if (!decision.approved || !decision.decidedBy) { const message = `Rejected agent registration: ${decision.reason || 'not approved'}.`; reject(message, 'permission_denied'); await deps.sendMessage(requestedTargetJid, message, data.authThreadId ? { threadId: data.authThreadId } : undefined); return; }
-  await deps.registerGroup(data.jid, { name: data.name, folder: data.folder, trigger: data.trigger, added_at: nowIso(), agentConfig: data.agentConfig, requiresTrigger: data.requiresTrigger });
-  await syncApprovedCapabilitySettings(data.appId as never);
+  const previousSettings = structuredClone(getRuntimeSettingsForConfig());
+  const settings = structuredClone(previousSettings);
+  const binding = ensureConfiguredConversationBinding(settings, { agentId: data.folder, agentName: data.name, agentFolder: data.folder, jid: data.jid, displayName: data.name, requiresTrigger: data.requiresTrigger ?? false, providerAccountId: data.providerAccountId, persona: data.agentConfig?.persona });
+  const agent = settings.agents[data.folder];
+  if (agent && data.agentConfig?.relationshipMode) agent.relationshipMode = data.agentConfig.relationshipMode;
+  const install = settings.conversations[binding.conversationId]?.installedAgents[binding.bindingId];
+  if (install) { install.model = data.agentConfig?.model; install.permissionMode = data.agentConfig?.permissionMode; }
+  await writeDesiredRuntimeSettings({ runtimeHome: GANTRY_HOME, settings, previousSettings, appId: data.appId as never, createdBy: 'agent:register-agent' });
   accept(`Agent "${data.name}" registered.`);
 };
 const requestMcpServerHandler: TaskHandler = async (context) => {

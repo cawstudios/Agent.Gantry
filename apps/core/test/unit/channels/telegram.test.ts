@@ -166,7 +166,7 @@ import {
 import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
 import { writeTelegramFetchResponseToFile } from '@core/channels/telegram-file-download.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import { createPermissionBatchRequest } from '@core/channels/permission-batch-coalescer.js';
 import { createPermissionApprovalRequester } from '@core/channels/permission-approval-requester.js';
 import { telegramQuestionCallbackId } from '@core/channels/telegram/channel-shared.js';
@@ -188,6 +188,12 @@ import type {
 
 // --- Test helpers ---
 
+const telegramRouteKey = (
+  chatJid: string,
+  agentId: string,
+  threadId?: string,
+) => makeAgentThreadQueueKey(chatJid, agentId, threadId, 'telegram_default');
+
 function createTestOpts(
   overrides?: Partial<TelegramChannelOpts>,
 ): TelegramChannelOpts {
@@ -196,7 +202,7 @@ function createTestOpts(
     onChatMetadata: vi.fn(),
     providerAccountId: 'telegram_default',
     conversationRoutes: vi.fn(() => ({
-      'tg:100200300': {
+      [telegramRouteKey('tg:100200300', 'agent:test-group')]: {
         name: 'Test Group',
         folder: 'test-group',
         trigger: '@Andy',
@@ -347,14 +353,14 @@ function createGroupJoinOnboardingOpts() {
   };
   const opts = createTestOpts({
     conversationRoutes: vi.fn(() => ({
-      'tg:100200300': {
+      [telegramRouteKey('tg:100200300', 'agent:test-group')]: {
         name: 'Known Group',
         folder: 'test-group',
         trigger: '@Andy',
         added_at: timestamp,
         providerAccountId: 'telegram_default',
       },
-      'tg:222': {
+      [telegramRouteKey('tg:222', 'agent:whatsapp_main')]: {
         name: 'Operator DM',
         folder: 'whatsapp_main',
         trigger: '@Andy',
@@ -1310,7 +1316,7 @@ describe('TelegramChannel', () => {
       delete settings.conversations.operator_dm;
       opts.runtimeSettings = vi.fn(() => settings);
       opts.conversationRoutes = vi.fn(() => ({
-        'tg:100200300': {
+        [telegramRouteKey('tg:100200300', 'agent:test-group')]: {
           name: 'Known Group',
           folder: 'test-group',
           trigger: '@Andy',
@@ -1417,7 +1423,7 @@ describe('TelegramChannel', () => {
       const baseRoutes = opts.conversationRoutes();
       opts.conversationRoutes = vi.fn(() => ({
         ...baseRoutes,
-        'tg:-1001234': {
+        [telegramRouteKey('tg:-1001234', 'agent:whatsapp_main')]: {
           name: 'Ops Room',
           folder: 'whatsapp_main',
           trigger: '@Andy',
@@ -1492,7 +1498,7 @@ describe('TelegramChannel', () => {
     it('delivers message for an agent-qualified group route', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage')]: {
             name: 'Test Group',
             folder: 'test-group',
             trigger: '@Andy',
@@ -1518,7 +1524,7 @@ describe('TelegramChannel', () => {
     it('does not treat a Telegram topic route as a whole group route', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage', '77')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage', '77')]: {
             name: 'Test Topic',
             folder: 'test-topic',
             trigger: '@Andy',
@@ -1537,7 +1543,7 @@ describe('TelegramChannel', () => {
     it('delivers Telegram topic messages for exact agent-qualified topic routes', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage', '77')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage', '77')]: {
             name: 'Test Topic',
             folder: 'test-topic',
             trigger: '@Andy',
@@ -1726,7 +1732,7 @@ describe('TelegramChannel', () => {
     it('uses sender name as chat name for private chats', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          'tg:100200300': {
+          [telegramRouteKey('tg:100200300', 'agent:private')]: {
             name: 'Private',
             folder: 'private',
             trigger: '@Andy',
@@ -2039,7 +2045,7 @@ describe('TelegramChannel', () => {
     it('downloads media for an agent-qualified group route', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage')]: {
             name: 'Test Group',
             folder: 'test-group',
             trigger: '@Andy',
@@ -2070,7 +2076,12 @@ describe('TelegramChannel', () => {
     it('ignores Telegram media routes from another provider account', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage')]: {
+          [makeAgentThreadQueueKey(
+            'tg:100200300',
+            'agent:triage',
+            undefined,
+            'telegram_other',
+          )]: {
             name: 'Other Account Group',
             folder: 'other-account',
             trigger: '@Andy',
@@ -2097,14 +2108,14 @@ describe('TelegramChannel', () => {
     it('does not download media when multiple matching group route folders exist', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage')]: {
             name: 'Triage',
             folder: 'test-triage',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
             providerAccountId: 'telegram_default',
           },
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:ops')]: {
+          [telegramRouteKey('tg:100200300', 'agent:ops')]: {
             name: 'Ops',
             folder: 'test-ops',
             trigger: '@Andy',
@@ -2146,14 +2157,14 @@ describe('TelegramChannel', () => {
     it('downloads media for the selected multi-agent route', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage')]: {
             name: 'Triage',
             folder: 'test-triage',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
             providerAccountId: 'telegram_default',
           },
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:ops')]: {
+          [telegramRouteKey('tg:100200300', 'agent:ops')]: {
             name: 'Ops',
             folder: 'test-ops',
             trigger: '@Ops',
@@ -2198,14 +2209,14 @@ describe('TelegramChannel', () => {
     it('does not download media when multiple matching topic route folders exist', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage', '77')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage', '77')]: {
             name: 'Triage',
             folder: 'test-triage',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
             providerAccountId: 'telegram_default',
           },
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:ops', '77')]: {
+          [telegramRouteKey('tg:100200300', 'agent:ops', '77')]: {
             name: 'Ops',
             folder: 'test-ops',
             trigger: '@Andy',
@@ -2251,7 +2262,7 @@ describe('TelegramChannel', () => {
     it('does not download media through a Telegram topic route for whole-group media', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage', '77')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage', '77')]: {
             name: 'Test Topic',
             folder: 'test-topic',
             trigger: '@Andy',
@@ -2278,7 +2289,7 @@ describe('TelegramChannel', () => {
     it('downloads media for exact Telegram topic agent routes', async () => {
       const opts = createTestOpts({
         conversationRoutes: vi.fn(() => ({
-          [makeAgentThreadQueueKey('tg:100200300', 'agent:triage', '77')]: {
+          [telegramRouteKey('tg:100200300', 'agent:triage', '77')]: {
             name: 'Test Topic',
             folder: 'test-topic',
             trigger: '@Andy',

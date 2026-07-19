@@ -3,6 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  ensureConfiguredAgent,
+  loadRuntimeSettings,
+  saveRuntimeSettings,
+} from '@core/config/settings/runtime-settings.js';
 
 const runtimeHomes: string[] = [];
 
@@ -410,11 +415,24 @@ describe('admin IPC handlers', () => {
     );
   });
 
-  it('requires same-channel approval and syncs settings after register_agent', async () => {
+  it('requires same-channel approval and writes the canonical desired-state install', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-admin-ipc-'),
     );
     runtimeHomes.push(runtimeHome);
+    const settings = loadRuntimeSettings(runtimeHome);
+    ensureConfiguredAgent(settings, {
+      agentId: 'ops_agent',
+      agentName: 'Ops',
+      agentFolder: 'ops_agent',
+    });
+    settings.providerAccounts.slack_ops = {
+      agentId: 'ops_agent',
+      provider: 'slack',
+      label: 'Ops Slack',
+      runtimeSecretRefs: {},
+    };
+    saveRuntimeSettings(runtimeHome, settings);
     const { adminTaskHandlers, syncRuntimeSettingsFromProjection, taskData } =
       await loadAdminHandlers(runtimeHome);
     const registerGroup = vi.fn(async () => undefined);
@@ -427,9 +445,9 @@ describe('admin IPC handlers', () => {
       data: taskData('register-agent', {
         chatJid: 'sl:C123',
         jid: 'sl:C123',
+        providerAccountId: 'slack_ops',
         name: 'Ops',
         folder: 'ops_agent',
-        trigger: '@Ops',
         requiresTrigger: true,
         payload: { reason: 'bind ops agent' },
       }) as never,
@@ -447,17 +465,30 @@ describe('admin IPC handlers', () => {
         decisionPolicy: 'same_channel',
         targetJid: 'sl:C123',
         toolName: 'register_agent',
+        toolInput: expect.objectContaining({
+          providerAccountId: 'slack_ops',
+          accountLabel: 'Ops Slack',
+        }),
       }),
     );
-    expect(registerGroup).toHaveBeenCalledWith(
-      'sl:C123',
+    expect(registerGroup).not.toHaveBeenCalled();
+    expect(syncRuntimeSettingsFromProjection).not.toHaveBeenCalled();
+    expect(
+      Object.values(loadRuntimeSettings(runtimeHome).conversations),
+    ).toContainEqual(
       expect.objectContaining({
-        name: 'Ops',
-        folder: 'ops_agent',
-        trigger: '@Ops',
+        providerAccount: 'slack_ops',
+        externalId: 'C123',
+        requiresTrigger: true,
+        installedAgents: expect.objectContaining({
+          ops_agent: expect.objectContaining({
+            agentId: 'ops_agent',
+            providerAccountId: 'slack_ops',
+            status: 'active',
+          }),
+        }),
       }),
     );
-    expect(syncRuntimeSettingsFromProjection).toHaveBeenCalledTimes(1);
     expect(readResponse(runtimeHome, 'register-agent')).toMatchObject({
       ok: true,
       message: 'Agent "Ops" registered.',
@@ -482,9 +513,9 @@ describe('admin IPC handlers', () => {
         chatJid: 'sl:C123',
         targetJid: 'sl:C123',
         jid: 'sl:C999',
+        providerAccountId: 'slack_default',
         name: 'Other',
         folder: 'other_agent',
-        trigger: '@Other',
       }) as never,
       sourceAgentFolder: 'main_agent',
       deps: depsWithAdminTools(['mcp__gantry__register_agent'], {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationRoute, Job } from '@core/domain/types.js';
 import { currentLogContext } from '@core/infrastructure/logging/logger.js';
 import { getOperationalErrorCount } from '@core/shared/operational-error-counters.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 const runtimeStoreMock = vi.hoisted(() => ({
   publish: vi.fn(async () => undefined),
@@ -96,6 +97,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
       {
         conversationJid: 'tg:scheduler',
         threadId: 'thread-scheduled',
+        providerAccountId: 'telegram_default',
         label: 'primary',
       },
     ],
@@ -123,6 +125,18 @@ function makeRoute(): ConversationRoute {
     trigger: '',
     added_at: '2026-05-08T00:00:00.000Z',
     requiresTrigger: false,
+    providerAccountId: 'telegram_default',
+  };
+}
+
+function schedulerRoutes(): Record<string, ConversationRoute> {
+  return {
+    [makeAgentThreadQueueKey(
+      'tg:scheduler',
+      'agent:scheduler_agent',
+      undefined,
+      'telegram_default',
+    )]: makeRoute(),
   };
 }
 
@@ -231,7 +245,7 @@ describe('jobs/execution', () => {
       runJob(
         job,
         {
-          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          conversationRoutes: () => schedulerRoutes(),
           queue: {} as never,
           onProcess: () => {},
           sendMessage: vi.fn(async () => undefined) as never,
@@ -276,7 +290,7 @@ describe('jobs/execution', () => {
       runJob(
         job,
         {
-          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          conversationRoutes: () => schedulerRoutes(),
           queue: {} as never,
           onProcess: () => {},
           sendMessage: vi.fn(async () => undefined) as never,
@@ -363,7 +377,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -434,7 +448,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -498,7 +512,7 @@ describe('jobs/execution', () => {
       const run = runJob(
         job,
         {
-          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          conversationRoutes: () => schedulerRoutes(),
           queue: {} as never,
           onProcess: () => {},
           sendMessage: vi.fn(async () => undefined) as never,
@@ -541,7 +555,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -618,7 +632,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -663,7 +677,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -725,7 +739,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -803,7 +817,7 @@ describe('jobs/execution', () => {
       const run = runJob(
         job,
         {
-          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          conversationRoutes: () => schedulerRoutes(),
           queue: {} as never,
           onProcess: () => {},
           sendMessage: vi.fn(async () => undefined) as never,
@@ -855,7 +869,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -963,7 +977,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -1026,7 +1040,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: vi.fn(),
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1096,7 +1110,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1171,7 +1185,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1215,7 +1229,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1367,7 +1381,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1423,7 +1437,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -1464,7 +1478,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -1525,7 +1539,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -1605,7 +1619,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1662,7 +1676,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1698,7 +1712,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1762,7 +1776,7 @@ describe('jobs/execution', () => {
     await runJob(
       storedJob,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: queue as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1805,7 +1819,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1862,7 +1876,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: sendMessage as never,
@@ -1898,7 +1912,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -1960,7 +1974,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2001,7 +2015,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2054,7 +2068,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2136,7 +2150,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2211,7 +2225,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2293,7 +2307,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2339,7 +2353,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2405,7 +2419,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2463,7 +2477,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2566,7 +2580,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2624,7 +2638,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2681,7 +2695,7 @@ describe('jobs/execution', () => {
     await runJob(
       job,
       {
-        conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+        conversationRoutes: () => schedulerRoutes(),
         queue: {} as never,
         onProcess: () => {},
         sendMessage: vi.fn(async () => undefined) as never,
@@ -2761,7 +2775,7 @@ describe('jobs/execution', () => {
       await runJob(
         job,
         {
-          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          conversationRoutes: () => schedulerRoutes(),
           queue: {} as never,
           onProcess: vi.fn(),
           sendMessage: vi.fn(async () => undefined) as never,
@@ -2832,7 +2846,7 @@ describe('jobs/execution', () => {
       await runJob(
         job,
         {
-          conversationRoutes: () => ({ 'tg:scheduler': makeRoute() }),
+          conversationRoutes: () => schedulerRoutes(),
           queue: {} as never,
           onProcess: vi.fn(),
           sendMessage: vi.fn(async () => undefined) as never,

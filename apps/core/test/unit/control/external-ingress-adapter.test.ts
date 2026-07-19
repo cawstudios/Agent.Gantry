@@ -4,7 +4,7 @@ import {
   hasRouteForConversation,
   resolveConversationMessageRoute,
 } from '@core/control/server/external-ingress-adapter.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 describe('external ingress adapter', () => {
   it('uses the conversation provider account when resolving live routes', () => {

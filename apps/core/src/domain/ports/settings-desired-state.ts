@@ -38,9 +38,8 @@ export interface ConfiguredRoutingBinding {
   jid: string;
   installKey?: string;
   threadId?: string;
-  providerAccountId?: string;
+  providerAccountId: string;
   name?: string;
-  trigger: string;
   addedAt: string;
   requiresTrigger: boolean;
   memoryScope: 'conversation' | 'user' | 'agent' | 'app';

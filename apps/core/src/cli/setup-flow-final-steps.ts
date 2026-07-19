@@ -139,6 +139,7 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         displayName: draft.agentName,
         conversationDisplayName: conversationLabel,
         approverIds,
+        providerAccountId: 'slack_default',
       });
       draft.workspaceKey = result.folder;
       draft.conversationLabel = conversationLabel;
@@ -150,6 +151,7 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         runtimeHome: draft.runtimeHome,
         chatJid: draft.telegramChatJid,
         displayName: draft.agentName,
+        providerAccountId: 'telegram_default',
       });
       const approverIds = parseApproverIds(
         draft.telegramPermissionApproverIds || draft.telegramAdminSenderId,
@@ -164,6 +166,7 @@ export async function runGroupStep(draft: SetupDraft): Promise<FlowAction> {
         displayName: conversationLabel,
         requiresTrigger: false,
         approverIds,
+        providerAccountId: 'telegram_default',
       });
       const writeResult = await writeDesiredRuntimeSettings({
         runtimeHome: draft.runtimeHome,

@@ -8,7 +8,7 @@ import {
   startLiveRecoveryCoordinatorLeaseAcquisition,
 } from '@core/app/bootstrap/live-recovery-coordinator.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 interface ScheduledTimer {
   fn: () => void;

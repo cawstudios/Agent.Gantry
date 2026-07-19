@@ -10,7 +10,7 @@ import { resolveEffectivePermissionMode } from '../shared/permission-mode.js';
 import {
   findConversationRouteForQueue,
   makeAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
 import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
 import type { IpcDeps } from './ipc-domain-types.js';
 import type { ParsedPermissionIpcRequest } from './ipc-parsing.js';
@@ -38,7 +38,6 @@ export async function resolvePermissionIpcDecision(input: {
           input.request.threadId,
           input.request.providerAccountId,
         ),
-        (candidate) => agentIdForFolder(candidate.folder),
       )
     : undefined;
   const settings = input.deps.getPermissionRuntimeSettings?.();

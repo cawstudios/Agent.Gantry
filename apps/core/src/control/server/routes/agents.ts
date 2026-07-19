@@ -58,7 +58,7 @@ import {
 } from '../../../config/settings/settings-import-service.js';
 import type { RuntimeSettings } from '../../../shared/runtime-settings.js';
 import { writeControlDesiredState } from './settings.js';
-import { parseAgentThreadQueueKey } from '../../../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../../../application/provider-conversations/thread-queue-key.js';
 
 const PROFILE_JSON_BODY_MAX_BYTES = MAX_PROFILE_CONTENT_BYTES * 6 + 64 * 1024;
 

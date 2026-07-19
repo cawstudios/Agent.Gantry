@@ -15,7 +15,7 @@ import { PartialMessageDeliveryError } from '@core/domain/messages/partial-deliv
 import { runBoundedOutboundDeliveryRecovery } from '@core/jobs/outbound-delivery-recovery.js';
 import { stopWorkerHeartbeat } from '@core/jobs/worker-identity.js';
 import { buildPendingMessagesContinuationIdempotencyKey } from '@core/runtime/pending-message-replay.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,

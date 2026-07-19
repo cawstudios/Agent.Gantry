@@ -390,7 +390,6 @@ export function parseTaskIpcData(
   const jid = toTrimmedString(raw.jid, { maxLen: 255 });
   const name = toTrimmedString(raw.name, { maxLen: 255 });
   const folder = toTrimmedString(raw.folder, { maxLen: 128 });
-  const trigger = toTrimmedString(raw.trigger, { maxLen: 255 });
   const requiresTrigger = toOptionalBoolean(raw.requiresTrigger);
   const agentConfig = parseAgentConfigPayload(raw.agentConfig);
   const payload = isPlainObject(raw.payload) ? raw.payload : undefined;
@@ -485,7 +484,6 @@ export function parseTaskIpcData(
   if (jid) parsed.jid = jid;
   if (name) parsed.name = name;
   if (folder) parsed.folder = folder;
-  if (trigger) parsed.trigger = trigger;
   if (requiresTrigger !== undefined) parsed.requiresTrigger = requiresTrigger;
   if (agentConfig !== undefined) parsed.agentConfig = agentConfig;
   if (payload !== undefined) parsed.payload = payload;

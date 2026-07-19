@@ -22,7 +22,7 @@ import {
   makeAgentThreadQueueKey,
   makeThreadQueueKey,
   parseAgentThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import { SessionInteractionModule } from '../../application/sessions/session-interaction-module.js';
 import {
   getRuntimeControlRepository,

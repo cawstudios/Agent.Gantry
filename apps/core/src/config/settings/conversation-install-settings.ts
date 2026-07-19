@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 
 import type { Conversation } from '../../domain/conversation/conversation.js';
-import { triggerForRoute } from '../../shared/trigger-pattern.js';
 import type { RuntimeSettings } from '../../shared/runtime-settings.js';
 
 export function applyConversationInstallToSettings(input: {
@@ -41,10 +40,6 @@ export function applyConversationInstallToSettings(input: {
       [agentFolder]: {
         agentId: agentFolder,
         providerAccountId,
-        trigger: triggerForRoute({
-          trigger: existing?.installedAgents[agentFolder]?.trigger,
-          name: settings.agents[agentFolder]?.name ?? agentFolder,
-        }),
         status: 'active',
         addedAt: input.now,
         memoryScope: 'conversation',

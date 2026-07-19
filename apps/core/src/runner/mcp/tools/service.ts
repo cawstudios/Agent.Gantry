@@ -484,7 +484,11 @@ The JID must be the current conversation. The folder name must be channel-prefix
       folder: z
         .string()
         .describe('Channel-prefixed folder name (e.g., "discord_ops")'),
-      trigger: z.string().describe('Trigger word (e.g., "@Default Agent")'),
+      providerAccountId: z
+        .string()
+        .describe(
+          'Existing provider account owned by the agent being registered',
+        ),
       requiresTrigger: z
         .boolean()
         .optional()
@@ -505,7 +509,7 @@ The JID must be the current conversation. The folder name must be channel-prefix
         chatJid,
         name: args.name,
         folder: args.folder,
-        trigger: args.trigger,
+        providerAccountId: args.providerAccountId,
         requiresTrigger: args.requiresTrigger ?? false,
         timestamp: nowIso(),
       };

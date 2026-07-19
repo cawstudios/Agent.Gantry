@@ -84,7 +84,8 @@ import type {
 } from '../../shared/runtime-settings.js';
 import { resolveAgentToolReference } from '../../domain/tools/agent-tool-catalog-references.js';
 import { nowIso } from '../../shared/time/datetime.js';
-import { makeAgentThreadQueueKey } from '../../shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '../provider-conversations/thread-queue-key.js';
+import { liveConversationRoute } from '../provider-conversations/live-conversation-route.js';
 
 export class SettingsDesiredStateService {
   private readonly appId: AppId;
@@ -245,20 +246,24 @@ export class SettingsDesiredStateService {
           binding.providerAccountId,
         );
         configuredJids.add(routeKey);
-        await this.deps.ops.setConversationRoute(routeKey, {
-          name: agent.name,
-          folder,
-          conversationId: binding.conversationId,
-          trigger: binding.trigger,
-          added_at: binding.addedAt,
-          requiresTrigger: binding.requiresTrigger,
-          providerAccountId: binding.providerAccountId,
-          conversationKind:
-            conversation?.kind === 'dm' || conversation?.kind === 'direct'
-              ? 'dm'
-              : 'channel',
-          agentConfig: configuredAgentConfig(binding, agent),
-        });
+        await this.deps.ops.setConversationRoute(
+          routeKey,
+          liveConversationRoute({
+            displayName: agent.name,
+            agentName: agent.name,
+            agentFolder: folder,
+            agentId: String(agentIdForFolder(folder)),
+            providerAccountId: binding.providerAccountId,
+            conversationId: binding.conversationId,
+            addedAt: binding.addedAt,
+            requiresTrigger: binding.requiresTrigger,
+            conversationKind:
+              conversation?.kind === 'dm' || conversation?.kind === 'direct'
+                ? 'dm'
+                : 'channel',
+            agentConfig: configuredAgentConfig(binding, agent),
+          }),
+        );
         applied.push(`binding:${binding.jid}:${folder}`);
       }
     }
@@ -550,7 +555,6 @@ export class SettingsDesiredStateService {
           }),
           route: {
             configuredConversationId: input.conversationKey,
-            trigger: binding.trigger,
             requiresTrigger: binding.requiresTrigger,
             agentConfig: configuredAgentConfig(binding),
           },

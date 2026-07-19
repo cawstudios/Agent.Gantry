@@ -20,7 +20,6 @@ import { openRuntimeGroupDb } from './runtime-group-db.js';
 import {
   allocateDefaultAgentFolder,
   DEFAULT_AGENT_FOLDER,
-  defaultTriggerForAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
 import { nowIso } from '../shared/time/datetime.js';
@@ -31,6 +30,10 @@ import {
 } from '../platform/profile-file-mirror.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
 import { providerAccountIdForAgent } from './provider-utils.js';
+import { findSingleConversationRouteForChat } from '../application/provider-conversations/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
+import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
+import { liveConversationRoute } from '../application/provider-conversations/live-conversation-route.js';
 
 type DiscordChannelChoice =
   | { type: 'selected'; channel: DiscordDiscoveredChannel }
@@ -54,12 +57,18 @@ export async function registerDiscordMainGroup(options: {
   chatJid: string;
   displayName: string;
   agentId?: string;
+  providerAccountId?: string;
 }): Promise<{ folder: string; groupName: string }> {
   ensureRuntimeLayout(options.runtimeHome);
   const db = await openRuntimeGroupDb(options.runtimeHome);
   try {
     const existing = await db.getAllConversationRoutes();
-    const existingGroup = existing[options.chatJid];
+    const existingGroup = findSingleConversationRouteForChat(
+      existing,
+      options.chatJid,
+      undefined,
+      options.providerAccountId,
+    );
     // An already-registered conversation keeps its owning agent; agentId
     // only binds conversations that are not routed yet.
     const folder =
@@ -78,26 +87,38 @@ export async function registerDiscordMainGroup(options: {
     const groupName = keepExistingRoute
       ? existingGroup!.name
       : normalizeDefaultAgentName(options.displayName);
-    const route = {
-      name: groupName,
-      folder,
-      trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: existingGroup?.added_at || nowIso(),
-      requiresTrigger: false,
-      agentConfig: existingGroup?.agentConfig,
-    };
-    await db.setConversationRoute(options.chatJid, route);
     const settings = loadRuntimeSettings(options.runtimeHome);
     const previousSettings = structuredClone(settings);
-    ensureConfiguredConversationBinding(settings, {
+    const binding = ensureConfiguredConversationBinding(settings, {
       agentId: folder,
       agentName: groupName,
       agentFolder: folder,
       jid: options.chatJid,
       displayName: options.displayName,
-      trigger: route.trigger,
       requiresTrigger: false,
+      providerAccountId: options.providerAccountId,
     });
+    const route = liveConversationRoute({
+      displayName: groupName,
+      agentName: groupName,
+      agentFolder: folder,
+      agentId: String(agentIdForFolder(folder)),
+      providerAccountId: binding.providerAccountId,
+      conversationId: binding.conversationId,
+      addedAt: existingGroup?.added_at || nowIso(),
+      requiresTrigger: false,
+      conversationKind: 'channel',
+      agentConfig: existingGroup?.agentConfig,
+    });
+    await db.setConversationRoute(
+      makeAgentThreadQueueKey(
+        options.chatJid,
+        route.agentId,
+        undefined,
+        route.providerAccountId,
+      ),
+      route,
+    );
     await writeDesiredRuntimeSettings({
       runtimeHome: options.runtimeHome,
       settings,
@@ -237,6 +258,7 @@ export async function runDiscordConnectCommand(
   let conversationRouteName = '';
   let registeredChatJid = '';
   let registeredChatTitle = '';
+  let registrationProviderAccountId: string | undefined;
   const approverInput =
     channelChoice.type === 'selected'
       ? await promptForValue({
@@ -271,6 +293,11 @@ export async function runDiscordConnectCommand(
       }
       return 1;
     }
+    registrationProviderAccountId = providerAccountIdForAgent(currentSettings, {
+      providerId: 'discord',
+      agentId: requestedAgentId || DEFAULT_AGENT_FOLDER,
+      defaultAccountId: 'discord_default',
+    });
     const registered = await registerDiscordMainGroup({
       runtimeHome,
       chatJid: verified.chatJid,
@@ -279,6 +306,11 @@ export async function runDiscordConnectCommand(
         requestedAgentDisplayName ||
         currentSettings.agent.name,
       agentId: requestedAgentId,
+      providerAccountId: currentSettings.providerAccounts[
+        registrationProviderAccountId
+      ]
+        ? registrationProviderAccountId
+        : undefined,
     });
     registeredFolder = registered.folder;
     conversationRouteName = registered.groupName;
@@ -319,6 +351,11 @@ export async function runDiscordConnectCommand(
       displayName: registeredChatTitle || conversationRouteName,
       requiresTrigger: false,
       approverIds,
+      providerAccountId:
+        registrationProviderAccountId &&
+        settings.providerAccounts[registrationProviderAccountId]
+          ? registrationProviderAccountId
+          : undefined,
     });
     providerAccountId = binding.providerAccountId;
   } else {

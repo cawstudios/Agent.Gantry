@@ -16,9 +16,8 @@ import {
   writeDesiredRuntimeSettings,
 } from '../config/settings/runtime-settings.js';
 import {
-  defaultTriggerForAgentName,
-  displayAgentName,
   defaultAgentNameFromSettings,
+  displayAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
 import { RuntimeGroupDb } from './runtime-group-db.js';
@@ -40,8 +39,8 @@ import {
 import {
   allocateGroupFolder,
   conversationIdsForProvider,
+  displayNameForConfiguredConversation,
   ensureGroupFiles,
-  findConversationIdForAgent,
   formatAgentHarnessLine,
   isInteractiveTerminal,
   loadDatabase,
@@ -63,31 +62,11 @@ import { nowIso } from '../shared/time/datetime.js';
 import {
   makeAgentThreadQueueKey,
   parseAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
+import { liveConversationRoute } from '../application/provider-conversations/live-conversation-route.js';
 
 const errorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
-
-function displayNameForConfiguredConversation(
-  settings: ReturnType<typeof loadRuntimeSettings>,
-  jid: string,
-  fallback: string,
-): string {
-  const provider = providerFromGroupJid(jid);
-  if (!provider) return fallback;
-  const existingConversation = Object.values(settings.conversations).find(
-    (conversation) => {
-      const connection =
-        settings.providerAccounts[conversation.providerAccount];
-      return (
-        connection?.provider === provider &&
-        (conversation.externalId === jid ||
-          jid.endsWith(`:${conversation.externalId}`))
-      );
-    },
-  );
-  return existingConversation?.displayName || fallback;
-}
 
 async function runInfo(
   runtimeHome: string,
@@ -178,9 +157,12 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
     return 1;
   }
 
-  const normalized = normalizeGroupAddSelector(parsed.selector || '');
-  if (!normalized) {
-    p.log.error('Invalid JID/chat-id. Example: tg:-1001234567890');
+  const rawSelector = parsed.selector || '';
+  const normalized = normalizeGroupAddSelector(rawSelector);
+  if (!normalized || !providerFromGroupJid(rawSelector.trim())) {
+    p.log.error(
+      'agent add requires a provider-qualified conversation selector such as tg:-1001234567890 or sl:C123. Connect the provider first with gantry provider connect <provider>.',
+    );
     return 1;
   }
 
@@ -278,48 +260,50 @@ async function runAdd(runtimeHome: string, args: string[]): Promise<number> {
 
     const previousSettings = structuredClone(settings);
     const requiresTrigger = parsed.requiresTrigger ?? true;
-    const defaultTrigger = defaultTriggerForAgentName(
-      defaultAgentNameFromSettings(settings),
-    );
-
-    const record: ConversationRoute = {
-      name: displayName,
-      folder: agentFolder,
-      trigger: (parsed.trigger || defaultTrigger).trim() || defaultTrigger,
-      added_at: nowIso(),
-      requiresTrigger,
-    };
-
     try {
+      const binding = ensureConfiguredConversationBinding(settings, {
+        agentId: agentFolder,
+        agentName: displayName,
+        agentFolder,
+        jid: normalized,
+        displayName,
+        requiresTrigger,
+      });
+      const record = liveConversationRoute({
+        displayName,
+        agentName: displayName,
+        agentFolder,
+        agentId: String(agentIdForFolder(agentFolder)),
+        providerAccountId: binding.providerAccountId,
+        conversationId: binding.conversationId,
+        addedAt: nowIso(),
+        requiresTrigger,
+        conversationKind:
+          settings.conversations[binding.conversationId]?.kind === 'direct'
+            ? 'dm'
+            : 'channel',
+      });
       await db.setConversationRoute(
-        makeAgentThreadQueueKey(normalized, agentIdForFolder(agentFolder)),
+        makeAgentThreadQueueKey(
+          normalized,
+          record.agentId,
+          undefined,
+          record.providerAccountId,
+        ),
         record,
       );
-      try {
-        ensureConfiguredConversationBinding(settings, {
-          agentId: agentFolder,
-          agentName: displayName,
-          agentFolder,
-          jid: normalized,
-          displayName,
-          trigger: record.trigger,
-          requiresTrigger: record.requiresTrigger !== false,
-        });
-        await writeDesiredRuntimeSettings({
-          runtimeHome,
-          settings,
-          previousSettings,
-        });
-      } catch {
-        // Generic local JIDs are still allowed for file-backed agents; only
-        // known provider JIDs participate in conversation desired state.
-      }
+      await writeDesiredRuntimeSettings({
+        runtimeHome,
+        settings,
+        previousSettings,
+      });
       try {
         const seededApprover = await seedTelegramControlApproverForAgent({
           runtimeHome,
           db,
           chatJid: normalized,
           agentFolder,
+          providerAccountId: record.providerAccountId,
         });
         if (seededApprover) {
           p.log.info(
@@ -418,7 +402,15 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
     }
     const found = resolved.found;
     const routeKey = found.jid;
-    const { chatJid } = parseAgentThreadQueueKey(routeKey);
+    const { chatJid, providerAccountId } = parseAgentThreadQueueKey(routeKey);
+    const selectedProviderAccountId =
+      providerAccountId ?? found.group.providerAccountId;
+    if (!selectedProviderAccountId) {
+      p.log.error(
+        `Agent ${found.group.name} (${found.jid}) does not identify a provider account.`,
+      );
+      return 1;
+    }
 
     if (!parsed.assumeYes) {
       if (!isInteractiveTerminal()) {
@@ -459,6 +451,7 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
       runtimeHome,
       chatJid,
       found.group.folder,
+      selectedProviderAccountId,
     );
     if (policyPrune.error) {
       p.log.warn(
@@ -535,20 +528,20 @@ async function runTrigger(
     }
     const found = resolved.found;
     const routeKey = found.jid;
-    const { chatJid } = parseAgentThreadQueueKey(routeKey);
+    const { chatJid, providerAccountId } = parseAgentThreadQueueKey(routeKey);
+    const selectedProviderAccountId =
+      providerAccountId ?? found.group.providerAccountId;
+    if (!selectedProviderAccountId) {
+      p.log.error(
+        `Agent ${found.group.name} (${found.jid}) does not identify a provider account.`,
+      );
+      return 1;
+    }
 
     const nextGroup: ConversationRoute = {
       ...found.group,
       requiresTrigger: parsed.disable ? false : true,
-      trigger: parsed.disable
-        ? found.group.trigger
-        : (parsed.trigger || '').trim() || found.group.trigger,
     };
-
-    if (!parsed.disable && !nextGroup.trigger.trim()) {
-      p.log.error('Trigger word cannot be empty.');
-      return 1;
-    }
 
     try {
       const providerId = providerFromGroupJid(chatJid);
@@ -566,9 +559,10 @@ async function runTrigger(
             settings,
             chatJid,
             found.group.name,
+            selectedProviderAccountId,
           ),
-          trigger: nextGroup.trigger,
           requiresTrigger: nextGroup.requiresTrigger !== false,
+          providerAccountId: selectedProviderAccountId,
         });
         await writeDesiredRuntimeSettings({
           runtimeHome,
@@ -590,7 +584,7 @@ async function runTrigger(
     }
 
     p.log.success(
-      `Trigger for ${found.group.name} (${found.jid}) is now "${nextGroup.trigger}".`,
+      `Trigger requirement enabled for ${found.group.name} (${found.jid}).`,
     );
     return 0;
   } finally {
@@ -627,7 +621,15 @@ async function runPolicy(runtimeHome: string, args: string[]): Promise<number> {
     }
 
     const found = resolved.found;
-    const { chatJid } = parseAgentThreadQueueKey(found.jid);
+    const { chatJid, providerAccountId } = parseAgentThreadQueueKey(found.jid);
+    const selectedProviderAccountId =
+      providerAccountId ?? found.group.providerAccountId;
+    if (!selectedProviderAccountId) {
+      p.log.error(
+        `Agent ${found.group.name} (${found.jid}) does not identify a provider account.`,
+      );
+      return 1;
+    }
     const channel = providerFromGroupJid(chatJid);
     if (!channel) {
       p.log.error(
@@ -644,14 +646,10 @@ async function runPolicy(runtimeHome: string, args: string[]): Promise<number> {
       agentFolder: found.group.folder,
       jid: chatJid,
       displayName: found.group.name,
-      trigger: found.group.trigger,
       requiresTrigger: found.group.requiresTrigger !== false,
+      providerAccountId: selectedProviderAccountId,
     });
-    const conversation =
-      settings.conversations[
-        findConversationIdForAgent(settings, found.group.folder, channel) ||
-          ensured.conversationId
-      ];
+    const conversation = settings.conversations[ensured.conversationId];
     if (!conversation) {
       p.log.error(
         `Agent ${found.group.name} (${found.jid}) does not have a configured conversation.`,

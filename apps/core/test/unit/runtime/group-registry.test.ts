@@ -54,7 +54,7 @@ import {
   setGroupThinkingOverride,
   listAvailableGroups,
 } from '@core/runtime/group-registry.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 type PersistGroupFn = (jid: string, group: ConversationRoute) => void;
 
@@ -71,6 +71,7 @@ function makeGroup(
   return {
     name: 'Test Group',
     folder: 'test-group',
+    providerAccountId: 'provider-account:test',
     trigger: '!test',
     added_at: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -107,22 +108,85 @@ describe('registerGroup', () => {
     mockFs.existsSync.mockReturnValue(false);
   });
 
-  it('registers the group and calls persist + ensureCredentialBinding', async () => {
+  it('preserves the route trigger while normalizing the route', async () => {
     const group = makeGroup();
     await registerGroup(groups, 'g1@g.us', group, {
       persist,
       ensureCredentialBinding,
     });
 
-    expect(groups['g1@g.us']).toBe(group);
-    expect(persist).toHaveBeenCalledWith('g1@g.us', group);
-    expect(ensureCredentialBinding).toHaveBeenCalledWith('g1@g.us', group);
+    const routeKey = makeAgentThreadQueueKey(
+      'g1@g.us',
+      'agent:test-group',
+      undefined,
+      'provider-account:test',
+    );
+    const registered = expect.objectContaining({
+      ...group,
+      agentId: 'agent:test-group',
+      providerAccountId: 'provider-account:test',
+      trigger: '!test',
+      requiresTrigger: true,
+      conversationKind: 'channel',
+    });
+    expect(groups[routeKey]).toEqual(registered);
+    expect(persist).toHaveBeenCalledWith(routeKey, registered);
+    expect(ensureCredentialBinding).toHaveBeenCalledWith(routeKey, registered);
     expect(mockFs.mkdirSync).toHaveBeenCalledWith('/resolved/test-group/logs', {
       recursive: true,
     });
     expect(logger.info).toHaveBeenCalledWith(
-      { jid: 'g1@g.us', name: 'Test Group', folder: 'test-group' },
+      { jid: routeKey, name: 'Test Group', folder: 'test-group' },
       'Group registered',
+    );
+  });
+
+  it('keeps a secondary agents trigger instead of the runtime default', async () => {
+    const group = makeGroup({
+      name: 'Operations',
+      folder: 'ops_agent',
+      agentId: 'agent:ops_agent',
+      trigger: '@Ops',
+    });
+
+    await registerGroup(groups, 'sl:C123', group, {
+      assistantName: 'Main Agent',
+      persist,
+      ensureCredentialBinding,
+    });
+
+    const routeKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:ops_agent',
+      undefined,
+      'provider-account:test',
+    );
+    expect(groups[routeKey]).toMatchObject({
+      folder: 'ops_agent',
+      trigger: '@Ops',
+    });
+  });
+
+  it('preserves thread scope when rehydrating a persisted route', async () => {
+    const persistedRouteKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:test-group',
+      '1700.1',
+      'provider-account:test',
+    );
+
+    await registerGroup(groups, persistedRouteKey, makeGroup(), {
+      persist,
+      ensureCredentialBinding,
+    });
+
+    expect(groups[persistedRouteKey]).toMatchObject({
+      name: 'Test Group',
+      trigger: '!test',
+    });
+    expect(persist).toHaveBeenCalledWith(
+      persistedRouteKey,
+      groups[persistedRouteKey],
     );
   });
 

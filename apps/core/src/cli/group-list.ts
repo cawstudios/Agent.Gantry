@@ -41,7 +41,7 @@ export async function runList(runtimeHome: string): Promise<number> {
         (channel) => `\`gantry provider connect ${channel}\``,
       );
       p.log.info(
-        `Next action: run \`gantry agent add <chat-id>\` or ${connectCommands.join(' / ')}.`,
+        `Next action: run \`gantry agent add <provider-jid>\` or ${connectCommands.join(' / ')}.`,
       );
       return 0;
     }

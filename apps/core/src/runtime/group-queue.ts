@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'child_process';
 import { logger } from '../infrastructure/logging/logger.js';
 import { runPort, stopActiveGroupRun } from './group-queue-stop.js';
-import { normalizeThreadQueueId } from '../shared/thread-queue-key.js';
+import { normalizeThreadQueueId } from '../application/provider-conversations/thread-queue-key.js';
 import {
   continuationSenderMatchesRequiredUser,
   createGroupQueuePolicy,

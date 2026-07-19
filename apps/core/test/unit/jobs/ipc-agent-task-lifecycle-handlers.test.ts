@@ -22,6 +22,8 @@ import {
   callableAgentToolName,
   projectCallableAgentTools,
 } from '@core/application/core-tools/callable-agent-tools.js';
+import { bindingRowToGroup } from '@core/adapters/storage/postgres/repositories/canonical-binding-repository.postgres.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 const runtimeHomes: string[] = [];
 
@@ -1013,16 +1015,42 @@ describe('agent task lifecycle IPC handlers', () => {
       policy: interactiveSandboxPolicy,
     });
 
-    const conversationBindings = {
-      'sl:C123': {
-        jid: 'sl:C123',
-        name: 'Lead gen',
-        folder: 'main_agent',
-        providerAccountId: 'slack-one',
+    const persistedCallerRoute = bindingRowToGroup({
+      id: `conversation-route:${makeAgentThreadQueueKey(
+        'sl:C123',
+        'agent:main_agent',
+        undefined,
+        'slack-one',
+      )}`,
+      agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
+      providerAccountId: 'slack-one',
+      conversationId: 'conversation:shared',
+      threadId: null,
+      status: 'active',
+      conversationKind: 'channel',
+      requiresTrigger: true,
+      memorySubjectJson: JSON.stringify({
+        kind: 'conversation',
+        appId: 'app:test',
         conversationId: 'conversation:shared',
-        isRegistered: true,
-      },
-      'sl:C123::thread:thread-1::agent:agent%3Areviewer': {
+        liveRoute: {},
+      }),
+      displayName: 'Lead gen',
+      createdAt: '2026-07-19T00:00:00.000Z',
+    });
+    expect(persistedCallerRoute?.group).toMatchObject({
+      agentId: 'agent:main_agent',
+      providerAccountId: 'slack-one',
+    });
+    const conversationBindings = {
+      [persistedCallerRoute!.jid]: persistedCallerRoute!.group,
+      [makeAgentThreadQueueKey(
+        'sl:C123',
+        'agent:reviewer',
+        'thread-1',
+        'slack-two',
+      )]: {
         jid: 'sl:C123',
         name: 'Reviewer',
         folder: 'reviewer',
@@ -1069,9 +1097,9 @@ describe('agent task lifecycle IPC handlers', () => {
       readResponse(runtimeHome, 'delegate-other-conversation'),
     ).toMatchObject({ ok: false, code: 'not_found' });
     expect(repository.tasks.size).toBe(0);
-    conversationBindings[
-      'sl:C123::thread:thread-1::agent:agent%3Areviewer'
-    ].conversationId = 'conversation:shared';
+    Object.values(conversationBindings).find(
+      (route) => route.folder === 'reviewer',
+    )!.conversationId = 'conversation:shared';
 
     configuredDelegates = [];
     await agentTaskLifecycleHandlers.delegate_task(
@@ -1418,7 +1446,12 @@ describe('agent task lifecycle IPC handlers', () => {
         }),
         deps,
         conversationBindings: {
-          'sl:C123': {
+          [makeAgentThreadQueueKey(
+            'sl:C123',
+            'agent:main_agent',
+            'thread-1',
+            'slack-one',
+          )]: {
             jid: 'sl:C123',
             name: 'Lead gen',
             folder: 'main_agent',
@@ -1640,7 +1673,12 @@ describe('agent task lifecycle IPC handlers', () => {
         },
         deps,
         conversationBindings: {
-          'sl:C123': {
+          [makeAgentThreadQueueKey(
+            'sl:C123',
+            'agent:main_agent',
+            'thread-1',
+            'slack-one',
+          )]: {
             jid: 'sl:C123',
             name: 'Lead gen',
             folder: 'main_agent',

@@ -18,7 +18,10 @@ import { AvailableGroup } from './agent-spawn.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
 import { resolveAgentLockStatus } from '../config/profiles.js';
 import type { FileArtifactStore } from '../domain/ports/file-artifact-store.js';
-import { parseAgentThreadQueueKey } from '../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
+import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
+import { liveConversationRoute } from '../application/provider-conversations/live-conversation-route.js';
 
 interface ChatRow {
   jid: string;
@@ -98,6 +101,34 @@ export async function registerGroup(
   options: RegisterGroupOptions,
 ): Promise<void> {
   const assistantName = options.assistantName ?? DEFAULT_ASSISTANT_NAME;
+  const parsed = parseAgentThreadQueueKey(jid);
+  const agentId = group.agentId ?? String(agentIdForFolder(group.folder));
+  const providerAccountId =
+    group.providerAccountId ??
+    (parsed.chatJid.startsWith('app:')
+      ? 'channel-providerAccount:default:app'
+      : undefined);
+  if (!providerAccountId) {
+    throw new Error(`Conversation route ${jid} requires a provider account`);
+  }
+  const routeKey = makeAgentThreadQueueKey(
+    parsed.chatJid,
+    agentId,
+    parsed.threadId,
+    providerAccountId,
+  );
+  group = liveConversationRoute({
+    displayName: group.name,
+    trigger: group.trigger,
+    agentFolder: group.folder,
+    agentId,
+    providerAccountId,
+    conversationId: group.conversationId,
+    addedAt: group.added_at,
+    requiresTrigger: group.requiresTrigger ?? true,
+    conversationKind: group.conversationKind ?? 'channel',
+    agentConfig: group.agentConfig,
+  });
 
   let groupDir: string;
   try {
@@ -116,12 +147,12 @@ export async function registerGroup(
     getFileArtifactStore: options.getFileArtifactStore,
   });
 
-  conversationRoutes[jid] = group;
-  await options.persist(jid, group);
-  options.ensureCredentialBinding(jid, group);
+  conversationRoutes[routeKey] = group;
+  await options.persist(routeKey, group);
+  options.ensureCredentialBinding(routeKey, group);
 
   logger.info(
-    { jid, name: group.name, folder: group.folder },
+    { jid: routeKey, name: group.name, folder: group.folder },
     'Group registered',
   );
 }

@@ -111,9 +111,11 @@ describe('provider conversation live routes', () => {
     expect(projectConversationRoute).toHaveBeenCalledWith(
       'C1',
       expect.objectContaining({
-        conversationId: 'shared_team',
+        conversationId: 'conversation:C1',
+        name: 'Team Channel',
         providerAccountId: 'provider-account:enabled',
         conversationKind: 'channel',
+        trigger: '@Main Agent',
       }),
     );
   });

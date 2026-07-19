@@ -4,7 +4,7 @@ import type {
 } from '../../domain/types.js';
 import type { ChannelWiringDeps } from './channel-wiring-types.js';
 import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
-import { findConversationRoutesForChat } from '../../shared/thread-queue-key.js';
+import { findConversationRoutesForChat } from '../../application/provider-conversations/thread-queue-key.js';
 
 export async function authorizeConversationApprover(input: {
   providerId: string;

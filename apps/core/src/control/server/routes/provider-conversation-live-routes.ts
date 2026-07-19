@@ -9,20 +9,10 @@ import type {
   ConversationInstall,
   ProviderAccountId,
 } from '../../../domain/provider/provider.js';
-import { makeAgentThreadQueueKey } from '../../../shared/thread-queue-key.js';
+import { liveConversationRoute } from '../../../application/provider-conversations/live-conversation-route.js';
+import { makeAgentThreadQueueKey } from '../../../application/provider-conversations/thread-queue-key.js';
 import { getProvider } from '../../../channels/provider-registry.js';
 import type { ControlRouteContext } from '../handler-context.js';
-
-interface RuntimeConversationRouteState {
-  name: string;
-  folder: string;
-  conversationId: string;
-  providerAccountId: string;
-  trigger: string;
-  added_at: string;
-  requiresTrigger: boolean;
-  conversationKind: 'dm' | 'channel';
-}
 
 export async function projectConversationInstallToRuntime(
   ctx: ControlRouteContext,
@@ -81,7 +71,7 @@ export async function removeProviderAccountRoutesFromRuntime(
   }
   const routes = getRoutes.call(ctx.app) as Record<
     string,
-    RuntimeConversationRouteState
+    { providerAccountId?: string }
   >;
   const routeKeys = Object.entries(routes)
     .filter(([, route]) => route.providerAccountId === providerAccountId)
@@ -167,40 +157,21 @@ function routeStateForConversationInstall(input: {
   agent: Agent;
   install: ConversationInstall;
   conversation: Conversation;
-}): RuntimeConversationRouteState {
+}) {
   const folder = folderForAgentId(input.agent.id) ?? String(input.agent.id);
-  const route = (
-    input.install.memorySubject as {
-      route?: {
-        configuredConversationId?: unknown;
-        trigger?: unknown;
-        requiresTrigger?: unknown;
-      };
-    }
-  ).route;
-  const configuredConversationId = route?.configuredConversationId;
-  const configuredTrigger = route?.trigger;
-  const fallbackTrigger = `@${(input.agent.name || folder).trim() || 'agent'}`;
-  return {
-    name: input.install.displayName || input.agent.name,
-    folder,
-    conversationId:
-      typeof configuredConversationId === 'string' &&
-      configuredConversationId.trim()
-        ? configuredConversationId.trim()
-        : input.conversation.id,
+  return liveConversationRoute({
+    displayName: input.install.displayName || input.agent.name,
+    agentName: input.agent.name,
+    agentFolder: folder,
+    agentId: String(input.agent.id),
+    conversationId: input.conversation.id,
     providerAccountId: input.install.providerAccountId,
-    trigger:
-      typeof configuredTrigger === 'string' && configuredTrigger.trim()
-        ? configuredTrigger.trim()
-        : fallbackTrigger,
-    added_at: input.install.createdAt,
+    addedAt: input.install.createdAt,
     requiresTrigger:
-      typeof route?.requiresTrigger === 'boolean'
-        ? route.requiresTrigger
-        : input.conversation.kind !== 'direct',
+      input.conversation.requiresTrigger ??
+      input.conversation.kind !== 'direct',
     conversationKind: input.conversation.kind === 'direct' ? 'dm' : 'channel',
-  };
+  });
 }
 
 function jidForConversation(providerId: string, externalId: string): string {

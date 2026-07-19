@@ -9,7 +9,7 @@ import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
 import {
   findConversationRouteForQueue,
   parseAgentThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import { buildLiveTurnContinuation } from './live-turn-continuation.js';
 import {
   encodeGroupMessageCursor,
@@ -270,7 +270,6 @@ export async function liveTurnScopeForQueue(input: {
   const route = findConversationRouteForQueue(
     app.getConversationRoutes(),
     queueJid,
-    (candidate) => agentIdForFolder(candidate.folder),
   );
   if (!route) return null;
   const executionProviderId =

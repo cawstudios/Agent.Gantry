@@ -21,7 +21,7 @@ import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
 } from '../../../../shared/message-cursor.js';
-import { makeAgentThreadQueueKey } from '../../../../shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '../../../../application/provider-conversations/thread-queue-key.js';
 import * as pgSchema from '../schema/schema.js';
 import { enqueueLiveAdmissionWorkItem } from './live-admission-work-item-repository.postgres.js';
 import {

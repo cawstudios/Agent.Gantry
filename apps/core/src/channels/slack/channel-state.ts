@@ -4,7 +4,7 @@ import { App } from '@slack/bolt';
 
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ensurePrivateDirSync } from '../../shared/private-fs.js';
-import { findConversationRoutesForChat } from '../../shared/thread-queue-key.js';
+import { findConversationRoutesForChat } from '../../application/provider-conversations/thread-queue-key.js';
 import {
   NewMessage,
   PermissionApprovalDecision,

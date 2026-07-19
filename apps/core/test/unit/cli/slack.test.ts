@@ -14,11 +14,12 @@ import {
 import { readEnvFile } from '@core/config/env/file.js';
 import { envFilePath } from '@core/config/settings/runtime-home.js';
 import {
+  ensureConfiguredAgent,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@core/config/settings/runtime-settings.js';
 import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import {
   pruneAgentSenderPolicyOverride,
   resolveGroupSelector,
@@ -660,13 +661,23 @@ describe('cli slack helpers', () => {
   it('slack connect stores secrets on the selected agent provider account', async () => {
     vi.resetModules();
     const runtimeHome = makeRuntimeHome();
-    groupsStore.set('sl:C0123456789', {
-      name: 'Recruiting',
-      folder: 'recruiting_agent',
-      trigger: '@Recruiting',
-      added_at: '2024-01-01T00:00:00.000Z',
-      requiresTrigger: true,
-    });
+    groupsStore.set(
+      makeAgentThreadQueueKey(
+        'sl:C0123456789',
+        'agent:recruiting_agent',
+        undefined,
+        'slack_recruiting_agent',
+      ),
+      {
+        name: 'Recruiting',
+        folder: 'recruiting_agent',
+        agentId: 'agent:recruiting_agent',
+        providerAccountId: 'slack_recruiting_agent',
+        trigger: '@Recruiting',
+        added_at: '2024-01-01T00:00:00.000Z',
+        requiresTrigger: true,
+      },
+    );
     const seedSettings = loadRuntimeSettings(runtimeHome);
     seedSettings.agents.main_agent = {
       name: 'Main',
@@ -748,7 +759,7 @@ describe('cli slack helpers', () => {
     mockRuntimeSecretStorage(runtimeHome);
 
     const { runSlackConnectCommand } = await import('@core/cli/slack.js');
-    const code = await runSlackConnectCommand(runtimeHome);
+    const code = await runSlackConnectCommand(runtimeHome, 'recruiting_agent');
 
     expect(code).toBe(0);
     const settings = loadRuntimeSettings(runtimeHome);
@@ -788,7 +799,16 @@ describe('cli slack helpers', () => {
 
     expect(result.groupName).toBe('Kai Slack');
     expect(result.folder).toBe('main_agent');
-    expect(groupsStore.get('sl:C0123456789')).toEqual(
+    expect(
+      groupsStore.get(
+        makeAgentThreadQueueKey(
+          'sl:C0123456789',
+          'agent:main_agent',
+          undefined,
+          'slack_default',
+        ),
+      ),
+    ).toEqual(
       expect.objectContaining({
         name: 'Kai Slack',
         folder: 'main_agent',
@@ -836,6 +856,135 @@ describe('cli slack helpers', () => {
     expect(soul).toContain('## Continuity Boundary');
   });
 
+  it('reconnects the matching provider account when two accounts share a chat', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const chatJid = 'sl:C0123456789';
+    const alphaKey = makeAgentThreadQueueKey(
+      chatJid,
+      'agent:alpha',
+      undefined,
+      'slack_alpha',
+    );
+    const betaKey = makeAgentThreadQueueKey(
+      chatJid,
+      'agent:beta',
+      undefined,
+      'slack_beta',
+    );
+    groupsStore.set(alphaKey, {
+      name: 'Alpha',
+      folder: 'alpha',
+      agentId: 'agent:alpha',
+      providerAccountId: 'slack_alpha',
+      conversationId: 'conversation:alpha',
+      trigger: '@Alpha',
+      added_at: '2026-01-01T00:00:00.000Z',
+      requiresTrigger: true,
+    });
+    groupsStore.set(betaKey, {
+      name: 'Beta',
+      folder: 'beta',
+      agentId: 'agent:beta',
+      providerAccountId: 'slack_beta',
+      conversationId: 'conversation:beta',
+      trigger: '@Beta',
+      added_at: '2026-02-01T00:00:00.000Z',
+      requiresTrigger: true,
+      agentConfig: { model: 'opus', permissionMode: 'auto_strict' },
+    });
+    const settings = loadRuntimeSettings(runtimeHome);
+    ensureConfiguredAgent(settings, {
+      agentId: 'alpha',
+      agentName: 'Alpha',
+      agentFolder: 'alpha',
+    });
+    ensureConfiguredAgent(settings, {
+      agentId: 'beta',
+      agentName: 'Beta',
+      agentFolder: 'beta',
+    });
+    settings.providerAccounts.slack_alpha = {
+      agentId: 'alpha',
+      provider: 'slack',
+      label: 'Alpha Slack',
+      runtimeSecretRefs: {},
+    };
+    settings.providerAccounts.slack_beta = {
+      agentId: 'beta',
+      provider: 'slack',
+      label: 'Beta Slack',
+      runtimeSecretRefs: {},
+    };
+    saveRuntimeSettings(runtimeHome, settings);
+
+    const result = await registerSlackMainGroup({
+      runtimeHome,
+      chatJid,
+      displayName: 'Beta',
+      conversationDisplayName: 'shared-channel',
+      agentId: 'beta',
+      providerAccountId: 'slack_beta',
+    });
+
+    expect(result).toEqual({ folder: 'beta', groupName: 'Beta' });
+    expect(groupsStore.get(alphaKey)).toMatchObject({
+      folder: 'alpha',
+      providerAccountId: 'slack_alpha',
+    });
+    expect(groupsStore.get(betaKey)).toMatchObject({
+      name: 'Beta',
+      folder: 'beta',
+      providerAccountId: 'slack_beta',
+      added_at: '2026-02-01T00:00:00.000Z',
+      agentConfig: { model: 'opus', permissionMode: 'auto_strict' },
+    });
+  });
+
+  it('persists an explicit provider account when one agent owns multiple', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const settings = loadRuntimeSettings(runtimeHome);
+    ensureConfiguredAgent(settings, {
+      agentId: 'recruiting_agent',
+      agentName: 'Recruiting',
+      agentFolder: 'recruiting_agent',
+    });
+    settings.providerAccounts.slack_recruiting_primary = {
+      agentId: 'recruiting_agent',
+      provider: 'slack',
+      label: 'Recruiting Primary',
+      runtimeSecretRefs: {},
+    };
+    settings.providerAccounts.slack_recruiting_selected = {
+      agentId: 'recruiting_agent',
+      provider: 'slack',
+      label: 'Recruiting Selected',
+      runtimeSecretRefs: {},
+    };
+    saveRuntimeSettings(runtimeHome, settings);
+
+    await registerSlackMainGroup({
+      runtimeHome,
+      chatJid: 'sl:C0123456789',
+      displayName: 'Recruiting',
+      conversationDisplayName: 'recruiting-channel',
+      agentId: 'recruiting_agent',
+      providerAccountId: 'slack_recruiting_selected',
+    });
+
+    const savedSettings = loadRuntimeSettings(runtimeHome);
+    const recruitingConversations = Object.values(
+      savedSettings.conversations,
+    ).filter((conversation) =>
+      Object.values(conversation.installedAgents).some(
+        (install) => install.agentId === 'recruiting_agent',
+      ),
+    );
+    expect(recruitingConversations).toHaveLength(1);
+    expect(recruitingConversations[0]?.providerAccount).toBe(
+      'slack_recruiting_selected',
+    );
+  });
+
   it('keeps desired Slack settings when prompt profile seeding fails', async () => {
     const runtimeHome = makeRuntimeHome();
     fileArtifactState.failWrites = true;
@@ -850,7 +999,16 @@ describe('cli slack helpers', () => {
       }),
     ).rejects.toThrow('profile seed failed');
 
-    expect(groupsStore.get('sl:C0123456789')).toEqual(
+    expect(
+      groupsStore.get(
+        makeAgentThreadQueueKey(
+          'sl:C0123456789',
+          'agent:main_agent',
+          undefined,
+          'slack_default',
+        ),
+      ),
+    ).toEqual(
       expect.objectContaining({
         name: 'Kai Slack',
         folder: 'main_agent',
@@ -880,8 +1038,14 @@ describe('cli slack helpers', () => {
       approverIds: ['U123'],
     });
 
-    groupsStore.set('sl:C0123456789', {
-      ...groupsStore.get('sl:C0123456789'),
+    const routeKey = makeAgentThreadQueueKey(
+      'sl:C0123456789',
+      'agent:main_agent',
+      undefined,
+      'slack_default',
+    );
+    groupsStore.set(routeKey, {
+      ...groupsStore.get(routeKey),
       requiresTrigger: false,
     });
     const staleSettings = loadRuntimeSettings(runtimeHome);
@@ -892,11 +1056,10 @@ describe('cli slack helpers', () => {
     const code = await runAgentCommand(runtimeHome, [
       'trigger',
       'sl:C0123456789',
-      '@reagent',
     ]);
 
     expect(code).toBe(0);
-    expect(groupsStore.get('sl:C0123456789')).toEqual(
+    expect(groupsStore.get(routeKey)).toEqual(
       expect.objectContaining({ requiresTrigger: true }),
     );
     const settings = loadRuntimeSettings(runtimeHome);
@@ -922,8 +1085,10 @@ describe('cli slack helpers', () => {
     const routeKey = makeAgentThreadQueueKey(
       'sl:C0123456789',
       'agent:main_agent',
+      undefined,
+      'slack_default',
     );
-    const sourceRoute = groupsStore.get('sl:C0123456789');
+    const sourceRoute = groupsStore.get(routeKey);
     expect(sourceRoute).toEqual(
       expect.objectContaining({
         name: 'Kai Slack',
@@ -933,11 +1098,7 @@ describe('cli slack helpers', () => {
     groupsStore.set(routeKey, { ...sourceRoute, requiresTrigger: true });
 
     const { runAgentCommand } = await import('@core/cli/group.js');
-    const code = await runAgentCommand(runtimeHome, [
-      'trigger',
-      routeKey,
-      '@reagent',
-    ]);
+    const code = await runAgentCommand(runtimeHome, ['trigger', routeKey]);
 
     expect(code).toBe(0);
     const settings = loadRuntimeSettings(runtimeHome);
@@ -945,7 +1106,7 @@ describe('cli slack helpers', () => {
       settings.conversations.slack_default_c0123456789.requiresTrigger,
     ).toBe(true);
     expect(groupsStore.get(routeKey)).toMatchObject({
-      trigger: '@reagent',
+      trigger: '@Kai Slack',
       requiresTrigger: true,
     });
     expect(Object.values(settings.conversations)).not.toContainEqual(
@@ -969,8 +1130,10 @@ describe('cli slack helpers', () => {
     const routeKey = makeAgentThreadQueueKey(
       'sl:C0123456789',
       'agent:main_agent',
+      undefined,
+      'slack_default',
     );
-    const sourceRoute = groupsStore.get('sl:C0123456789');
+    const sourceRoute = groupsStore.get(routeKey);
     groupsStore.set(routeKey, { ...sourceRoute, requiresTrigger: true });
 
     const { runAgentCommand } = await import('@core/cli/group.js');
@@ -999,6 +1162,120 @@ describe('cli slack helpers', () => {
     );
   });
 
+  it('keeps trigger, policy, and removal writes on the selected provider account', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const seeded = loadRuntimeSettings(runtimeHome);
+    ensureConfiguredAgent(seeded, {
+      agentId: 'main_agent',
+      agentName: 'Main Agent',
+      agentFolder: 'main_agent',
+    });
+    seeded.providerAccounts.slack_primary = {
+      agentId: 'main_agent',
+      provider: 'slack',
+      label: 'Primary Slack',
+      runtimeSecretRefs: {},
+    };
+    seeded.providerAccounts.slack_selected = {
+      agentId: 'main_agent',
+      provider: 'slack',
+      label: 'Selected Slack',
+      runtimeSecretRefs: {},
+    };
+    saveRuntimeSettings(runtimeHome, seeded);
+
+    await registerSlackMainGroup({
+      runtimeHome,
+      chatJid: 'sl:C0123456789',
+      displayName: 'Main Agent',
+      conversationDisplayName: 'Primary conversation',
+      agentId: 'main_agent',
+      providerAccountId: 'slack_primary',
+    });
+    await registerSlackMainGroup({
+      runtimeHome,
+      chatJid: 'sl:C0123456789',
+      displayName: 'Main Agent',
+      conversationDisplayName: 'Selected conversation',
+      agentId: 'main_agent',
+      providerAccountId: 'slack_selected',
+    });
+
+    const selectedRouteKey = makeAgentThreadQueueKey(
+      'sl:C0123456789',
+      'agent:main_agent',
+      undefined,
+      'slack_selected',
+    );
+    const cliLog = {
+      error: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn(),
+      warn: vi.fn(),
+    };
+    vi.doMock('@clack/prompts', () => ({
+      isCancel: vi.fn(() => false),
+      log: cliLog,
+      select: vi.fn(),
+    }));
+    const { runAgentCommand } = await import('@core/cli/group.js');
+
+    await expect(
+      runAgentCommand(runtimeHome, ['trigger', selectedRouteKey, '--off']),
+    ).resolves.toBe(0);
+    expect(cliLog.success).toHaveBeenCalledWith(
+      expect.stringContaining('Trigger requirement disabled'),
+    );
+    let settings = loadRuntimeSettings(runtimeHome);
+    const primaryConversation = Object.values(settings.conversations).find(
+      (conversation) => conversation.providerAccount === 'slack_primary',
+    );
+    let selectedConversation = Object.values(settings.conversations).find(
+      (conversation) => conversation.providerAccount === 'slack_selected',
+    );
+    expect(primaryConversation?.requiresTrigger).toBe(true);
+    expect(selectedConversation?.requiresTrigger).toBe(false);
+
+    await expect(
+      runAgentCommand(runtimeHome, [
+        'policy',
+        selectedRouteKey,
+        '--allow',
+        'USELECTED',
+        '--mode',
+        'drop',
+      ]),
+    ).resolves.toBe(0);
+    settings = loadRuntimeSettings(runtimeHome);
+    expect(
+      Object.values(settings.conversations).find(
+        (conversation) => conversation.providerAccount === 'slack_primary',
+      )?.senderPolicy,
+    ).toEqual({ allow: '*', mode: 'trigger' });
+    selectedConversation = Object.values(settings.conversations).find(
+      (conversation) => conversation.providerAccount === 'slack_selected',
+    );
+    expect(selectedConversation?.senderPolicy).toEqual({
+      allow: ['USELECTED'],
+      mode: 'drop',
+    });
+
+    await expect(
+      runAgentCommand(runtimeHome, ['remove', selectedRouteKey, '--yes']),
+    ).resolves.toBe(0);
+    settings = loadRuntimeSettings(runtimeHome);
+    expect(
+      Object.values(settings.conversations).some(
+        (conversation) => conversation.providerAccount === 'slack_primary',
+      ),
+    ).toBe(true);
+    expect(
+      Object.values(settings.conversations).some(
+        (conversation) => conversation.providerAccount === 'slack_selected',
+      ),
+    ).toBe(false);
+  });
+
   it('removes desired settings for an agent-qualified route key', async () => {
     const runtimeHome = makeRuntimeHome();
 
@@ -1013,8 +1290,10 @@ describe('cli slack helpers', () => {
     const routeKey = makeAgentThreadQueueKey(
       'sl:C0123456789',
       'agent:main_agent',
+      undefined,
+      'slack_default',
     );
-    const sourceRoute = groupsStore.get('sl:C0123456789');
+    const sourceRoute = groupsStore.get(routeKey);
     groupsStore.set(routeKey, { ...sourceRoute, requiresTrigger: true });
 
     const { runAgentCommand } = await import('@core/cli/group.js');
@@ -1093,6 +1372,7 @@ describe('cli slack helpers', () => {
         runtimeHome,
         'sl:C0123456789',
         'main_agent',
+        'slack_default',
       ),
     ).resolves.toEqual({ pruned: true });
 

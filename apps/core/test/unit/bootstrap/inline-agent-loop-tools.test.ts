@@ -18,7 +18,7 @@ import type {
   AsyncTaskCreateInput,
   AsyncTaskRecord,
 } from '@core/domain/ports/async-tasks.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 const publishRuntimeEvent = vi.fn(async () => undefined);
 const sendMessage = vi.fn(async () => undefined);

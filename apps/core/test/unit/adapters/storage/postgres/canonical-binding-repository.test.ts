@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import {
   PostgresCanonicalBindingRepository,
   bindingRowToGroup,
@@ -14,24 +14,18 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: `conversation-route:${routeKey}`,
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:100',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({
-        kind: 'conversation',
-        value: '100',
-        jid: 'tg:100',
-      }),
       conversationKind: 'group',
+      requiresTrigger: false,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:100',
-        route: {
-          trigger: '@main',
-          requiresTrigger: false,
-        },
+        liveRoute: {},
       }),
       displayName: 'Main Telegram',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -44,24 +38,18 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: 'conversation-route:tg:100',
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:100',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({
-        kind: 'conversation',
-        value: '100',
-        jid: 'tg:100',
-      }),
       conversationKind: 'group',
+      requiresTrigger: false,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:100',
-        route: {
-          trigger: '@main',
-          requiresTrigger: false,
-        },
+        liveRoute: {},
       }),
       displayName: 'Main Telegram',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -72,9 +60,10 @@ describe('canonical binding repository route projection', () => {
       group: {
         name: 'Main Telegram',
         folder: 'main_agent',
+        agentId: 'agent:main_agent',
         conversationId: 'conversation:tg:100',
         providerAccountId: 'provider-account:telegram',
-        trigger: '@main',
+        trigger: '@Main Agent',
         added_at: '2026-05-06T00:00:00.000Z',
         requiresTrigger: false,
         conversationKind: 'channel',
@@ -88,23 +77,18 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: 'conversation-route:sl:C123',
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'slack_default',
       conversationId: 'conversation:slack_default:sl:C123',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({
-        kind: 'conversation',
-        value: 'C123',
-      }),
       conversationKind: 'group',
+      requiresTrigger: true,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:slack_default:sl:C123',
-        route: {
-          trigger: '@Gantry',
-          requiresTrigger: true,
-        },
+        liveRoute: {},
       }),
       displayName: 'Slack General',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -113,24 +97,22 @@ describe('canonical binding repository route projection', () => {
     expect(bindingRowToGroup(row)).toMatchObject({ jid: 'sl:C123' });
   });
 
-  it('ignores non-route, disabled, and thread-scoped binding rows', () => {
+  it('ignores non-route and disabled binding rows', () => {
     const baseRow = {
       id: 'conversation-route:tg:100',
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:100',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({ jid: 'tg:100' }),
       conversationKind: 'group',
+      requiresTrigger: false,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:100',
-        route: {
-          trigger: '@main',
-          requiresTrigger: false,
-        },
+        liveRoute: {},
       }),
       displayName: 'Main Telegram',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -142,28 +124,60 @@ describe('canonical binding repository route projection', () => {
     expect(
       bindingRowToGroup({ ...baseRow, status: 'disabled' }),
     ).toBeUndefined();
-    expect(
-      bindingRowToGroup({ ...baseRow, threadId: 'thread-1' }),
-    ).toBeUndefined();
+  });
+
+  it('rehydrates thread-scoped binding rows from their persisted route key', () => {
+    const routeKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'agent:main_agent',
+      '1700.1',
+      'provider-account:slack',
+    );
+    const row = {
+      id: `conversation-route:${routeKey}`,
+      agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
+      providerAccountId: 'provider-account:slack',
+      conversationId: 'conversation:sl:C123',
+      threadId: 'thread:sl:C123:1700.1',
+      status: 'active',
+      conversationKind: 'group',
+      requiresTrigger: true,
+      memorySubjectJson: JSON.stringify({
+        kind: 'conversation',
+        appId: 'default',
+        conversationId: 'conversation:sl:C123',
+        liveRoute: {},
+      }),
+      displayName: 'Incident thread',
+      createdAt: '2026-05-06T00:00:00.000Z',
+    };
+
+    expect(bindingRowToGroup(row)).toMatchObject({
+      jid: routeKey,
+      group: {
+        name: 'Incident thread',
+        trigger: '@Main Agent',
+      },
+    });
   });
 
   it('uses a non-empty trigger fallback for always-on bindings without trigger patterns', () => {
     const row = {
       id: 'conversation-route:app:one',
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'provider-account:app',
       conversationId: 'conversation:app:one',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({ jid: 'app:one' }),
       conversationKind: 'group',
+      requiresTrigger: false,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:app:one',
-        route: {
-          requiresTrigger: false,
-        },
+        liveRoute: {},
       }),
       displayName: 'App Conversation',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -171,7 +185,7 @@ describe('canonical binding repository route projection', () => {
 
     expect(bindingRowToGroup(row)?.group).toMatchObject({
       folder: 'main_agent',
-      trigger: '@main_agent',
+      trigger: '@Main Agent',
       requiresTrigger: false,
     });
   });
@@ -180,19 +194,18 @@ describe('canonical binding repository route projection', () => {
     const row = {
       id: 'conversation-route:sl:C123',
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'provider-account:slack',
       conversationId: 'conversation:sl:C123',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({ jid: 'sl:C123' }),
       conversationKind: 'group',
+      requiresTrigger: true,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:sl:C123',
-        route: {
-          trigger: '@ops',
-          requiresTrigger: true,
+        liveRoute: {
           agentConfig: {
             model: 'opus',
             thinking: { mode: 'enabled', effort: 'high' },
@@ -215,20 +228,18 @@ describe('canonical binding repository route projection', () => {
     const directRow = {
       id: 'conversation-route:tg:5759865942',
       agentId: 'agent:main_agent',
+      agentName: 'Main Agent',
       providerAccountId: 'provider-account:telegram',
       conversationId: 'conversation:tg:5759865942',
       threadId: null,
       status: 'active',
-      conversationExternalRefJson: JSON.stringify({ jid: 'tg:5759865942' }),
       conversationKind: 'direct',
+      requiresTrigger: false,
       memorySubjectJson: JSON.stringify({
         kind: 'conversation',
         appId: 'default',
         conversationId: 'conversation:tg:5759865942',
-        route: {
-          trigger: '@main',
-          requiresTrigger: false,
-        },
+        liveRoute: {},
       }),
       displayName: 'Main Agent',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -237,9 +248,6 @@ describe('canonical binding repository route projection', () => {
       ...directRow,
       id: 'conversation-route:tg:-1003986348737',
       conversationId: 'conversation:tg:-1003986348737',
-      conversationExternalRefJson: JSON.stringify({
-        jid: 'tg:-1003986348737',
-      }),
       conversationKind: 'group',
       displayName: 'Main Agent Telegram Group',
     };
@@ -315,7 +323,7 @@ describe('canonical binding repository route projection', () => {
     expect(
       JSON.parse(
         (insertedRows[0] as { memorySubjectJson: string }).memorySubjectJson,
-      ).route.conversationId,
+      ).liveRoute.conversationId,
     ).toBe('configured:shared');
   });
 
@@ -336,6 +344,10 @@ describe('canonical binding repository route projection', () => {
 
     expect(query.innerJoin).toHaveBeenCalledWith(
       pgSchema.providerAccountsPostgres,
+      expect.anything(),
+    );
+    expect(query.innerJoin).toHaveBeenCalledWith(
+      pgSchema.agentsPostgres,
       expect.anything(),
     );
   });

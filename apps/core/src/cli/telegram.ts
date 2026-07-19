@@ -11,7 +11,6 @@ import {
 } from '../config/settings/runtime-home.js';
 import {
   allocateDefaultAgentFolder,
-  defaultTriggerForAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
 import { syncConfiguredConversationBinding } from './group-helpers.js';
@@ -21,6 +20,10 @@ import {
   createProfileFileMirrorExists,
   createProfileFileMirrorWriter,
 } from '../platform/profile-file-mirror.js';
+import { findSingleConversationRouteForChat } from '../application/provider-conversations/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
+import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
+import { liveConversationRoute } from '../application/provider-conversations/live-conversation-route.js';
 
 export interface TelegramTokenValidation {
   ok: boolean;
@@ -317,12 +320,18 @@ export async function registerTelegramMainGroup(options: {
   chatJid: string;
   displayName: string;
   agentId?: string;
+  providerAccountId?: string;
 }): Promise<{ folder: string; groupName: string }> {
   ensureRuntimeLayout(options.runtimeHome);
   const db = await openRuntimeGroupDb(options.runtimeHome);
   try {
     const existing = await db.getAllConversationRoutes();
-    const existingGroup = existing[options.chatJid];
+    const existingGroup = findSingleConversationRouteForChat(
+      existing,
+      options.chatJid,
+      undefined,
+      options.providerAccountId,
+    );
     // An already-registered conversation keeps its owning agent; agentId
     // only binds conversations that are not routed yet.
     const folder =
@@ -342,26 +351,37 @@ export async function registerTelegramMainGroup(options: {
       ? existingGroup!.name
       : normalizeDefaultAgentName(options.displayName);
 
-    const route = {
-      name: groupName,
-      folder,
-      trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: nowIso(),
-      requiresTrigger: false,
-      agentConfig: existingGroup?.agentConfig,
-    };
-    await db.setConversationRoute(options.chatJid, route);
-    await syncConfiguredConversationBinding({
+    const binding = await syncConfiguredConversationBinding({
       runtimeHome: options.runtimeHome,
       agentId: folder,
       agentName: groupName,
       agentFolder: folder,
       jid: options.chatJid,
       displayName: options.displayName,
-      trigger: route.trigger,
       requiresTrigger: false,
+      providerAccountId: options.providerAccountId,
     });
-
+    const route = liveConversationRoute({
+      displayName: groupName,
+      agentName: groupName,
+      agentFolder: folder,
+      agentId: String(agentIdForFolder(folder)),
+      providerAccountId: binding.providerAccountId,
+      conversationId: binding.conversationId,
+      addedAt: existingGroup?.added_at || nowIso(),
+      requiresTrigger: false,
+      conversationKind: options.chatJid.startsWith('tg:-') ? 'channel' : 'dm',
+      agentConfig: existingGroup?.agentConfig,
+    });
+    await db.setConversationRoute(
+      makeAgentThreadQueueKey(
+        options.chatJid,
+        route.agentId,
+        undefined,
+        route.providerAccountId,
+      ),
+      route,
+    );
     await new PromptProfileService({
       fileArtifactStore: () => db.getFileArtifactStore(),
       mirrorProfileFile: createProfileFileMirrorWriter(options.runtimeHome),

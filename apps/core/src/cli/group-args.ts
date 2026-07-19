@@ -6,7 +6,6 @@ export interface GroupAddOptions {
   selector?: string;
   name?: string;
   folder?: string;
-  trigger?: string;
   requiresTrigger?: boolean;
   sendTestMessage: boolean;
 }
@@ -19,7 +18,6 @@ export interface GroupRemoveOptions {
 
 export interface GroupTriggerOptions {
   selector?: string;
-  trigger?: string;
   disable: boolean;
 }
 
@@ -100,16 +98,6 @@ export function parseGroupAddArgs(
       continue;
     }
 
-    if (arg === '--trigger') {
-      options.trigger = args[i + 1] || '';
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--trigger=')) {
-      options.trigger = arg.slice('--trigger='.length);
-      continue;
-    }
-
     if (arg === '--requires-trigger') {
       const rawValue = args[i + 1] || '';
       const parsed = parseBooleanFlag(rawValue);
@@ -158,7 +146,7 @@ export function parseGroupAddArgs(
 
   if (!options.selector) {
     return {
-      error: 'Missing JID/chat-id. Usage: gantry agent add <jid|chat-id> ...',
+      error: 'Missing provider JID. Usage: gantry agent add <provider-jid> ...',
     };
   }
 
@@ -227,24 +215,13 @@ export function parseGroupTriggerArgs(
       continue;
     }
 
-    if (!options.trigger) {
-      options.trigger = arg;
-      continue;
-    }
-
     return { error: `Unexpected argument for agent trigger: ${arg}` };
   }
 
   if (!options.selector) {
     return {
       error:
-        'Missing agent selector. Usage: gantry agent trigger <jid|folder> <word>|--off',
-    };
-  }
-  if (!options.disable && !options.trigger) {
-    return {
-      error:
-        'Missing trigger word. Usage: gantry agent trigger <jid|folder> <word>',
+        'Missing agent selector. Usage: gantry agent trigger <jid|folder> [--off]',
     };
   }
 

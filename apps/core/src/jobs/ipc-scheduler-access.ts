@@ -2,7 +2,7 @@ import { ApplicationError } from '../application/common/application-error.js';
 import type { SchedulerJobAccess } from '../application/jobs/job-management-types.js';
 import { toTrimmedString } from './ipc-shared.js';
 import type { TaskContext } from './ipc-types.js';
-import { parseAgentThreadQueueKey } from '../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
 
 export function schedulerAccessFromContext(
   context: TaskContext,

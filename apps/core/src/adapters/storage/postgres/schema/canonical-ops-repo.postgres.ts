@@ -33,7 +33,10 @@ import type {
   RuntimeRouterStateRepository,
 } from '../../../../domain/repositories/ops-repo.js';
 import type { RuntimeEventPublishInput } from '../../../../domain/events/events.js';
-import { PostgresCanonicalBindingRepository } from '../repositories/canonical-binding-repository.postgres.js';
+import {
+  bindingRowToGroup,
+  PostgresCanonicalBindingRepository,
+} from '../repositories/canonical-binding-repository.postgres.js';
 import {
   type CanonicalDb,
   DEFAULT_LLM_PROFILE_ID,
@@ -47,7 +50,6 @@ import { PostgresCanonicalSessionRepository } from '../repositories/canonical-se
 import { createPostgresDomainRepositories } from '../repositories/domain-repositories.postgres.js';
 import { RUNTIME_EVENT_TYPES } from '../../../../domain/events/runtime-event-types.js';
 import { engineForExecutionProviderId } from '../../../../shared/model-execution-route.js';
-import { CanonicalBindingOpsService } from '../services/canonical-binding-ops-service.js';
 import { CanonicalJobOpsService } from '../services/canonical-job-ops-service.js';
 import { CanonicalMessageOpsService } from '../services/canonical-message-ops-service.js';
 import { CanonicalSessionOpsService } from '../services/canonical-session-ops-service.js';
@@ -90,7 +92,7 @@ export class PostgresRuntimeRepositoryBundle
   private readonly messages: CanonicalMessageOpsService;
   private readonly jobs: CanonicalJobOpsService;
   private readonly sessions: CanonicalSessionOpsService;
-  private readonly bindings: CanonicalBindingOpsService;
+  private readonly bindings: PostgresCanonicalBindingRepository;
   private readonly routerState: PostgresCanonicalRouterStateRepository;
 
   constructor(
@@ -119,9 +121,7 @@ export class PostgresRuntimeRepositoryBundle
       },
       this.options.sessions,
     );
-    this.bindings = new CanonicalBindingOpsService(
-      new PostgresCanonicalBindingRepository(this.db),
-    );
+    this.bindings = new PostgresCanonicalBindingRepository(this.db);
     this.routerState = new PostgresCanonicalRouterStateRepository(this.db);
   }
 
@@ -685,14 +685,14 @@ export class PostgresRuntimeRepositoryBundle
   async getConversationRoute(
     jid: string,
   ): Promise<ConversationRoute | undefined> {
-    return this.bindings.getConversationRoute(jid);
+    return (await this.getAllConversationRoutes())[jid];
   }
 
   async setConversationRoute(
     jid: string,
     group: ConversationRoute,
   ): Promise<void> {
-    await this.bindings.setConversationRoute(jid, group);
+    await this.bindings.saveConversationRoute(jid, group);
   }
 
   async deleteConversationRoute(jid: string): Promise<void> {
@@ -700,6 +700,11 @@ export class PostgresRuntimeRepositoryBundle
   }
 
   async getAllConversationRoutes(): Promise<Record<string, ConversationRoute>> {
-    return this.bindings.getAllConversationRoutes();
+    const routes: Record<string, ConversationRoute> = {};
+    for (const row of await this.bindings.listConversationRoutes()) {
+      const route = bindingRowToGroup(row);
+      if (route) routes[route.jid] = route.group;
+    }
+    return routes;
   }
 }

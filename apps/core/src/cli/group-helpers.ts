@@ -20,9 +20,37 @@ import { ensureRuntimeLayout } from '../config/settings/runtime-home.js';
 import { RuntimeGroupDb, openRuntimeGroupDb } from './runtime-group-db.js';
 import { normalizeTelegramChatJid } from './telegram.js';
 import { providerForJid } from '../channels/provider-registry.js';
-import { parseAgentThreadQueueKey } from '../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
 
 export { formatAgentHarnessLine } from './group-engine.js';
+
+export function displayNameForConfiguredConversation(
+  settings: ReturnType<typeof loadRuntimeSettings>,
+  jid: string,
+  fallback: string,
+  providerAccountId?: string,
+): string {
+  const provider = providerFromGroupJid(jid);
+  if (!provider) return fallback;
+  const existingConversation = Object.values(settings.conversations).find(
+    (conversation) => {
+      if (
+        providerAccountId &&
+        conversation.providerAccount !== providerAccountId
+      ) {
+        return false;
+      }
+      const connection =
+        settings.providerAccounts[conversation.providerAccount];
+      return (
+        connection?.provider === provider &&
+        (conversation.externalId === jid ||
+          jid.endsWith(`:${conversation.externalId}`))
+      );
+    },
+  );
+  return existingConversation?.displayName || fallback;
+}
 
 export function usage(): string {
   const channels = getProviderIds().join('|');
@@ -31,9 +59,9 @@ export function usage(): string {
     '  gantry agent list',
     '  gantry agent info <jid|folder>',
     '  gantry agent name <name>',
-    '  gantry agent add <jid|chat-id> [--name <name>] [--folder <folder>] [--trigger <word>] [--requires-trigger true|false] [--test-message|--no-test-message]',
+    '  gantry agent add <provider-jid> [--name <name>] [--folder <folder>] [--requires-trigger true|false] [--test-message|--no-test-message]',
     '  gantry agent remove <jid|folder> [--delete-folder] [--yes]',
-    '  gantry agent trigger <jid|folder> <word>',
+    '  gantry agent trigger <jid|folder>',
     '  gantry agent trigger <jid|folder> --off',
     '  gantry conversation approvers <conversation-id> [--allow <userId,userId>]',
     '    conversation approvers manage direct/private and group/channel approval policy.',
@@ -53,27 +81,6 @@ export function usage(): string {
   ].join('\n');
 }
 
-export function findConversationIdForAgent(
-  settings: ReturnType<typeof loadRuntimeSettings>,
-  agentId: string,
-  providerId: string,
-): string | null {
-  for (const [conversationId, conversation] of Object.entries(
-    settings.conversations,
-  )) {
-    if (
-      !Object.values(conversation.installedAgents ?? {}).some(
-        (install) => install.status === 'active' && install.agentId === agentId,
-      )
-    ) {
-      continue;
-    }
-    const connection = settings.providerAccounts[conversation.providerAccount];
-    if (connection?.provider === providerId) return conversationId;
-  }
-  return null;
-}
-
 export function conversationIdsForProvider(
   settings: ReturnType<typeof loadRuntimeSettings>,
   providerId: string,
@@ -91,6 +98,7 @@ export async function pruneAgentSenderPolicyOverride(
   runtimeHome: string,
   jid: string,
   folder: string,
+  providerAccountId: string,
 ): Promise<{ pruned: boolean; error?: string }> {
   const channel = providerFromGroupJid(jid);
   if (!channel) return { pruned: false };
@@ -109,6 +117,9 @@ export async function pruneAgentSenderPolicyOverride(
       const connection =
         settings.providerAccounts[conversation.providerAccount];
       if (connection?.provider !== channel) continue;
+      if (conversation.providerAccount !== providerAccountId) {
+        continue;
+      }
       if (conversation.externalId !== externalId) {
         continue;
       }
@@ -146,25 +157,18 @@ export async function syncConfiguredConversationBinding(input: {
   agentFolder: string;
   jid: string;
   displayName: string;
-  trigger: string;
   requiresTrigger: boolean;
-}): Promise<void> {
+  providerAccountId?: string;
+}): Promise<{ conversationId: string; providerAccountId: string }> {
   const settings = loadRuntimeSettings(input.runtimeHome);
   const previousSettings = structuredClone(settings);
-  ensureConfiguredConversationBinding(settings, {
-    agentId: input.agentId,
-    agentName: input.agentName,
-    agentFolder: input.agentFolder,
-    jid: input.jid,
-    displayName: input.displayName,
-    trigger: input.trigger,
-    requiresTrigger: input.requiresTrigger,
-  });
+  const binding = ensureConfiguredConversationBinding(settings, input);
   await writeDesiredRuntimeSettings({
     runtimeHome: input.runtimeHome,
     settings,
     previousSettings,
   });
+  return binding;
 }
 
 function inferTelegramPrivateChatApprover(chatJid: string): string | undefined {
@@ -177,6 +181,7 @@ export async function seedTelegramControlApproverForAgent(input: {
   db: RuntimeGroupDb;
   chatJid: string;
   agentFolder: string;
+  providerAccountId: string;
 }): Promise<string | undefined> {
   if (!input.chatJid.startsWith('tg:')) return undefined;
 
@@ -190,6 +195,7 @@ export async function seedTelegramControlApproverForAgent(input: {
     'telegram',
     input.agentFolder,
     approver,
+    input.providerAccountId,
   );
   if (added) {
     await writeDesiredRuntimeSettings({

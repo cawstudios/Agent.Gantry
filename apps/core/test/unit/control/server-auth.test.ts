@@ -25,7 +25,7 @@ import {
 import { signExternalIngressRequest } from '@core/application/external-ingress/signature.js';
 import { preflightModelProvider } from '@core/adapters/llm/model-provider-preflight.js';
 import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 vi.mock('@core/adapters/llm/model-provider-preflight.js', () => ({
   preflightModelProvider: vi.fn(async () => ({

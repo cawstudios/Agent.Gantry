@@ -1,5 +1,5 @@
 import { nowIso } from '../../shared/time/datetime.js';
-import { findConversationRoutesForChat } from '../../shared/thread-queue-key.js';
+import { findConversationRoutesForChat } from '../../application/provider-conversations/thread-queue-key.js';
 import {
   buildTriggerPattern,
   triggerForRoute,

@@ -48,7 +48,7 @@ import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
 } from '@core/shared/message-cursor.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import { ConversationRoute } from '@core/domain/types.js';
 import type { LiveAdmissionWorkItem } from '@core/domain/ports/live-turns.js';
 

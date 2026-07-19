@@ -210,6 +210,7 @@ export class PostgresCanonicalGraphRepository {
       isGroup?: boolean | null;
       timestamp?: string | null;
       providerAccountId?: string | null;
+      requiresTrigger?: boolean;
     } = {},
     executor: CanonicalExecutor = this.db,
   ): Promise<string> {
@@ -262,6 +263,7 @@ export class PostgresCanonicalGraphRepository {
         externalRefJson,
         kind: input.isGroup ? 'group' : 'direct',
         title,
+        requiresTrigger: input.requiresTrigger ?? Boolean(input.isGroup),
         createdAt: now,
         updatedAt: now,
       })
@@ -270,6 +272,9 @@ export class PostgresCanonicalGraphRepository {
         set: {
           ...(input.name ? { title } : {}),
           ...(hasKnownKind ? { kind: input.isGroup ? 'group' : 'direct' } : {}),
+          ...(input.requiresTrigger === undefined
+            ? {}
+            : { requiresTrigger: input.requiresTrigger }),
           externalRefJson,
           updatedAt: sql`GREATEST(${pgSchema.conversationsPostgres.updatedAt}, ${now})`,
         },

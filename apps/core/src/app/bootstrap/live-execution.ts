@@ -20,7 +20,7 @@ import {
   findConversationRouteForQueue,
   parseAgentThreadQueueKey,
   makeThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
 import { resolveRuntimeExecutionProviderId } from '../../runtime/execution-provider-id.js';
 import type { LiveTurnAuthority } from '../../runtime/live-turn-authority.js';
@@ -215,7 +215,6 @@ export function buildLiveAdmissionProcessor(input: {
       const route = findConversationRouteForQueue(
         app.getConversationRoutes(),
         queueJid,
-        (candidate) => agentIdForFolder(candidate.folder),
       );
       if (!route) return false;
       const executionProviderId =

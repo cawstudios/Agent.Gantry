@@ -85,7 +85,6 @@ export interface RuntimeConfiguredConversationInstall {
   agentId: string;
   providerAccountId: string;
   threadId?: string;
-  trigger?: string;
   status: 'active' | 'disabled';
   addedAt: string;
   memoryScope: 'conversation' | 'user' | 'agent' | 'app';

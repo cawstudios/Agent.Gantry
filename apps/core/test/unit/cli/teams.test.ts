@@ -10,6 +10,7 @@ import {
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@core/config/settings/runtime-settings.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 const groupsStore = vi.hoisted(() => new Map<string, any>());
 
@@ -367,7 +368,16 @@ describe('cli teams helpers', () => {
       client_secret: 'gantry-secret:TEAMS_CLIENT_SECRET',
       tenant_id: 'gantry-secret:TEAMS_TENANT_ID',
     });
-    expect(groupsStore.get('teams:19:general@thread.tacv2')).toEqual(
+    expect(
+      groupsStore.get(
+        makeAgentThreadQueueKey(
+          'teams:19:general@thread.tacv2',
+          'agent:main_agent',
+          undefined,
+          'teams_default',
+        ),
+      ),
+    ).toEqual(
       expect.objectContaining({
         folder: 'main_agent',
       }),

@@ -58,7 +58,6 @@ export interface TaskIpcData {
   memoryUserId?: string;
   jid?: string;
   folder?: string;
-  trigger?: string;
   requiresTrigger?: boolean;
   agentConfig?: ConversationRoute['agentConfig'];
   payload?: Record<string, unknown>;

@@ -7,7 +7,7 @@ import type {
 import {
   normalizeThreadQueueId,
   parseAgentThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import type { RuntimeApp } from './runtime-app.js';
 import type { AsyncTaskQueue } from './async-task-queue.js';
 import type { ChannelWiringDeps } from './channel-wiring-types.js';

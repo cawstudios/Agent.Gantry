@@ -722,6 +722,43 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
     MCP_FIXTURE_TIMEOUT_MS,
   );
 
+  it(
+    'threads the selected provider account through register_agent IPC',
+    async () => {
+      const fixture = createMcpFixture();
+
+      const result = await runMcpFixture(
+        fixture,
+        'register_agent',
+        {
+          jid: 'tg:team',
+          name: 'Ops',
+          folder: 'telegram_ops',
+          providerAccountId: 'telegram_ops',
+        },
+        { GANTRY_ADMIN_MCP_TOOLS_JSON: '["register_agent"]' },
+      );
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const taskFiles = fs.readdirSync(path.join(fixture.ipcDir, 'tasks'));
+      const task = JSON.parse(
+        fs.readFileSync(
+          path.join(fixture.ipcDir, 'tasks', taskFiles[0]),
+          'utf-8',
+        ),
+      );
+      expect(task).toMatchObject({
+        type: 'register_agent',
+        jid: 'tg:team',
+        targetJid: 'tg:team',
+        providerAccountId: 'telegram_ops',
+        name: 'Ops',
+        folder: 'telegram_ops',
+      });
+    },
+    MCP_FIXTURE_TIMEOUT_MS,
+  );
+
   it('keeps unselected admin tools gated at call time', async () => {
     const fixture = createMcpFixture();
 

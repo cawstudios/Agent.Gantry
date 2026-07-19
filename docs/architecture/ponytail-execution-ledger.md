@@ -156,8 +156,75 @@ one-time settings cleanup — `main_telegram_group` and
 conversations match kind-derived defaults. All codex*test*\* conversations are
 deleted, not migrated.
 
+- Phase 7-9 cutover must restamp unqualified/bare route keys and legacy `memorySubjectJson.route` rows because Slice 2 requires agent/provider-account-qualified keys.
+
 ## Phase 3 Slice 1 deferral
 
 - Transient install `trigger` remains until AR2 replaces the legacy route DTO;
   current routing still reads it, so deleting only the in-memory bridge would
   change behavior before the canonical writer cutover.
+
+## Phase 3 Slice 2 outcomes
+
+### Current-tree revalidation
+
+AR2, F5, and F14 all still applied. Slice 1 had already removed the durable
+install-trigger projection and qualified the settings desired-state writer,
+but the transient install bridge, manual Control/IPC writers, partially
+qualified runtime registration, route-selection fallbacks, and Postgres
+external-reference fallback all remained.
+
+The legacy runtime record has expanded from the original audit's 51 production
+consumers to 94. A mechanical repo-wide record rename would add churn without
+removing behavior, so Slice 2 names and enforces `LiveConversationRoute` at the
+application projection seam, moves route-key encoding/selection beside it, and
+leaves `ConversationRoute` as the internal repository storage record rather
+than the canonical writer contract. This is the only current-tree adjustment;
+no finding was stale or fully absorbed.
+
+| Item           | Outcome     | Evidence and boundary                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AR2            | Implemented | Added one application-owned live-route projection with required agent/provider-account identity and derived trigger behavior; moved route-key selection out of `shared`; preserved thread scope; replaced `MemorySubject.route` with a typed adapter-private payload; merged the one-consumer binding ops service into the Postgres repository; and routed `register_agent` through the revision-first ConversationInstall writer. |
+| F5             | Implemented | Every durable writer now emits an agent/provider-account-qualified key. Runtime registration rejects non-app routes without provider-account identity, and selection/recovery no longer falls back to route payload identity, folder identity, bare keys, or partially qualified duplicates.                                                                                                                                       |
+| F14            | Implemented | Canonical binding reads no longer select or parse Conversation external refs and reject an empty `conversation-route:` suffix instead of reconstructing a JID.                                                                                                                                                                                                                                                                     |
+| Trigger bridge | Implemented | Removed transient install `trigger`, IPC/MCP registration trigger input, free-form CLI trigger input, writer copies, and adapter-private persisted trigger text. Trigger text is derived once from the agent display name; Conversation remains authoritative for `requiresTrigger`.                                                                                                                                               |
+
+The Phase 9 transition reader still recognizes legacy revision `binding.trigger`
+as explicitly planned. It is not a live settings/runtime bridge and remains
+until the rollback window closes.
+
+### Surface impact
+
+| Surface                     | Classification      | Reason                                                                                          |
+| --------------------------- | ------------------- | ----------------------------------------------------------------------------------------------- |
+| Runtime behavior            | Changed             | Route identity is canonical and trigger text is derived.                                        |
+| `settings.yaml`             | Unchanged by design | Slice 1 already removed install trigger; current writes still use revision-first desired state. |
+| Postgres/runtime projection | Changed             | Binding rows require canonical route suffixes and Conversation-owned trigger policy.            |
+| Control API / SDK contracts | Unchanged by design | No public route contract changed.                                                               |
+| CLI / Gantry MCP tools      | Changed             | Custom trigger text was removed; registration writes ConversationInstall desired state.         |
+| Channel/provider adapters   | Changed             | Setup writers persist qualified routes through the central projection.                          |
+| Audit/events                | Unchanged by design | Existing desired-state and registration audit paths remain authoritative.                       |
+| Tests/verification          | Changed             | Legacy-key/fallback cases were deleted and canonical identity invariants added.                 |
+
+### Net line delta
+
+Mutually exclusive path attribution for source and tests is AR2 +578/-363,
+F5 +459/-687, F14 +52/-79, and trigger-bridge removal +58/-104: total
++1,147/-1,233, net **-86 lines**. The required ledger and audit-path updates
+add +68/-3 documentation lines, making the complete uncommitted worktree delta
++1,215/-1,236, net **-21 lines**.
+
+### Verification notes
+
+- Focused routing matrix: 16 files, 416 tests passed; the additional
+  `ipc-interaction-handler` canonical-key fixture rerun passed 37 tests.
+- Full-unit broad run: 511 files / 6,324 tests passed. The remaining unrelated
+  failures were isolated to the sandbox's denied FSEvents watchers (`EMFILE`)
+  and `npm pack`'s denied write to the primary checkout's `.git/config` during
+  Husky prepare; the exact `npm run test:unit` run stalled after the same
+  watcher exhaustion and was terminated after bounded waits.
+- Architecture checker before and after Slice 2 reports the same 11 current-tree
+  findings: five size ratchets, one existing control agent-route layer edge, three
+  Telegram text-style findings, and two active-doc references. The task's
+  stated eight-finding baseline omitted the newly merged prompt-profile ratchet
+  and two active-doc references; Slice 2 added no finding or exception.

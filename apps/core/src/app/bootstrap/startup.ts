@@ -374,6 +374,8 @@ async function ensureFreshRuntimeHasDefaultAgent(
   const binding = {
     name: agentName,
     folder: DEFAULT_AGENT_FOLDER,
+    agentId: 'agent:main_agent',
+    providerAccountId: 'channel-providerAccount:default:app',
     trigger: `@${agentName}`,
     added_at: nowIso(),
     requiresTrigger: false,

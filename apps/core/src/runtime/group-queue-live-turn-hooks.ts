@@ -1,4 +1,4 @@
-import { normalizeThreadQueueId } from '../shared/thread-queue-key.js';
+import { normalizeThreadQueueId } from '../application/provider-conversations/thread-queue-key.js';
 import type { ContinuationHandler } from './group-queue-types.js';
 import type { ContinuationRunnerControlPort } from './group-queue-types.js';
 import type { LiveTurnLocalRunnerHooks } from './live-turn-authority.js';

@@ -4,7 +4,7 @@ import {
   buildLiveAdmissionProcessor,
   startLiveExecutionServices,
 } from '@core/app/bootstrap/live-execution.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 describe('startLiveExecutionServices', () => {
   it('uses the exact thread route when admitting a live queue', async () => {

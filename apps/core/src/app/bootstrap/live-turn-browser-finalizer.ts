@@ -1,10 +1,9 @@
 import { resolveConversationBrowserProfile } from '../../shared/browser-profile-scope.js';
-import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
 import { getProfile } from '../../runtime/browser-profiles.js';
 import {
-  parseAgentThreadQueueKey,
+  findConversationRouteForQueue,
   parseThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import {
   consumeBrowserProfileActivity,
   isBrowserProfileSyncEnabled,
@@ -24,36 +23,7 @@ function resolveConversationRouteFolder(
   routes: Record<string, { folder: string }>,
   queueJid: string,
 ): string | undefined {
-  const parsedQueue = parseAgentThreadQueueKey(queueJid);
-  const candidates = Object.entries(routes)
-    .map(([routeKey, route]) => {
-      const parsedRoute = parseAgentThreadQueueKey(routeKey);
-      return {
-        routeKey,
-        folder: route.folder,
-        chatJid: parsedRoute.chatJid,
-        agentId: parsedRoute.agentId,
-      };
-    })
-    .filter((candidate) => candidate.chatJid === parsedQueue.chatJid);
-
-  if (candidates.length === 0) return undefined;
-  if (parsedQueue.agentId) {
-    const exactMatch = candidates.find(
-      (candidate) =>
-        (candidate.agentId ?? agentIdForFolder(candidate.folder)) ===
-        parsedQueue.agentId,
-    );
-    if (exactMatch) return exactMatch.folder;
-    return undefined;
-  }
-  candidates.sort((a, b) => {
-    const aHasAgent = Boolean(a.agentId);
-    const bHasAgent = Boolean(b.agentId);
-    if (aHasAgent !== bHasAgent) return aHasAgent ? -1 : 1;
-    return a.routeKey.localeCompare(b.routeKey);
-  });
-  return candidates[0]?.folder;
+  return findConversationRouteForQueue(routes, queueJid)?.folder;
 }
 
 export function buildLiveTurnBrowserFinalizer(deps: {

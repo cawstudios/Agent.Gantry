@@ -15,7 +15,6 @@ import {
 import {
   allocateDefaultAgentFolder,
   DEFAULT_AGENT_FOLDER,
-  defaultTriggerForAgentName,
   normalizeDefaultAgentName,
 } from './main-agent.js';
 import {
@@ -34,6 +33,10 @@ import {
 } from '../platform/profile-file-mirror.js';
 import { planRuntimeSecretInput } from './runtime-secret-ref-prompt.js';
 import { providerAccountIdForAgent } from './provider-utils.js';
+import { findSingleConversationRouteForChat } from '../application/provider-conversations/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
+import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
+import { liveConversationRoute } from '../application/provider-conversations/live-conversation-route.js';
 
 export interface SlackTokenValidation {
   ok: boolean;
@@ -375,12 +378,18 @@ export async function registerSlackMainGroup(options: {
   conversationDisplayName?: string;
   approverIds?: string[];
   agentId?: string;
+  providerAccountId?: string;
 }): Promise<{ folder: string; groupName: string }> {
   ensureRuntimeLayout(options.runtimeHome);
   const db = await openRuntimeGroupDb(options.runtimeHome);
   try {
     const existing = await db.getAllConversationRoutes();
-    const existingGroup = existing[options.chatJid];
+    const existingGroup = findSingleConversationRouteForChat(
+      existing,
+      options.chatJid,
+      undefined,
+      options.providerAccountId,
+    );
     // An already-registered conversation keeps its owning agent; agentId
     // only binds conversations that are not routed yet.
     const folder =
@@ -401,28 +410,39 @@ export async function registerSlackMainGroup(options: {
       ? existingGroup!.name
       : normalizeDefaultAgentName(options.displayName);
 
-    const route = {
-      name: groupName,
-      folder,
-      trigger: existingGroup?.trigger || defaultTriggerForAgentName(groupName),
-      added_at: existingGroup?.added_at || nowIso(),
-      requiresTrigger: true,
-      agentConfig: existingGroup?.agentConfig,
-    };
-    await db.setConversationRoute(options.chatJid, route);
-
     const settings = loadRuntimeSettings(options.runtimeHome);
     const previousSettings = structuredClone(settings);
-    ensureConfiguredConversationBinding(settings, {
+    const binding = ensureConfiguredConversationBinding(settings, {
       agentId: folder,
       agentName: groupName,
       agentFolder: folder,
       jid: options.chatJid,
       displayName: options.conversationDisplayName || options.displayName,
-      trigger: route.trigger,
       requiresTrigger: true,
       approverIds: options.approverIds,
+      providerAccountId: options.providerAccountId,
     });
+    const route = liveConversationRoute({
+      displayName: groupName,
+      agentName: groupName,
+      agentFolder: folder,
+      agentId: String(agentIdForFolder(folder)),
+      providerAccountId: binding.providerAccountId,
+      conversationId: binding.conversationId,
+      addedAt: existingGroup?.added_at || nowIso(),
+      requiresTrigger: true,
+      conversationKind: 'channel',
+      agentConfig: existingGroup?.agentConfig,
+    });
+    await db.setConversationRoute(
+      makeAgentThreadQueueKey(
+        options.chatJid,
+        route.agentId,
+        undefined,
+        route.providerAccountId,
+      ),
+      route,
+    );
     await writeDesiredRuntimeSettings({
       runtimeHome: options.runtimeHome,
       settings,
@@ -567,6 +587,7 @@ export async function runSlackConnectCommand(
   let registeredFolder = '';
   let conversationRouteName = '';
   let conversationDisplayName = '';
+  let registrationProviderAccountId: string | undefined;
 
   if (normalizedChatJid) {
     const currentSettings = loadRuntimeSettings(runtimeHome);
@@ -581,6 +602,11 @@ export async function runSlackConnectCommand(
       return 1;
     }
     conversationDisplayName = access.chatTitle || normalizedChatJid;
+    registrationProviderAccountId = providerAccountIdForAgent(currentSettings, {
+      providerId: 'slack',
+      agentId: requestedAgentId || DEFAULT_AGENT_FOLDER,
+      defaultAccountId: 'slack_default',
+    });
 
     const registered = await registerSlackMainGroup({
       runtimeHome,
@@ -592,6 +618,11 @@ export async function runSlackConnectCommand(
       conversationDisplayName,
       approverIds,
       agentId: requestedAgentId,
+      providerAccountId: currentSettings.providerAccounts[
+        registrationProviderAccountId
+      ]
+        ? registrationProviderAccountId
+        : undefined,
     });
     registeredFolder = registered.folder;
     conversationRouteName = registered.groupName;
@@ -629,6 +660,11 @@ export async function runSlackConnectCommand(
         conversationDisplayName || conversationRouteName || settings.agent.name,
       requiresTrigger: true,
       approverIds,
+      providerAccountId:
+        registrationProviderAccountId &&
+        settings.providerAccounts[registrationProviderAccountId]
+          ? registrationProviderAccountId
+          : undefined,
     });
     providerAccountId = binding.providerAccountId;
   } else {

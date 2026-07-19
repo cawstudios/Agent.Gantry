@@ -16,7 +16,7 @@ import {
   registerRuntimeLiveStopMessageAction,
 } from '@core/app/bootstrap/runtime-live-stop-message-action.js';
 import { writeTaskIpcResponse } from '@core/jobs/ipc-shared.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 describe('createChannelMessageActionRouter', () => {
   afterEach(() => {

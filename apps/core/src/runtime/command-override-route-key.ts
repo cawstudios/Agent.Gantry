@@ -2,7 +2,7 @@ import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
 import {
   makeAgentThreadQueueKey,
   parseAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
 import { appIdFromConversationJid } from '../shared/app-conversation-jid.js';
 import type { ConversationRoute } from '../domain/types.js';
 import type { GroupProcessingDeps } from './group-processing-types.js';

@@ -1,4 +1,4 @@
-import { parseAgentThreadQueueKey } from '../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
 import type { ConversationRoute } from '../domain/types.js';
 
 export function conversationRouteKeysForRemoval(

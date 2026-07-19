@@ -144,7 +144,7 @@ import {
 } from '@core/application/interactions/pending-interaction-durability.js';
 import { logger } from '@core/infrastructure/logging/logger.js';
 import { slackRateLimitRetryDelayMs } from '@core/channels/slack/channel-retry-delay.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import { createPermissionBatchRequest } from '@core/channels/permission-batch-coalescer.js';
 import {
   buildPermissionPromptContentBlocks,

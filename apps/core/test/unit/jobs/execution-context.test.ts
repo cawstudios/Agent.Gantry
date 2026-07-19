@@ -5,7 +5,7 @@ import {
   resolveExecutionContext,
   resolveExecutionMemoryContext,
 } from '@core/jobs/execution-context.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import type { Job, ConversationRoute } from '@core/domain/types.js';
 
 function group(
@@ -45,51 +45,73 @@ function job(input: Partial<Job>): Job {
 
 describe('resolveExecutionContext', () => {
   it('resolves execution using canonical execution_context', () => {
+    const routeA = makeAgentThreadQueueKey(
+      'sl:C100',
+      'agent:agent-folder',
+      undefined,
+      'slack-one',
+    );
+    const routeB = makeAgentThreadQueueKey(
+      'sl:C200',
+      'agent:agent-folder',
+      undefined,
+      'slack-one',
+    );
     const groups = {
-      'chat-a': group('agent-folder', 'Conversation A'),
-      'chat-b': group('agent-folder', 'Conversation B'),
+      [routeA]: group('agent-folder', 'Conversation A', 'slack-one'),
+      [routeB]: group('agent-folder', 'Conversation B', 'slack-one'),
     };
 
     const resolved = resolveExecutionContext(
       job({
         workspace_key: 'agent-folder',
         execution_context: {
-          conversationJid: 'chat-b',
+          conversationJid: 'sl:C200',
           threadId: 'thread-1',
           workspaceKey: 'agent-folder',
         },
         notification_routes: [
-          { conversationJid: 'chat-a', threadId: null, label: 'backup' },
-          { conversationJid: 'chat-b', threadId: 'thread-1', label: 'primary' },
+          { conversationJid: 'sl:C100', threadId: null, label: 'backup' },
+          {
+            conversationJid: 'sl:C200',
+            threadId: 'thread-1',
+            label: 'primary',
+          },
         ],
       }),
       groups,
     );
 
     expect(resolved).toMatchObject({
-      group: groups['chat-b'],
-      executionJid: 'chat-b',
+      group: groups[routeB],
+      executionJid: 'sl:C200',
       threadId: 'thread-1',
-      stopAliasJids: ['chat-b', 'chat-a'],
+      stopAliasJids: ['sl:C200', 'sl:C100'],
     });
   });
 
   it('uses the same-conversation notification route thread for delivery when the job is conversation-owned', () => {
+    const routeKey = makeAgentThreadQueueKey(
+      'tg:-1001',
+      'agent:agent-folder',
+      undefined,
+      'telegram-one',
+    );
     const groups = {
-      'chat-a': group('agent-folder', 'Conversation A'),
+      [routeKey]: group('agent-folder', 'Conversation A', 'telegram-one'),
     };
 
     const resolved = resolveExecutionContext(
       job({
         workspace_key: 'agent-folder',
         execution_context: {
-          conversationJid: 'chat-a',
+          conversationJid: 'tg:-1001',
           threadId: null,
           workspaceKey: 'agent-folder',
         },
         notification_routes: [
           {
-            conversationJid: 'chat-a',
+            conversationJid: 'tg:-1001',
             threadId: 'topic-2771',
             label: 'primary',
           },
@@ -99,10 +121,10 @@ describe('resolveExecutionContext', () => {
     );
 
     expect(resolved).toMatchObject({
-      group: groups['chat-a'],
-      executionJid: 'chat-a',
+      group: groups[routeKey],
+      executionJid: 'tg:-1001',
       threadId: 'topic-2771',
-      stopAliasJids: ['chat-a'],
+      stopAliasJids: ['tg:-1001'],
     });
   });
 

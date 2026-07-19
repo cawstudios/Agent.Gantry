@@ -17,7 +17,7 @@ import {
   verifyTelegramChatAccess,
 } from '@core/cli/telegram.js';
 import { listTelegramRecentChats } from '@core/cli/telegram-chat-discovery.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import { resolveGroupSelector } from '@core/cli/group-helpers.js';
 
 const groupsStore = vi.hoisted(() => new Map<string, any>());
@@ -853,6 +853,56 @@ describe('cli telegram helpers', () => {
     expect(soul).toContain('## Continuity Boundary');
   });
 
+  it('registers a Telegram group with group conversation kind', async () => {
+    const runtimeHome = makeRuntimeHome();
+
+    await registerTelegramMainGroup({
+      runtimeHome,
+      chatJid: 'tg:-100123',
+      displayName: 'Ops Group',
+    });
+
+    expect(
+      groupsStore.get(
+        makeAgentThreadQueueKey(
+          'tg:-100123',
+          'agent:main_agent',
+          undefined,
+          'telegram_default',
+        ),
+      ),
+    ).toMatchObject({ conversationKind: 'channel' });
+  });
+
+  it('rejects agent add without a provider-qualified conversation selector', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const agentsBefore = fs.readdirSync(path.join(runtimeHome, 'agents'));
+    const errors: string[] = [];
+    vi.doMock('@clack/prompts', () => ({
+      log: {
+        error: (message: string) => errors.push(message),
+        info: vi.fn(),
+        success: vi.fn(),
+        warn: vi.fn(),
+      },
+      spinner: () => ({ start: vi.fn(), stop: vi.fn() }),
+      note: vi.fn(),
+      isCancel: vi.fn(() => false),
+    }));
+    const { runAgentCommand } = await import('@core/cli/group.js');
+
+    await expect(
+      runAgentCommand(runtimeHome, ['add', 'worker@local']),
+    ).resolves.toBe(1);
+    expect(errors).toEqual([
+      'agent add requires a provider-qualified conversation selector such as tg:-1001234567890 or sl:C123. Connect the provider first with gantry provider connect <provider>.',
+    ]);
+    expect(groupsStore.size).toBe(0);
+    expect(fs.readdirSync(path.join(runtimeHome, 'agents'))).toEqual(
+      agentsBefore,
+    );
+  });
+
   it('allows agent add to bind a second agent to the same provider conversation', async () => {
     const runtimeHome = makeRuntimeHome();
     fs.appendFileSync(path.join(runtimeHome, '.env'), 'TELEGRAM_BOT_TOKEN=x\n');
@@ -935,8 +985,18 @@ describe('cli telegram helpers', () => {
     );
     expect([...groupsStore.keys()]).toEqual(
       expect.arrayContaining([
-        makeAgentThreadQueueKey('tg:123', 'agent:first_agent'),
-        makeAgentThreadQueueKey('tg:123', 'agent:second_agent'),
+        makeAgentThreadQueueKey(
+          'tg:123',
+          'agent:first_agent',
+          undefined,
+          'telegram_default',
+        ),
+        makeAgentThreadQueueKey(
+          'tg:123',
+          'agent:second_agent',
+          undefined,
+          'telegram_second_agent',
+        ),
       ]),
     );
     expect(groupsStore.has('tg:123')).toBe(false);

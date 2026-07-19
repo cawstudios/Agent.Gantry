@@ -22,7 +22,7 @@ import { getGroupMemoryStatus } from './group-memory-commands.js';
 import { runDreamingForGroup } from './memory-dreaming-runner.js';
 import { settleDeliveryAttempt } from '../jobs/delivery.js';
 import { resolveMemoryUserId } from './session-resume-runtime.js';
-import { firstThreadQueueId } from '../shared/thread-queue-key.js';
+import { firstThreadQueueId } from '../application/provider-conversations/thread-queue-key.js';
 import { formatElapsed } from './time-format.js';
 import { createRuntimeModelStatusAccess } from './model-status-store.js';
 import { getConfiguredModelProvidersForApp } from '../adapters/storage/postgres/runtime-store.js';

@@ -1,7 +1,7 @@
 import type { Filter } from 'grammy';
 
 import { logger } from '../../infrastructure/logging/logger.js';
-import { findConversationRoutesForChat } from '../../shared/thread-queue-key.js';
+import { findConversationRoutesForChat } from '../../application/provider-conversations/thread-queue-key.js';
 import type { ChannelOpts } from '../channel-provider.js';
 import type { TelegramContext } from './channel-shared.js';
 import { shouldLogUnregisteredChatDrop } from '../unregistered-chat-drop-log.js';

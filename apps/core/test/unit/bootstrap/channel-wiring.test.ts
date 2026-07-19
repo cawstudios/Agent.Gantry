@@ -67,7 +67,7 @@ import {
   type PermissionApprovalRequest,
   type UserQuestionRequest,
 } from '@core/domain/types.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 function makeRuntimeSettings(enabled: {
   telegram: boolean;

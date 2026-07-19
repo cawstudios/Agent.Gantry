@@ -253,6 +253,7 @@ export async function runTelegramConnectCommand(
   }
   let registeredFolder = '';
   let conversationRouteName = '';
+  let registrationProviderAccountId: string | undefined;
 
   if (normalizedChatJid) {
     const currentSettings = loadRuntimeSettings(runtimeHome);
@@ -267,6 +268,11 @@ export async function runTelegramConnectCommand(
       if (access.nextAction) p.log.info(access.nextAction);
       return 1;
     }
+    registrationProviderAccountId = providerAccountIdForAgent(currentSettings, {
+      providerId: 'telegram',
+      agentId: requestedAgentId || DEFAULT_AGENT_FOLDER,
+      defaultAccountId: 'telegram_default',
+    });
 
     const registered = await registerTelegramMainGroup({
       runtimeHome,
@@ -276,6 +282,11 @@ export async function runTelegramConnectCommand(
         requestedAgentDisplayName ||
         currentSettings.agent.name,
       agentId: requestedAgentId,
+      providerAccountId: currentSettings.providerAccounts[
+        registrationProviderAccountId
+      ]
+        ? registrationProviderAccountId
+        : undefined,
     });
     registeredFolder = registered.folder;
     conversationRouteName = registered.groupName;
@@ -315,6 +326,11 @@ export async function runTelegramConnectCommand(
       displayName: conversationRouteName || settings.agent.name,
       requiresTrigger: false,
       approverIds,
+      providerAccountId:
+        registrationProviderAccountId &&
+        settings.providerAccounts[registrationProviderAccountId]
+          ? registrationProviderAccountId
+          : undefined,
     });
     providerAccountId = binding.providerAccountId;
     if (approverIds.length > 0) {

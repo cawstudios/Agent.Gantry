@@ -4,7 +4,7 @@ import {
   resolveCommandOverrideRouteKey,
   resolveGroupProcessingRouteContext,
 } from '@core/runtime/command-override-route-key.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 describe('command override route keys', () => {
   it('keeps provider account scope while resolving queued routes', () => {

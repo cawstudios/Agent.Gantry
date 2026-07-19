@@ -15,7 +15,7 @@ import type { IpcDeps } from '../../runtime/ipc.js';
 import {
   findConversationRouteForQueue,
   makeThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import type { RuntimeApp } from './runtime-app.js';
 
 const UNRESOLVED_LIVE_TURN_OWNER_CAPABILITY =
@@ -59,7 +59,6 @@ export function buildLiveTurnRecoveryCapabilityGate(input: {
     const route = findConversationRouteForQueue(
       input.app.getConversationRoutes(),
       pendingQueueJid ?? makeThreadQueueKey(turn.conversationId, turn.threadId),
-      (candidate) => input.agentIdForFolder(candidate.folder),
     );
     const folder = route?.folder;
     if (!folder) {

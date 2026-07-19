@@ -136,7 +136,7 @@ were discovered after the ranked confidence pass and were not renumbered.
 - Primary paths:
   - `apps/core/src/app/bootstrap/runtime-app.ts`
   - `apps/core/src/runtime/message-loop.ts`
-  - `apps/core/src/shared/thread-queue-key.ts`
+  - `apps/core/src/application/provider-conversations/thread-queue-key.ts`
   - `apps/core/src/app/bootstrap/live-turn-browser-finalizer.ts`
 - Evidence:
   - Startup, external ingress, session ensure, IPC agent registration, and
@@ -511,7 +511,7 @@ worktree changes.
   - `apps/core/src/domain/types.ts` models `ConversationRoute` with `folder`, free-form
     `trigger`, `added_at`, and optional canonical identities.
   - The repository port lives in the old ops bundle, route selection lives in
-    `apps/core/src/shared/thread-queue-key.ts`, and 51 production files consume the legacy
+    `apps/core/src/application/provider-conversations/thread-queue-key.ts`, and 51 production files consume the legacy
     shape.
   - A manual thread-qualified Control projection loses thread scope when
     `runtime-app.ts` reconstructs the key with `threadId: undefined`.

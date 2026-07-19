@@ -1266,6 +1266,7 @@ describe('conversation install labels', () => {
         agentName: 'Gantry',
         jid: 'tg:-100123',
         displayName: 'Ops Room',
+        providerAccountId: 'telegram_default',
       }),
     );
     expect(draft).toEqual(

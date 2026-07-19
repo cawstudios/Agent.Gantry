@@ -1,9 +1,10 @@
-import { and, asc, eq, isNull, like } from 'drizzle-orm';
+import { and, asc, eq, like } from 'drizzle-orm';
 
 import type { ConversationRoute } from '../../../../domain/repositories/domain-types.js';
 import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
-import { parseAgentThreadQueueKey } from '../../../../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../../../../application/provider-conversations/thread-queue-key.js';
+import { defaultTriggerForAgentName } from '../../../../shared/trigger-pattern.js';
 import {
   CANONICAL_APP_ID,
   type CanonicalDb,
@@ -15,12 +16,13 @@ import {
 export interface CanonicalBindingRecord {
   id: string;
   agentId: string;
+  agentName: string;
   providerAccountId: string;
   conversationId: string;
   threadId: string | null;
   status: string;
-  conversationExternalRefJson: string | null;
   conversationKind: string;
+  requiresTrigger: boolean;
   memorySubjectJson: string;
   displayName: string;
   createdAt: string;
@@ -32,18 +34,26 @@ function routeBindingId(jid: string): string {
   return `${CONVERSATION_ROUTE_BINDING_ID_PREFIX}${jid}`;
 }
 
-function routeMemorySubject(
+interface StoredLiveRouteProjection {
+  kind: 'conversation';
+  appId: string;
+  conversationId: string;
+  liveRoute?: {
+    conversationId?: string;
+    agentConfig?: ConversationRoute['agentConfig'];
+  };
+}
+
+function storedLiveRouteProjection(
   conversationId: string,
   group: ConversationRoute,
-): Record<string, unknown> {
+): StoredLiveRouteProjection {
   return {
     kind: 'conversation',
     appId: CANONICAL_APP_ID,
     conversationId,
-    route: {
+    liveRoute: {
       conversationId: group.conversationId,
-      trigger: group.trigger,
-      requiresTrigger: group.requiresTrigger ?? true,
       ...(group.agentConfig ? { agentConfig: group.agentConfig } : {}),
     },
   };
@@ -74,6 +84,7 @@ export class PostgresCanonicalBindingRepository {
               : group.conversationKind === 'channel'
                 ? true
                 : group.requiresTrigger !== false,
+          requiresTrigger: group.requiresTrigger ?? true,
         },
         tx,
       );
@@ -99,7 +110,9 @@ export class PostgresCanonicalBindingRepository {
           displayName: group.name,
           status: 'active',
           memoryScope: 'conversation',
-          memorySubjectJson: json(routeMemorySubject(conversationId, group)),
+          memorySubjectJson: json(
+            storedLiveRouteProjection(conversationId, group),
+          ),
           permissionPolicyIdsJson: '[]',
           createdAt: now,
           updatedAt: now,
@@ -113,7 +126,9 @@ export class PostgresCanonicalBindingRepository {
             displayName: group.name,
             status: 'active',
             memoryScope: 'conversation',
-            memorySubjectJson: json(routeMemorySubject(conversationId, group)),
+            memorySubjectJson: json(
+              storedLiveRouteProjection(conversationId, group),
+            ),
             updatedAt: now,
           },
         });
@@ -130,16 +145,18 @@ export class PostgresCanonicalBindingRepository {
     const b = pgSchema.conversationInstallsPostgres;
     const c = pgSchema.conversationsPostgres;
     const pa = pgSchema.providerAccountsPostgres;
+    const a = pgSchema.agentsPostgres;
     return this.db
       .select({
         id: b.id,
         agentId: b.agentId,
+        agentName: a.name,
         providerAccountId: b.providerAccountId,
         conversationId: b.conversationId,
         threadId: b.threadId,
         status: b.status,
-        conversationExternalRefJson: c.externalRefJson,
         conversationKind: c.kind,
+        requiresTrigger: c.requiresTrigger,
         memorySubjectJson: b.memorySubjectJson,
         displayName: b.displayName,
         createdAt: b.createdAt,
@@ -147,13 +164,13 @@ export class PostgresCanonicalBindingRepository {
       .from(b)
       .innerJoin(c, eq(c.id, b.conversationId))
       .innerJoin(pa, eq(pa.id, b.providerAccountId))
+      .innerJoin(a, eq(a.id, b.agentId))
       .where(
         and(
           eq(b.appId, CANONICAL_APP_ID),
           like(b.id, `${CONVERSATION_ROUTE_BINDING_ID_PREFIX}%`),
           eq(b.status, 'active'),
           eq(pa.status, 'active'),
-          isNull(b.threadId),
         ),
       )
       .orderBy(asc(b.createdAt));
@@ -166,41 +183,34 @@ export function bindingRowToGroup(
   if (!row.id.startsWith(CONVERSATION_ROUTE_BINDING_ID_PREFIX)) {
     return undefined;
   }
-  if (row.status !== 'active' || row.threadId) return undefined;
-  const externalRef = parseJson<{ jid?: string; value?: string }>(
-    row.conversationExternalRefJson,
-    {},
+  if (row.status !== 'active') return undefined;
+  const routeSubject = parseJson<StoredLiveRouteProjection>(
+    row.memorySubjectJson,
+    {} as StoredLiveRouteProjection,
   );
-  const routeSubject = parseJson<{
-    route?: {
-      agentConfig?: ConversationRoute['agentConfig'];
-      conversationId?: string;
-      trigger?: string;
-      requiresTrigger?: boolean;
-    };
-  }>(row.memorySubjectJson, {});
   const bindingIdRouteKey = row.id.slice(
     CONVERSATION_ROUTE_BINDING_ID_PREFIX.length,
   );
-  const jid = bindingIdRouteKey || externalRef.jid || externalRef.value;
-  if (!jid) return undefined;
+  if (!bindingIdRouteKey) return undefined;
   const folder = row.agentId.startsWith('agent:')
     ? row.agentId.slice('agent:'.length)
     : row.agentId;
-  const agentConfig = routeSubject.route?.agentConfig;
+  const agentConfig = routeSubject.liveRoute?.agentConfig;
   const conversationKind =
     row.conversationKind === 'direct' || row.conversationKind === 'dm'
       ? 'dm'
       : 'channel';
   return {
-    jid,
+    jid: bindingIdRouteKey,
     group: {
       name: row.displayName,
       folder,
-      conversationId: routeSubject.route?.conversationId ?? row.conversationId,
-      trigger: routeSubject.route?.trigger?.trim() || `@${folder || 'agent'}`,
+      agentId: row.agentId,
+      conversationId:
+        routeSubject.liveRoute?.conversationId ?? row.conversationId,
+      trigger: defaultTriggerForAgentName(row.agentName),
       added_at: row.createdAt,
-      requiresTrigger: routeSubject.route?.requiresTrigger ?? true,
+      requiresTrigger: row.requiresTrigger,
       conversationKind,
       providerAccountId: row.providerAccountId,
       ...(agentConfig ? { agentConfig } : {}),

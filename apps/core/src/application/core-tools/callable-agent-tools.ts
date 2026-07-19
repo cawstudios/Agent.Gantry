@@ -22,7 +22,7 @@ import {
   makeAgentThreadQueueKey,
   parseAgentThreadQueueKey,
   routesForConversationId,
-} from '../../shared/thread-queue-key.js';
+} from '../provider-conversations/thread-queue-key.js';
 import type {
   CoreTaskLifecycleBackend,
   CoreTaskLifecycleErrorCode,
@@ -276,7 +276,6 @@ function conversationRouteForAgent(input: {
       input.threadId,
       input.providerAccountId,
     ),
-    (route) => route.agentId ?? String(agentIdForFolder(route.folder)),
   );
 }
 

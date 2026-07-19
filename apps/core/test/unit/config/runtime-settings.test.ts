@@ -2339,6 +2339,46 @@ agents:
     expect(Object.keys(settings.conversations)).toHaveLength(2);
   });
 
+  it('rejects an explicitly requested unknown provider account', () => {
+    const settings = createDefaultRuntimeSettings();
+
+    expect(() =>
+      ensureConfiguredConversationBinding(settings, {
+        agentId: 'main_agent',
+        agentName: 'Main',
+        agentFolder: 'main_agent',
+        jid: 'sl:C123',
+        displayName: 'Engineering',
+        requiresTrigger: true,
+        providerAccountId: 'slack_missing',
+      }),
+    ).toThrow('Provider account slack_missing does not exist');
+  });
+
+  it('rejects an explicitly requested provider account owned by another agent', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providerAccounts.slack_other = {
+      agentId: 'other_agent',
+      provider: 'slack',
+      label: 'Other Slack',
+      runtimeSecretRefs: {},
+    };
+
+    expect(() =>
+      ensureConfiguredConversationBinding(settings, {
+        agentId: 'main_agent',
+        agentName: 'Main',
+        agentFolder: 'main_agent',
+        jid: 'sl:C123',
+        displayName: 'Engineering',
+        requiresTrigger: true,
+        providerAccountId: 'slack_other',
+      }),
+    ).toThrow(
+      'Provider account slack_other belongs to other_agent, not main_agent',
+    );
+  });
+
   it('seeds onboarding approvers into conversation policy only', () => {
     const settings = createDefaultRuntimeSettings();
 

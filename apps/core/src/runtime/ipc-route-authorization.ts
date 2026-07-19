@@ -1,5 +1,5 @@
 import type { ConversationRoute } from '../domain/types.js';
-import { parseAgentThreadQueueKey } from '../shared/thread-queue-key.js';
+import { parseAgentThreadQueueKey } from '../application/provider-conversations/thread-queue-key.js';
 
 export function resolveRunnerIpcRoute(input: {
   routes: Record<string, ConversationRoute>;

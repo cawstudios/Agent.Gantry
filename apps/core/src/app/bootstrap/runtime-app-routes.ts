@@ -4,7 +4,7 @@ import {
   findConversationRouteForQueue,
   makeAgentThreadQueueKey,
   routesForConversationId,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 
 export function resolveConversationRoute(
   routes: Record<string, ConversationRoute>,
@@ -17,6 +17,5 @@ export function resolveConversationRoute(
   return findConversationRouteForQueue(
     conversationId ? routesForConversationId(routes, conversationId) : routes,
     makeAgentThreadQueueKey(chatJid, agentId, threadId, providerAccountId),
-    (route) => route.agentId ?? agentIdForFolder(route.folder),
   );
 }

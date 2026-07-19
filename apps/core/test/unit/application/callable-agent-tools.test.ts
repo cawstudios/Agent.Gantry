@@ -10,7 +10,7 @@ import {
 import type { Agent } from '@core/domain/agent/agent.js';
 import type { CoreTaskLifecycleBackend } from '@core/application/core-tools/task-lifecycle.js';
 import type { CoreSendMessageDeps } from '@core/application/core-tools/send-message.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 function agent(
   id: string,

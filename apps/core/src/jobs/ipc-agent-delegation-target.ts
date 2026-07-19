@@ -20,7 +20,7 @@ import {
   findConversationRouteForQueue,
   makeAgentThreadQueueKey,
   routesForConversationId,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
 
 interface DelegatedTaskOwner {
   appId: string;
@@ -98,7 +98,6 @@ export async function resolveDelegatedAgentTarget(input: {
         ? callerRoute.providerAccountId
         : undefined,
     ),
-    (route) => route.agentId ?? agentIdForFolder(route.folder),
   );
   if (!group) {
     return {

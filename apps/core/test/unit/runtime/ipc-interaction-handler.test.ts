@@ -10,11 +10,14 @@ import {
 import { createIpcAuthEnvelope } from '@core/runtime/ipc-auth.js';
 import { agentIdForFolder } from '@core/domain/agent/agent-folder-id.js';
 import { semanticCapabilityInputSchema } from '@core/shared/semantic-capabilities.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import type {
   PendingInteraction,
   PendingInteractionRepository,
 } from '@core/domain/ports/worker-coordination.js';
+
+const mainAgentRouteKey = (jid: string): string =>
+  makeAgentThreadQueueKey(jid, agentIdForFolder('main_agent'));
 import type {
   QuestionRecoveryEnvelope,
   UserQuestionRequest,
@@ -678,7 +681,7 @@ describe('ipc-interaction-handler', () => {
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
-          'tg:auto': {
+          [mainAgentRouteKey('tg:auto')]: {
             folder: 'main_agent',
             agentConfig: {},
             conversationKind: 'dm',
@@ -855,7 +858,7 @@ describe('ipc-interaction-handler', () => {
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
-          'tg:trusted-gate': {
+          [mainAgentRouteKey('tg:trusted-gate')]: {
             folder: 'main_agent',
             agentConfig: { permissionMode: 'auto' },
             conversationKind: 'channel',
@@ -941,7 +944,7 @@ describe('ipc-interaction-handler', () => {
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
-          'tg:unattended': {
+          [mainAgentRouteKey('tg:unattended')]: {
             folder: 'main_agent',
             agentConfig: { permissionMode: 'auto' },
             conversationKind: 'channel',
@@ -999,7 +1002,7 @@ describe('ipc-interaction-handler', () => {
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
-          'tg:unattended': {
+          [mainAgentRouteKey('tg:unattended')]: {
             folder: 'main_agent',
             agentConfig: { permissionMode: 'auto' },
             conversationKind: 'channel',
@@ -1132,7 +1135,7 @@ describe('ipc-interaction-handler', () => {
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
-          'tg:auto': {
+          [mainAgentRouteKey('tg:auto')]: {
             folder: 'main_agent',
             agentConfig: { permissionMode: 'auto' },
             conversationKind: 'dm',
@@ -1215,7 +1218,7 @@ describe('ipc-interaction-handler', () => {
       sourceAgentFolder: 'main_agent',
       deps: {
         conversationRoutes: () => ({
-          'tg:auto': {
+          [mainAgentRouteKey('tg:auto')]: {
             folder: 'main_agent',
             agentConfig: { permissionMode: 'auto' },
             conversationKind: 'channel',
@@ -1297,7 +1300,7 @@ describe('ipc-interaction-handler', () => {
         sourceAgentFolder: 'main_agent',
         deps: {
           conversationRoutes: () => ({
-            'tg:auto': {
+            [mainAgentRouteKey('tg:auto')]: {
               folder: 'main_agent',
               agentConfig: { permissionMode },
             },

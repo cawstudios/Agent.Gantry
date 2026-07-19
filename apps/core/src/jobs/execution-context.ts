@@ -11,7 +11,7 @@ import {
   findConversationRouteForQueue,
   findSingleConversationRouteForChat,
   makeAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
 
 export function resolveExecutionContext(
   job: Job,
@@ -47,7 +47,6 @@ export function resolveExecutionContext(
           executionThreadId,
           executionProviderAccountId,
         ),
-        (route) => agentIdForJobWorkspaceKey(route.folder),
       )
     : findSingleConversationRouteForChat(
         groups,

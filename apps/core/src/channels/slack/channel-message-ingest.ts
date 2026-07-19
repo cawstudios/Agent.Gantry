@@ -8,7 +8,7 @@ import {
 import {
   findConversationRoutesForChat,
   parseAgentThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import { nowIso } from '../../shared/time/datetime.js';
 import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
 import type { SlackMessageLike } from './channel-state.js';

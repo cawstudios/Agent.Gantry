@@ -37,7 +37,7 @@ import {
   makeAgentThreadQueueKey,
   normalizeThreadQueueId,
   parseAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
 import {
   buildPendingMessagesContinuationIdempotencyKey,
   collectPendingMessagesSince,

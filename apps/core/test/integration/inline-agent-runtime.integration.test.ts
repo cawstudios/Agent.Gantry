@@ -181,7 +181,7 @@ import { readScheduledJobHeartbeat } from '@core/runtime/agent-spawn-scheduled-i
 import { GroupQueue } from '@core/runtime/group-queue.js';
 import { runJobAgentWithFailover } from '@core/jobs/execution-failover.js';
 import { createInlineAgentTaskLifecycle } from '@core/app/bootstrap/inline-agent-task-lifecycle.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import { createPostgresIntegrationRuntime } from '../harness/postgres-integration-runtime.js';
 import { hasPostgresIntegrationDatabase } from '../harness/postgres-integration-runtime.js';
 import { startTestControlServer } from '../harness/control-http-server.js';
@@ -1424,7 +1424,7 @@ maybeDescribe('inline session turns through the control API', () => {
     const { createInlineAgentTaskLifecycle } =
       await import('@core/app/bootstrap/inline-agent-task-lifecycle.js');
     const { makeAgentThreadQueueKey } =
-      await import('@core/shared/thread-queue-key.js');
+      await import('@core/application/provider-conversations/thread-queue-key.js');
     const conversationJid = 'app:default:delegation';
     const parentGroup = {
       ...group,

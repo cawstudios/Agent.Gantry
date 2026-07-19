@@ -39,9 +39,8 @@ import {
   makeAgentThreadQueueKey,
   makeThreadQueueKey,
   parseAgentThreadQueueKey,
-} from '../../shared/thread-queue-key.js';
+} from '../../application/provider-conversations/thread-queue-key.js';
 import { appIdFromConversationJid } from '../../shared/app-conversation-jid.js';
-import { agentIdForFolder } from '../../domain/agent/agent-folder-id.js';
 import { resolveConversationRoute } from './runtime-app-routes.js';
 import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
 import type {
@@ -448,13 +447,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
     jid: string,
     group: ConversationRoute,
   ): Promise<void> {
-    const routeKey = makeAgentThreadQueueKey(
-      jid,
-      agentIdForFolder(group.folder),
-      undefined,
-      group.providerAccountId,
-    );
-    await registerGroupEntry(conversationRoutes, routeKey, group, {
+    await registerGroupEntry(conversationRoutes, jid, group, {
       assistantName: ASSISTANT_NAME,
       persist: async () => undefined,
       ensureCredentialBinding,

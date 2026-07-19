@@ -49,7 +49,6 @@ import {
   withCustomModelCatalogEntries,
 } from '../../shared/model-catalog.js';
 import { envRuntimeSecretRef } from '../../domain/ports/runtime-secret-provider.js';
-import { triggerForRoute } from '../../shared/trigger-pattern.js';
 
 export {
   configureDesiredSettingsStorageProvider,
@@ -117,8 +116,8 @@ export interface EnsureConfiguredConversationBindingInput {
   agentFolder: string;
   jid: string;
   displayName: string;
-  trigger?: string;
   requiresTrigger: boolean;
+  providerAccountId?: string;
   persona?: AgentPersona;
   approverIds?: string[];
 }
@@ -297,6 +296,7 @@ export function addControlSenderForAgent(
   providerId: string,
   folder: string,
   sender: string,
+  providerAccountId: string,
 ): boolean {
   const trimmedFolder = folder.trim();
   const trimmedSender = sender.trim();
@@ -311,6 +311,7 @@ export function addControlSenderForAgent(
   for (const [conversationId, conversation] of Object.entries(
     settings.conversations,
   )) {
+    if (conversation.providerAccount !== providerAccountId) continue;
     const connection = settings.providerAccounts[conversation.providerAccount];
     if (connection?.provider !== providerId) continue;
     const installed = Object.values(conversation.installedAgents ?? {}).some(
@@ -351,7 +352,33 @@ export function ensureConfiguredConversationBinding(
   )?.[0];
   const defaultProviderAccountId =
     DEFAULT_PROVIDER_ACCOUNT_IDS[provider.id] || `${provider.id}_default`;
+  const requestedProviderAccountId = input.providerAccountId?.trim();
+  const requestedProviderAccount = requestedProviderAccountId
+    ? settings.providerAccounts[requestedProviderAccountId]
+    : undefined;
+  if (requestedProviderAccountId && !requestedProviderAccount) {
+    throw new Error(
+      `Provider account ${requestedProviderAccountId} does not exist`,
+    );
+  }
+  if (
+    requestedProviderAccount &&
+    requestedProviderAccount.provider !== provider.id
+  ) {
+    throw new Error(
+      `Provider account ${requestedProviderAccountId} does not own ${input.jid}`,
+    );
+  }
+  if (
+    requestedProviderAccount &&
+    requestedProviderAccount.agentId !== agentId
+  ) {
+    throw new Error(
+      `Provider account ${requestedProviderAccountId} belongs to ${requestedProviderAccount.agentId}, not ${agentId}`,
+    );
+  }
   const providerAccountId =
+    requestedProviderAccountId ??
     existingProviderAccountId ??
     (!settings.providerAccounts[defaultProviderAccountId] ||
     settings.providerAccounts[defaultProviderAccountId].agentId === agentId
@@ -415,10 +442,6 @@ export function ensureConfiguredConversationBinding(
   settings.conversations[conversationId].installedAgents[agentId] = {
     agentId,
     providerAccountId,
-    trigger: triggerForRoute({
-      trigger: input.trigger ?? existingInstall?.trigger,
-      name: input.agentName,
-    }),
     status: 'active',
     addedAt: existingInstall?.addedAt || nowIso(),
     memoryScope: existingInstall?.memoryScope || 'conversation',

@@ -10,6 +10,7 @@ import {
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@core/config/settings/runtime-settings.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 const groupsStore = vi.hoisted(() => new Map<string, any>());
 
@@ -213,8 +214,15 @@ describe('cli discord helpers', () => {
       value: 'discord-token',
       actor: 'cli:discord-connect',
     });
-    expect(groupsStore.get('dc:1234567890')).toEqual(
-      expect.objectContaining({ folder: 'main_agent' }),
-    );
+    expect(
+      groupsStore.get(
+        makeAgentThreadQueueKey(
+          'dc:1234567890',
+          'agent:main_agent',
+          undefined,
+          'discord_default',
+        ),
+      ),
+    ).toEqual(expect.objectContaining({ folder: 'main_agent' }));
   });
 });

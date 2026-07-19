@@ -11,7 +11,7 @@ import {
   ProviderListResponseSchema,
 } from '@gantry/contracts';
 import { syncRuntimeSettingsFromProjection } from '@core/config/index.js';
-import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 
 const state = vi.hoisted(() => ({
   providerAccounts: new Map<string, any>(),

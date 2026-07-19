@@ -92,7 +92,6 @@ export function configuredRoutingBindings(
         threadId: install.threadId,
         providerAccountId,
         name: conversation.displayName,
-        trigger: install.trigger ?? '',
         addedAt: install.addedAt,
         requiresTrigger: conversation.requiresTrigger,
         memoryScope: install.memoryScope,

@@ -3,7 +3,7 @@ import {
   buildTriggerPattern,
   triggerForRoute,
 } from '../../shared/trigger-pattern.js';
-import { findConversationRoutesForChat } from '../../shared/thread-queue-key.js';
+import { findConversationRoutesForChat } from '../../application/provider-conversations/thread-queue-key.js';
 
 type TelegramMediaQueue = {
   enqueue(task: () => Promise<void>): boolean;

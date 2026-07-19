@@ -34,7 +34,7 @@ import type { RuntimeSettings } from '../shared/runtime-settings.js';
 import {
   findConversationRoutesForChat,
   parseAgentThreadQueueKey,
-} from '../shared/thread-queue-key.js';
+} from '../application/provider-conversations/thread-queue-key.js';
 import { resolveEffectivePermissionMode } from '../shared/permission-mode.js';
 
 function validateSameChannelApprovalTarget(input: {
