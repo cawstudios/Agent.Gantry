@@ -149,6 +149,69 @@ describe('validateIpcAuthRequest', () => {
     });
   });
 
+  it('accepts top-level chatJid and provider account for signed rich interaction IPC', () => {
+    const payload = {
+      requestId: 'rich-chatjid',
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      chatJid: 'slack:C123',
+      context: {
+        threadId: 'thread-1',
+        providerAccountId: 'slack_default',
+      },
+      interaction: {
+        id: 'brief',
+        title: 'Brief',
+        fallbackText: 'Status: ready',
+        rich: {
+          kind: 'status',
+          payload: { state: 'ready' },
+        },
+      },
+    };
+
+    expect(
+      parseRichInteractionIpcRequest(
+        signedPayload(payload, 'team', 'thread-1'),
+        'team',
+      ),
+    ).toMatchObject({
+      requestId: 'rich-chatjid',
+      providerAccountId: 'slack_default',
+      targetJid: 'slack:C123',
+      threadId: 'thread-1',
+    });
+  });
+
+  it('rejects rich interaction IPC with conflicting target aliases', () => {
+    const payload = {
+      requestId: 'rich-chatjid-conflict',
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      targetJid: 'slack:C123',
+      chatJid: 'slack:C999',
+      context: {
+        threadId: 'thread-1',
+      },
+      interaction: {
+        id: 'brief',
+        title: 'Brief',
+        fallbackText: 'Status: ready',
+        rich: {
+          kind: 'status',
+          payload: { state: 'ready' },
+        },
+      },
+    };
+
+    expect(() =>
+      parseRichInteractionIpcRequest(
+        signedPayload(payload, 'team', 'thread-1'),
+        'team',
+      ),
+    ).toThrow(/targetJid\/chatJid mismatch/);
+  });
+
   it('rejects unsigned or malformed rich interaction IPC', () => {
     const payload = {
       requestId: 'rich-bad',

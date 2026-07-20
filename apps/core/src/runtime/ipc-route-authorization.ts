@@ -56,6 +56,22 @@ export function resolveRunnerIpcRoute(input: {
     }
   }
   if (distinctIdentities(selected).size !== 1) {
+    const providerAccountIds = new Set(
+      selected
+        .map(({ providerAccountId }) => providerAccountId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    if (providerAccountIds.size === 1) {
+      const [providerAccountId] = providerAccountIds;
+      const sameProvider = selected.filter(
+        (candidate) => candidate.providerAccountId === providerAccountId,
+      );
+      if (distinctIdentities(sameProvider).size === 1) {
+        selected = sameProvider;
+      }
+    }
+  }
+  if (distinctIdentities(selected).size !== 1) {
     throw new Error('Runner IPC route is ambiguous or unauthorized');
   }
   const match = selected[0]!;

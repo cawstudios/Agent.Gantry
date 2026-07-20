@@ -144,6 +144,31 @@ describe('resolveRunnerIpcRoute', () => {
     });
   });
 
+  it('collapses duplicate same-provider aliases when the request omits provider account', () => {
+    const routes = {
+      [makeAgentThreadQueueKey('slack:C123', 'agent:team', null, undefined)]: {
+        ...route('acct:a'),
+        conversationId: 'conversation:canonical',
+      },
+      [makeAgentThreadQueueKey('slack:C123', 'agent:team', null, 'acct:a')]: {
+        ...route('acct:a'),
+        conversationId: 'conversation:canonical',
+      },
+    };
+
+    expect(
+      resolveRunnerIpcRoute({
+        routes,
+        sourceAgentFolder: 'team',
+        targetJid: 'slack:C123',
+      }),
+    ).toEqual({
+      targetJid: 'slack:C123',
+      conversationId: 'conversation:canonical',
+      providerAccountId: 'acct:a',
+    });
+  });
+
   it('still fails closed on same-chat divergent aliases when the request names no provider account', () => {
     const routes = {
       [makeAgentThreadQueueKey('slack:C123', 'agent:team', null, undefined)]: {

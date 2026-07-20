@@ -483,6 +483,13 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
 );
+export const PENDING_MESSAGE_RECOVERY_MAX_AGE_MS = (() => {
+  const parsed = parseInt(
+    process.env.PENDING_MESSAGE_RECOVERY_MAX_AGE_MS || '900000',
+    10,
+  );
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 900000;
+})();
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep the agent run alive after last result
 export const DEFAULT_TRIGGER = defaultTriggerForAgentName(ASSISTANT_NAME);

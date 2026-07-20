@@ -26,6 +26,7 @@ async function loadRuntimeApp() {
       ASSISTANT_NAME: 'Default Agent',
       DATA_DIR: '/tmp/gantry-test',
       GANTRY_IPC_AUTH_SECRET: 'runtime-app-test-secret',
+      PENDING_MESSAGE_RECOVERY_MAX_AGE_MS: 0,
       getCredentialBrokerRuntimeConfig: () => ({
         mode: 'gantry',
         model_gatewayUrl: 'http://localhost:10254',
@@ -57,6 +58,7 @@ async function loadRuntimeAppWithGroupProcessorSpy() {
       ASSISTANT_NAME: 'Default Agent',
       DATA_DIR: '/tmp/gantry-test',
       GANTRY_IPC_AUTH_SECRET: 'runtime-app-test-secret',
+      PENDING_MESSAGE_RECOVERY_MAX_AGE_MS: 0,
       getCredentialBrokerRuntimeConfig: () => ({
         mode: 'gantry',
         model_gatewayUrl: 'http://localhost:10254',
@@ -107,6 +109,7 @@ async function loadRuntimeAppWithPersistedRoutes(
       ASSISTANT_NAME: 'Default Agent',
       DATA_DIR: '/tmp/gantry-test',
       GANTRY_IPC_AUTH_SECRET: 'runtime-app-test-secret',
+      PENDING_MESSAGE_RECOVERY_MAX_AGE_MS: 0,
       getCredentialBrokerRuntimeConfig: () => ({
         mode: 'gantry',
         model_gatewayUrl: 'http://localhost:10254',
@@ -637,6 +640,62 @@ describe('runtime app credential binding', () => {
       setRouterState.mock.calls[0]?.[1] as string,
     ) as Record<string, string>;
     expect(persistedState[queueJid]).toBe(recoveredCursor);
+  });
+
+  it('caps stale recovered bot cursors to the startup recovery window', async () => {
+    vi.resetModules();
+    vi.doMock('@core/config/index.js', async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import('@core/config/index.js')>();
+      return {
+        ...actual,
+        ASSISTANT_NAME: 'Default Agent',
+        DATA_DIR: '/tmp/gantry-test',
+        GANTRY_IPC_AUTH_SECRET: 'runtime-app-test-secret',
+        PENDING_MESSAGE_RECOVERY_MAX_AGE_MS: 60_000,
+        getCredentialBrokerRuntimeConfig: () => ({
+          mode: 'gantry',
+          model_gatewayUrl: 'http://localhost:10254',
+          externalBrokerBaseUrl: undefined,
+        }),
+      };
+    });
+    vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
+      getRuntimeRepositories: vi.fn(() => {
+        throw new Error('ops repository should not be used by this test');
+      }),
+      getRuntimeSkillArtifactStore: vi.fn(),
+      getRuntimeStorage: vi.fn(() => ({})),
+      getConfiguredModelProvidersForApp: vi.fn(async () => new Set<string>()),
+    }));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-20T09:00:00.000Z'));
+      const { createRuntimeApp } =
+        await import('@core/app/bootstrap/runtime-app.js');
+      const setRouterState = vi.fn(async () => undefined);
+      const getLastBotMessageCursor = vi.fn(async () => ({
+        timestamp: '2026-07-20T08:00:00.000Z',
+        id: 'bot-1',
+      }));
+      const app = createRuntimeApp({
+        opsRepository: {
+          setRouterState,
+          getLastBotMessageCursor,
+        } as any,
+      });
+
+      const queueJid = 'sl:C999::agent:agent%3Aalpha';
+
+      await expect(app.getOrRecoverCursor(queueJid)).resolves.toBe(
+        JSON.stringify({
+          timestamp: '2026-07-20T08:59:00.000Z',
+          id: '\uffff',
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('recovers provider-qualified cursors from provider-scoped bot cursor lookup', async () => {

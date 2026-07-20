@@ -7,6 +7,7 @@ import {
   getRuntimeQueueConfig,
   getRuntimeSettingsForConfig,
   getSelectedAgentHarness,
+  PENDING_MESSAGE_RECOVERY_MAX_AGE_MS,
 } from '../../config/index.js';
 import {
   createAgentCredentialBroker,
@@ -18,7 +19,10 @@ import {
   MODEL_RUNTIME_CREDENTIAL_NAME,
 } from '../../domain/models/credentials.js';
 import type { AgentCredentialBroker } from '../../domain/ports/agent-credential-broker.js';
-import { encodeGroupMessageCursor } from '../../shared/message-cursor.js';
+import {
+  decodeGroupMessageCursor,
+  encodeGroupMessageCursor,
+} from '../../shared/message-cursor.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import { ConversationRoute, ThinkingOverride } from '../../domain/types.js';
 import { RemoteMcpDnsValidationCache } from '../../application/mcp/mcp-server-policy.js';
@@ -415,12 +419,18 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       providerAccountId: parsed.providerAccountId,
     });
     if (botCursor) {
-      const encoded = encodeGroupMessageCursor(botCursor);
+      const encoded = capRecoveredCursor(
+        encodeGroupMessageCursor(botCursor),
+        new Date(),
+      );
       logger.info(
         {
           chatJid: baseChatJid,
           recoveredFrom: botCursor.timestamp,
           recoveredFromId: botCursor.id,
+          ...(encoded !== encodeGroupMessageCursor(botCursor)
+            ? { cappedTo: decodeGroupMessageCursor(encoded).timestamp }
+            : {}),
         },
         'Recovered message cursor from last bot reply',
       );
@@ -429,6 +439,19 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       return encoded;
     }
     return '';
+  }
+
+  function capRecoveredCursor(cursor: string, now: Date): string {
+    if (PENDING_MESSAGE_RECOVERY_MAX_AGE_MS <= 0) return cursor;
+    const parsed = decodeGroupMessageCursor(cursor);
+    const recoveredAt = Date.parse(parsed.timestamp);
+    if (!Number.isFinite(recoveredAt)) return cursor;
+    const oldestAllowed = now.getTime() - PENDING_MESSAGE_RECOVERY_MAX_AGE_MS;
+    if (recoveredAt >= oldestAllowed) return cursor;
+    return encodeGroupMessageCursor({
+      timestamp: new Date(oldestAllowed).toISOString(),
+      id: '\uffff',
+    });
   }
 
   async function registerGroup(
