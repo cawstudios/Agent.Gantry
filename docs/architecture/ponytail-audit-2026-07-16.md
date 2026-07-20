@@ -588,8 +588,9 @@ worktree changes.
 
 - Related finding: 16; also resolves current provider-boundary debt
 - Current debt:
-  - `apps/core/src/messaging/text-styles.ts` contains Slack/Telegram dialect
-    behavior.
+  - Before Phase 5, generic messaging owned Slack/Telegram dialect behavior;
+    the completed cleanup now owns it in
+    `apps/core/src/channels/text-rendering.ts`.
   - `apps/core/src/messaging/router.ts`, runtime buffering, and bootstrap outbound projection
     resolve provider formatting before the channel send boundary.
   - Runtime events can therefore persist provider-formatted text instead of
@@ -615,8 +616,8 @@ estimate:
 - Split `apps/core/src/app/bootstrap/channel-wiring.ts` by responsibility and
   restore its ratchet. The dirty map raises its budget from 759 to 820 while the
   file is currently 790 lines; do not use that cap increase as the fix.
-- AR5 must remove the three provider-specific Telegram violations currently
-  reported in `apps/core/src/messaging/text-styles.ts`.
+- AR5 must remove the three provider-specific Telegram violations reported
+  before Phase 5; the completed cleanup removed them with the generic renderer.
 
 Do not raise `.codex/architecture-map.json` line budgets or
 `.codex/architecture-exceptions.json` counts. Remove exception entries in the
@@ -730,8 +731,8 @@ The following were searched and intentionally excluded from the total:
 
 The audit changed only this report. It did not implement cleanup, change
 configuration or dependencies, or mutate Git state. Current whole-worktree
-architecture closeout is blocked by the three provider-specific `telegram`
-violations in `apps/core/src/messaging/text-styles.ts` and the hidden
+architecture closeout was blocked by three provider-specific `telegram`
+violations in the former generic renderer and the hidden
 `channel-wiring.ts` ratchet relaxation described above. Those dirty-worktree
 failures are outside the Ponytail line estimate. Earlier Discord and Slack
 line-budget failures disappeared as concurrent dirty-worktree edits reduced

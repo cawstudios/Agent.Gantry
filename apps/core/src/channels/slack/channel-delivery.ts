@@ -16,10 +16,6 @@ import {
   isPartialMessageDeliveryError,
 } from '../../domain/messages/partial-delivery.js';
 import {
-  formatOutboundForChannel,
-  stripInternalTagsPreserveWhitespace,
-} from '../../messaging/router.js';
-import {
   disconnectSlackDelivery,
   loadPersistedSlackProgress,
   persistSlackProgress,
@@ -33,8 +29,8 @@ import {
 import { SlackChannelInteractions } from './channel-interactions.js';
 import {
   SLACK_FALLBACK_CHUNK_MAX_LENGTH,
+  SLACK_NATIVE_APPEND_MAX_LENGTH,
   SLACK_STREAM_UPDATE_INTERVAL_MS,
-  splitSlackTextByCodeUnits,
 } from './text-limits.js';
 import type { AgentTodoRender } from '../../domain/ports/task-lifecycle.js';
 import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
@@ -47,6 +43,12 @@ import {
 import { renderSlackRichInteraction } from './rich-interaction.js';
 import { addSlackReaction } from './reactions.js';
 import { requestSlackUserAnswer } from './user-question-delivery.js';
+import { renderSlackText } from '../text-rendering.js';
+import {
+  canonicalTailAfterRenderedPrefix,
+  planCanonicalMarkdownDeliveryChunks,
+} from '../canonical-markdown-delivery.js';
+import type { CanonicalMarkdownDeliveryChunk } from '../canonical-markdown-delivery.js';
 const SLACK_STREAM_SNIPPET_FALLBACK_MIN_PARTS = 4;
 
 export abstract class SlackChannelDelivery extends SlackChannelInteractions {
@@ -93,7 +95,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
       app: this.app,
       jid,
       channelId: parsed.channelId,
-      formattedText: formatOutboundForChannel(text, 'slack'),
+      canonicalText: text,
       options: {
         ...options,
         providerAccountId:
@@ -180,13 +182,16 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
         rawBuffer: '',
         lastSentText: '',
         lastNativeText: '',
+        lastFallbackCanonicalText: '',
         fallbackMessageTs: [],
         nativeEnabled: true,
         lastFlushAt: 0,
       };
       this.activeStreams.set(key, state);
     }
-    const sendFallbackParts = (fallbackParts: string[]) =>
+    const sendFallbackParts = (
+      fallbackParts: CanonicalMarkdownDeliveryChunk[],
+    ) =>
       sendSlackFallbackStreamParts({
         app: this.app,
         jid,
@@ -197,10 +202,8 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
           this.streamResetEpochs.isCurrent(key, streamEpoch),
       });
     if (text) state.rawBuffer += text;
-    const rendered = formatOutboundForChannel(
-      stripInternalTagsPreserveWhitespace(state.rawBuffer),
-      'slack',
-    );
+    const canonicalBuffer = state.rawBuffer;
+    const rendered = renderSlackText(canonicalBuffer);
     if (!rendered && options.done) {
       this.streamResetEpochs.deleteState(key, this.activeStreams);
       this.markStreamingGenerationDone(jid, options.generation);
@@ -217,6 +220,23 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
     if (!nextText) nextText = state.lastSentText;
     let delivered = false;
     let stopNativeStreamOnDoneAfterFallback = false;
+    const planFallbackParts = () => {
+      const canonicalText = canonicalTailAfterRenderedPrefix({
+        canonicalText: canonicalBuffer,
+        renderedPrefix: state.lastNativeText,
+        render: renderSlackText,
+      });
+      const parts = planCanonicalMarkdownDeliveryChunks({
+        canonicalText,
+        maxRenderedCodeUnits: SLACK_FALLBACK_CHUNK_MAX_LENGTH,
+        render: renderSlackText,
+      });
+      return {
+        canonicalText,
+        parts,
+        renderedText: parts.map((part) => part.renderedText).join(''),
+      };
+    };
     try {
       let startedNativeThisFlush = false;
       if (state.nativeEnabled && !state.nativeStreamTs && nextText) {
@@ -247,11 +267,24 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
             ? nextText.slice(state.lastSentText.length)
             : nextText;
         if (delta) {
-          const appendResult = await this.tryNativeStreamAppend(
-            state.channelId,
-            state.nativeStreamTs,
-            delta,
-          );
+          const canonicalDelta = canonicalTailAfterRenderedPrefix({
+            canonicalText: canonicalBuffer,
+            renderedPrefix: state.lastNativeText,
+            render: renderSlackText,
+          });
+          const appendChunks = planCanonicalMarkdownDeliveryChunks({
+            canonicalText: canonicalDelta,
+            maxRenderedCodeUnits: SLACK_NATIVE_APPEND_MAX_LENGTH,
+            render: renderSlackText,
+          }).map((part) => part.renderedText);
+          const appendResult =
+            appendChunks.join('') === delta
+              ? await this.tryNativeStreamAppend(
+                  state.channelId,
+                  state.nativeStreamTs,
+                  appendChunks,
+                )
+              : { completed: false, sentPrefix: '' };
           if (appendResult.sentPrefix) {
             state.lastNativeText += appendResult.sentPrefix;
             delivered = true;
@@ -279,14 +312,9 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
         return delivered;
       }
       if (!state.nativeEnabled) {
-        const fallbackTextRaw =
-          state.lastNativeText && nextText.startsWith(state.lastNativeText)
-            ? nextText.slice(state.lastNativeText.length)
-            : nextText;
-        const fallbackParts = splitSlackTextByCodeUnits(
-          fallbackTextRaw,
-          SLACK_FALLBACK_CHUNK_MAX_LENGTH,
-        );
+        const fallback = planFallbackParts();
+        const fallbackTextRaw = fallback.renderedText;
+        const fallbackParts = fallback.parts;
         if (
           options.done &&
           fallbackParts.length >= SLACK_STREAM_SNIPPET_FALLBACK_MIN_PARTS
@@ -302,6 +330,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
           if (fallback) {
             delivered = true;
             state.fallbackMessageTs = [];
+            state.lastFallbackCanonicalText = '';
           }
         }
         if (!delivered && fallbackParts.length > 0) {
@@ -324,14 +353,9 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
           state.nativeEnabled = false;
         }
         if (options.done && sentPrefix.length > 0) {
-          const fallbackTextRaw =
-            state.lastNativeText && nextText.startsWith(state.lastNativeText)
-              ? nextText.slice(state.lastNativeText.length)
-              : nextText;
-          const fallbackParts = splitSlackTextByCodeUnits(
-            fallbackTextRaw,
-            SLACK_FALLBACK_CHUNK_MAX_LENGTH,
-          );
+          const fallback = planFallbackParts();
+          const fallbackTextRaw = fallback.renderedText;
+          const fallbackParts = fallback.parts;
           try {
             if (
               fallbackParts.length >= SLACK_STREAM_SNIPPET_FALLBACK_MIN_PARTS
@@ -349,6 +373,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
               if (fallback) {
                 delivered = true;
                 state.fallbackMessageTs = [];
+                state.lastFallbackCanonicalText = '';
               }
             }
             if (!delivered && fallbackParts.length > 0) {
@@ -377,6 +402,7 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
                 ) {
                   const unsentTail = fallbackParts
                     .slice(deliveredParts)
+                    .map((part) => part.canonicalText)
                     .join('');
                   if (unsentTail.trim()) {
                     Object.assign(fallbackErr, {
@@ -396,10 +422,10 @@ export abstract class SlackChannelDelivery extends SlackChannelInteractions {
               }
               throw fallbackErr;
             }
-            if (fallbackTextRaw.trim()) {
+            if (fallback.canonicalText.trim()) {
               Object.assign(err, {
                 retryTail: {
-                  canonicalText: fallbackTextRaw,
+                  canonicalText: fallback.canonicalText,
                   providerPayload: {
                     provider: 'slack',
                     channelId: state.channelId,

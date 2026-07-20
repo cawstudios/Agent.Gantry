@@ -27,6 +27,7 @@ import type {
   Conversation,
   ConversationThread,
 } from '../../../../domain/conversation/conversation.js';
+import { conversationParticipantId } from '../../../../domain/conversation/conversation.js';
 import type { AgentRun } from '../../../../domain/events/events.js';
 import type { MemorySubject } from '../../../../domain/memory/memory.js';
 import type {
@@ -946,6 +947,36 @@ export class PostgresConversationRepository implements ConversationRepository {
     return rows
       .map((row) => row.externalUserId?.trim() || '')
       .filter((id) => id.length > 0);
+  }
+  async ensureConversationParticipants(input: {
+    appId: App['id'];
+    conversationId: Conversation['id'];
+    externalUserIds: string[];
+    updatedAt: string;
+  }): Promise<void> {
+    if (input.externalUserIds.length === 0) return;
+    await this.db
+      .insert(pgSchema.conversationParticipantsPostgres)
+      .values(
+        input.externalUserIds.map((externalUserId) => ({
+          id: conversationParticipantId(input.conversationId, externalUserId),
+          appId: input.appId,
+          conversationId: input.conversationId,
+          externalUserId,
+          role: 'member',
+          status: 'active',
+          createdAt: input.updatedAt,
+          updatedAt: input.updatedAt,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: pgSchema.conversationParticipantsPostgres.id,
+        set: {
+          externalUserId: sql`excluded.external_user_id`,
+          status: 'active',
+          updatedAt: input.updatedAt,
+        },
+      });
   }
   async listConversationApprovers(
     conversationId: Conversation['id'],

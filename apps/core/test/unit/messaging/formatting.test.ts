@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 
-import '@core/channels/provider-registry.js';
 import {
   ASSISTANT_NAME,
   getTriggerPattern,
@@ -12,11 +11,17 @@ import {
   findChannel,
   formatConversationContextMessages,
   formatMessages,
-  formatOutboundForChannel,
   stripInternalTags,
 } from '@core/messaging/router.js';
 import { Channel, NewMessage } from '@core/domain/types.js';
-import { parseTextStyles } from '@core/messaging/text-styles.js';
+import {
+  renderSlackText,
+  renderTelegramText,
+} from '@core/channels/text-rendering.js';
+import {
+  canonicalTailAfterRenderedPrefix,
+  planCanonicalMarkdownDeliveryChunks,
+} from '@core/channels/canonical-markdown-delivery.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -29,6 +34,61 @@ function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
     ...overrides,
   };
 }
+
+describe('canonical Markdown delivery planning', () => {
+  it('preserves a link destination when wrapper overhead exceeds the limit', () => {
+    const destination = `https://example.test/${'a'.repeat(60)}`;
+    const chunks = planCanonicalMarkdownDeliveryChunks({
+      canonicalText: `[download](${destination})`,
+      maxRenderedCodeUnits: 20,
+      render: renderSlackText,
+    });
+
+    expect(chunks.every((chunk) => chunk.renderedText.length <= 20)).toBe(true);
+    expect(chunks.map((chunk) => chunk.canonicalText).join('')).toBe(
+      `download\n${destination}`,
+    );
+  });
+
+  it('maps a rendered plain-text prefix back to its canonical tail', () => {
+    expect(
+      canonicalTailAfterRenderedPrefix({
+        canonicalText: `${'x'.repeat(12000)}**retry me**`,
+        renderedPrefix: 'x'.repeat(12000),
+        render: renderSlackText,
+      }),
+    ).toBe('**retry me**');
+  });
+
+  it('maps a complete formatted prefix without assuming monotonic rendering', () => {
+    expect(
+      canonicalTailAfterRenderedPrefix({
+        canonicalText: '**a**x',
+        renderedPrefix: '*a*',
+        render: renderSlackText,
+      }),
+    ).toBe('x');
+  });
+
+  it('maps many formatted tokens with linear rendering work', () => {
+    const tokens = Array.from({ length: 200 }, (_, index) => `**${index}**`);
+    const canonicalText = `${tokens.join('')}tail`;
+    const renderedPrefix = renderSlackText(tokens.join(''));
+    let renderedCodeUnits = 0;
+
+    expect(
+      canonicalTailAfterRenderedPrefix({
+        canonicalText,
+        renderedPrefix,
+        render: (text) => {
+          renderedCodeUnits += text.length;
+          return renderSlackText(text);
+        },
+      }),
+    ).toBe('tail');
+    expect(renderedCodeUnits).toBeLessThan(canonicalText.length * 3);
+  });
+});
 
 // --- escapeXml ---
 
@@ -531,118 +591,78 @@ describe('stripInternalTags', () => {
   });
 });
 
-describe('parseTextStyles — passthrough channels', () => {
-  it('passes text through unchanged for markdown-native', () => {
-    const md = '**bold** and *italic* and [link](https://example.com)';
-    expect(parseTextStyles(md, 'markdown-native')).toBe(md);
-  });
-});
-
-describe('parseTextStyles — bold and italic', () => {
-  it('converts **bold** to *bold* on telegram-html', () => {
-    expect(parseTextStyles('**hello**', 'telegram-html')).toBe('*hello*');
+describe('channel adapter text rendering — bold and italic', () => {
+  it('converts **bold** to Telegram bold', () => {
+    expect(renderTelegramText('**hello**')).toBe('*hello*');
   });
 
-  it('converts **bold** to *bold* on telegram-html with surrounding text', () => {
-    expect(parseTextStyles('say **this** now', 'telegram-html')).toBe(
-      'say *this* now',
-    );
+  it('converts **bold** with surrounding text', () => {
+    expect(renderTelegramText('say **this** now')).toBe('say *this* now');
   });
 
-  it('converts **bold** to *bold* on mrkdwn', () => {
-    expect(parseTextStyles('**hello**', 'mrkdwn')).toBe('*hello*');
+  it('converts **bold** to Slack bold', () => {
+    expect(renderSlackText('**hello**')).toBe('*hello*');
   });
 
-  it('converts *italic* to _italic_ on telegram-html', () => {
-    expect(parseTextStyles('*italic*', 'telegram-html')).toBe('_italic_');
+  it('converts *italic* to Telegram italic', () => {
+    expect(renderTelegramText('*italic*')).toBe('_italic_');
   });
 
   it('preserves ordering: **bold** *italic* -> *bold* _italic_', () => {
-    expect(parseTextStyles('**bold** *italic*', 'telegram-html')).toBe(
-      '*bold* _italic_',
-    );
+    expect(renderTelegramText('**bold** *italic*')).toBe('*bold* _italic_');
   });
 
   it('does not convert lone stars', () => {
-    expect(parseTextStyles('a * b * c', 'telegram-html')).toBe('a * b * c');
+    expect(renderTelegramText('a * b * c')).toBe('a * b * c');
   });
 });
 
-describe('parseTextStyles — headings and links', () => {
+describe('channel adapter text rendering — headings and links', () => {
   it('converts markdown headings to bold markers', () => {
-    expect(parseTextStyles('## Hello World', 'telegram-html')).toBe(
-      '*Hello World*',
-    );
-    expect(parseTextStyles('### Section', 'telegram-html')).toBe('*Section*');
+    expect(renderTelegramText('## Hello World')).toBe('*Hello World*');
+    expect(renderTelegramText('### Section')).toBe('*Section*');
   });
 
   it('only converts headings at line start', () => {
     const input = 'not a ## heading in middle';
-    expect(parseTextStyles(input, 'telegram-html')).toBe(input);
+    expect(renderTelegramText(input)).toBe(input);
   });
 
-  it('converts links to plain text on telegram-html', () => {
-    expect(
-      parseTextStyles('[Link](https://example.com)', 'telegram-html'),
-    ).toBe('Link (https://example.com)');
+  it('keeps Markdown links for Telegram MarkdownV2', () => {
+    expect(renderTelegramText('[Link](https://example.com)')).toBe(
+      '[Link](https://example.com)',
+    );
   });
 
-  it('converts links to mrkdwn syntax', () => {
-    expect(parseTextStyles('[Click here](https://example.com)', 'mrkdwn')).toBe(
+  it('converts links to Slack mrkdwn syntax', () => {
+    expect(renderSlackText('[Click here](https://example.com)')).toBe(
       '<https://example.com|Click here>',
     );
   });
 });
 
-describe('parseTextStyles — code and horizontal-rule protection', () => {
+describe('channel adapter text rendering — code and horizontal rules', () => {
   it('does not transform content inside code spans', () => {
-    expect(parseTextStyles('**bold** and `*code*`', 'telegram-html')).toBe(
+    expect(renderTelegramText('**bold** and `*code*`')).toBe(
       '*bold* and `*code*`',
     );
   });
 
   it('does not transform markers inside fenced code blocks', () => {
     const input = '```\n**not bold**\n```';
-    expect(parseTextStyles(input, 'telegram-html')).toBe(input);
+    expect(renderTelegramText(input)).toBe(input);
   });
 
   it('transforms text outside fenced blocks but keeps block content raw', () => {
     const input = '**bold**\n```\n**raw**\n```\n*italic*';
-    expect(parseTextStyles(input, 'telegram-html')).toBe(
+    expect(renderTelegramText(input)).toBe(
       '*bold*\n```\n**raw**\n```\n_italic_',
     );
   });
 
   it('strips markdown horizontal rules', () => {
-    expect(parseTextStyles('above\n---\nbelow', 'telegram-html')).toBe(
-      'above\n\nbelow',
-    );
-    expect(parseTextStyles('above\n***\nbelow', 'telegram-html')).toBe(
-      'above\n\nbelow',
-    );
-  });
-});
-
-describe('formatOutboundForChannel', () => {
-  it('strips internal tags and applies channel formatting', () => {
-    expect(
-      formatOutboundForChannel(
-        '<internal>thinking</internal>**done**',
-        'telegram',
-      ),
-    ).toBe('*done*');
-  });
-
-  it('returns stripped text when channel is unknown', () => {
-    expect(formatOutboundForChannel('**done**', 'custom-channel')).toBe(
-      '**done**',
-    );
-  });
-
-  it('returns empty when all text is internal', () => {
-    expect(
-      formatOutboundForChannel('<internal>hidden</internal>', 'telegram'),
-    ).toBe('');
+    expect(renderTelegramText('above\n---\nbelow')).toBe('above\n\nbelow');
+    expect(renderTelegramText('above\n***\nbelow')).toBe('above\n\nbelow');
   });
 });
 

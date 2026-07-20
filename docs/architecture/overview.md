@@ -280,7 +280,6 @@ Provider {
   id, label
   jidPrefix, folderPrefix
   isGroupJid(jid) -> bool
-  formatting:  'none' | 'markdown-native' | 'mrkdwn' | 'telegram-html'
   isEnabled(settings) -> bool
   create, setup
 }
@@ -289,12 +288,12 @@ Provider {
 `providerForJid()` resolves a jid to its provider by longest-prefix match.
 Built-in registrations from `apps/core/src/channels/register-builtins.ts`:
 
-| Provider | jidPrefix | folderPrefix | Group jid rule              | Formatting        |
-| -------- | --------- | ------------ | --------------------------- | ----------------- |
-| Telegram | `tg:`     | `telegram_`  | starts with `tg:-`          | `telegram-html`   |
-| Slack    | `sl:`     | `slack_`     | always group                | `mrkdwn`          |
-| Teams    | `teams:`  | `teams_`     | always (`teams:` prefix)    | `markdown-native` |
-| App      | `app:`    | `app_`       | always (internal SDK plane) | `none`            |
+| Provider | jidPrefix | folderPrefix | Group jid rule              |
+| -------- | --------- | ------------ | --------------------------- |
+| Telegram | `tg:`     | `telegram_`  | starts with `tg:-`          |
+| Slack    | `sl:`     | `slack_`     | always group                |
+| Teams    | `teams:`  | `teams_`     | always (`teams:` prefix)    |
+| App      | `app:`    | `app_`       | always (internal SDK plane) |
 
 ```mermaid
 flowchart LR
@@ -302,8 +301,8 @@ flowchart LR
   Resolve --> Adapter["ChannelAdapter ports<br/>onMessage / onChatMetadata"]
   Adapter --> Persist[Persist chat metadata<br/>+ inbound message in Postgres]
   Persist --> Queue[GroupQueue]
-  Out[Assistant reply] --> Router["messaging/router.ts<br/>format per provider dialect"]
-  Router --> Adapter
+  Out[Assistant reply] --> Canonical["canonical visible Markdown/text"]
+  Canonical --> Adapter["Channel adapter<br/>provider-native rendering"]
   Adapter --> Wire[Provider network send]
 ```
 

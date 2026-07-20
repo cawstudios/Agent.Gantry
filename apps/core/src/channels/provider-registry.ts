@@ -18,13 +18,6 @@ export interface ChannelProviderSettingsLike {
   providers?: Record<string, { enabled: boolean }>;
 }
 
-export type ChannelFormattingDialect =
-  | 'none'
-  | 'markdown-native'
-  | 'mrkdwn'
-  | 'telegram-html'
-  | 'telegram-markdown-v2';
-
 export interface Provider {
   id: string;
   label: string;
@@ -34,7 +27,6 @@ export interface Provider {
   folderPrefix: string;
   isGroupJid: (jid: string) => boolean;
   canStreamToJid?: (jid: string) => boolean;
-  formatting: ChannelFormattingDialect;
   isEnabled: (settings: ChannelProviderSettingsLike) => boolean;
   create: ChannelFactory;
   setup: ChannelProviderSetup;

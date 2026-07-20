@@ -40,7 +40,6 @@ function mockProviders() {
     label: 'Telegram',
     jidPrefix: 'tg:',
     folderPrefix: 'telegram',
-    formatting: 'telegram-html',
     isGroupJid: () => true,
     isEnabled: () => true,
     create: vi.fn(),
@@ -781,12 +780,12 @@ describe('channel CLI command', () => {
     },
   );
 
-  it('shows and replaces conversation approvers through local services', async () => {
+  it('shows and replaces conversation approvers through desired state', async () => {
     const { note } = mockClack();
     mockProviders();
     const iso = new Date(0).toISOString();
     const conversation = {
-      id: 'conversation-1',
+      id: 'conversation:app:app-conv-1',
       appId: 'default',
       providerAccountId: 'provider-account-1',
       externalRef: { kind: 'conversation', value: 'app-conv-1' },
@@ -812,12 +811,13 @@ describe('channel CLI command', () => {
       input.externalUserIds.map((externalUserId: string) => ({
         id: `approver:${externalUserId}`,
         appId: 'default',
-        conversationId: 'conversation-1',
+        conversationId: 'conversation:app:app-conv-1',
         externalUserId,
         createdAt: iso,
         updatedAt: iso,
       })),
     );
+    const ensureConversationParticipants = vi.fn(async () => undefined);
     vi.doMock('@core/adapters/storage/postgres/runtime-store.js', () => ({
       initializeRuntimeStorage: vi.fn(async () => undefined),
       closeRuntimeStorage: vi.fn(async () => undefined),
@@ -835,12 +835,13 @@ describe('channel CLI command', () => {
               {
                 id: 'approver:123',
                 appId: 'default',
-                conversationId: 'conversation-1',
+                conversationId: 'conversation:app:app-conv-1',
                 externalUserId: '123',
                 createdAt: iso,
                 updatedAt: iso,
               },
             ]),
+            ensureConversationParticipants,
             replaceConversationApprovers,
             listParticipantExternalUserIds: vi.fn(async () => ['123', '456']),
           },
@@ -850,27 +851,53 @@ describe('channel CLI command', () => {
     vi.doMock('@core/config/settings/runtime-settings.js', () => ({
       ensureRuntimeSettings: vi.fn(),
     }));
+    const settings: any = {
+      providers: { app: { enabled: true } },
+      conversations: {
+        engineering: {
+          providerAccount: 'provider-account-1',
+          externalId: 'app-conv-1',
+          kind: 'channel',
+          displayName: 'Engineering',
+          requiresTrigger: false,
+          senderPolicy: { allow: ['U_EXISTING'], mode: 'always' },
+          controlApprovers: ['123'],
+          installedAgents: { main: { status: 'active' } },
+        },
+      },
+      providerAccounts: {
+        'provider-account-1': {
+          agentId: 'main',
+          provider: 'app',
+          label: 'App',
+          runtimeSecretRefs: {},
+        },
+      },
+      agents: {},
+    };
+    const writeDesiredRuntimeSettings = vi.fn(async () => ({
+      reconciled: true,
+    }));
     vi.doMock('@core/config/settings/desired-settings-writer.js', () => ({
-      loadDesiredRuntimeSettingsForWrite: vi.fn(async () => ({
-        conversations: {},
-        providerAccounts: {},
-      })),
+      loadDesiredRuntimeSettingsForWrite: vi.fn(async () => settings),
+      noteRestartRequired: vi.fn(),
+      writeDesiredRuntimeSettings,
     }));
     vi.doMock('@core/config/env/file.js', () => ({ readEnvFile: vi.fn() }));
     vi.doMock('@core/config/settings/runtime-home.js', () => ({
       envFilePath: (runtimeHome: string) => `${runtimeHome}/.env`,
     }));
 
-    const { runProviderCommand } = await import('@core/cli/provider.js');
+    const { runConversationCommand } = await import('@core/cli/provider.js');
     const runtimeStore =
       await import('@core/adapters/storage/postgres/runtime-store.js');
-    const showCode = await runProviderCommand(import.meta.url, '/tmp/gantry', [
-      'control-allowlist',
-      'conversation-1',
+    const showCode = await runConversationCommand('/tmp/gantry', [
+      'approvers',
+      'engineering',
     ]);
-    const setCode = await runProviderCommand(import.meta.url, '/tmp/gantry', [
-      'control-allowlist',
-      'conversation-1',
+    const setCode = await runConversationCommand('/tmp/gantry', [
+      'approvers',
+      'engineering',
       '--allow',
       '456,456,123',
     ]);
@@ -880,10 +907,54 @@ describe('channel CLI command', () => {
     expect(runtimeStore.initializeRuntimeStorage).toHaveBeenCalledTimes(2);
     expect(runtimeStore.closeRuntimeStorage).toHaveBeenCalledTimes(2);
     expect(note).toHaveBeenCalledWith('123', 'Conversation Approvers');
-    expect(replaceConversationApprovers).toHaveBeenCalledWith(
-      expect.objectContaining({ externalUserIds: ['123', '456'] }),
+    expect(replaceConversationApprovers).not.toHaveBeenCalled();
+    expect(ensureConversationParticipants).toHaveBeenCalledWith({
+      appId: 'default',
+      conversationId: 'conversation:app:app-conv-1',
+      externalUserIds: ['123', '456'],
+      updatedAt: expect.any(String),
+    });
+    expect(writeDesiredRuntimeSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings,
+        createdBy: 'cli:conversation-approvers',
+      }),
     );
+    expect(settings.conversations.engineering).toMatchObject({
+      controlApprovers: ['123', '456'],
+      senderPolicy: { allow: ['U_EXISTING'], mode: 'always' },
+      installedAgents: { main: { status: 'active' } },
+    });
+
+    delete settings.conversations.engineering;
+    const missingCode = await runConversationCommand('/tmp/gantry', [
+      'approvers',
+      'engineering',
+      '--allow',
+      '123',
+    ]);
+    expect(missingCode).toBe(1);
+    expect(writeDesiredRuntimeSettings).toHaveBeenCalledTimes(1);
+    expect(runtimeStore.initializeRuntimeStorage).toHaveBeenCalledTimes(3);
+    expect(runtimeStore.closeRuntimeStorage).toHaveBeenCalledTimes(3);
   });
+
+  it.each(['info', 'control-allowlist', 'approvers'])(
+    'rejects the undocumented provider %s alias',
+    async (command) => {
+      const { error } = mockClack();
+      mockProviders();
+      const { runProviderCommand } = await import('@core/cli/provider.js');
+
+      const code = await runProviderCommand(import.meta.url, '/tmp/gantry', [
+        command,
+        'conversation-1',
+      ]);
+
+      expect(code).toBe(1);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('Usage:'));
+    },
+  );
 
   it.each([
     ['unprefixed external id', '-1003986348737'],

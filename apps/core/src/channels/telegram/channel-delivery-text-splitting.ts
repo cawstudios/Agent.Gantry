@@ -1,3 +1,7 @@
+import { renderTelegramText } from '../text-rendering.js';
+import { planCanonicalMarkdownDeliveryChunks } from '../canonical-markdown-delivery.js';
+import { escapeTelegramMarkdownV2 } from './telegram-markdown-v2-escape.js';
+
 type TelegramMarkdownSegment =
   | { kind: 'plain'; text: string }
   | { kind: 'fenced_code'; text: string }
@@ -14,6 +18,57 @@ const TELEGRAM_MARKDOWN_V2_PROTECTED_PATTERN =
   /```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]+\]\((?:\\.|[^\\\n)])+\)/g;
 const TELEGRAM_MARKDOWN_V2_LINK_PATTERN = /^\[([\s\S]+)]\(([\s\S]+)\)$/;
 const TELEGRAM_STYLE_MARKERS = new Set<TelegramStyleMarker>(['*', '_', '~']);
+
+export interface TelegramCanonicalDeliveryChunk {
+  canonicalText: string;
+  escapedText: string;
+  plainText: string;
+}
+
+export interface TelegramStreamDeliveryChunk {
+  canonicalText: string;
+  deliveryText: string;
+}
+
+export function planTelegramCanonicalDeliveryChunks(
+  canonicalText: string,
+  maxRenderedCodeUnits: number,
+): TelegramCanonicalDeliveryChunk[] {
+  return planCanonicalMarkdownDeliveryChunks({
+    canonicalText,
+    maxRenderedCodeUnits,
+    render: (text) =>
+      escapeTelegramMarkdownV2(renderTelegramText(text), {
+        preserveStyleMarkers: true,
+      }),
+  }).map((chunk) => ({
+    canonicalText: chunk.canonicalText,
+    escapedText: chunk.renderedText,
+    plainText: renderTelegramText(chunk.canonicalText),
+  }));
+}
+
+export function planTelegramStreamDeliveryChunks(
+  canonicalText: string,
+  done: boolean,
+  limits: readonly [softCodeUnitBudget: number, hardCodeUnitLimit: number],
+): TelegramStreamDeliveryChunk[] {
+  const [softCodeUnitBudget, hardCodeUnitLimit] = limits;
+  if (done) {
+    return planTelegramCanonicalDeliveryChunks(
+      canonicalText,
+      softCodeUnitBudget,
+    ).map((part) => ({
+      canonicalText: part.canonicalText,
+      deliveryText: part.plainText,
+    }));
+  }
+  return splitTelegramDeliveryTextWithLimits(
+    canonicalText,
+    softCodeUnitBudget,
+    hardCodeUnitLimit,
+  ).map((part) => ({ canonicalText: part, deliveryText: part }));
+}
 
 export function splitTelegramTextByCodeUnits(
   text: string,

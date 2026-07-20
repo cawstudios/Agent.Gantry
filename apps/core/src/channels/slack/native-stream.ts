@@ -1,10 +1,7 @@
 import type { App } from '@slack/bolt';
 import { PartialMessageDeliveryError } from '../../domain/messages/partial-delivery.js';
 import { logger } from '../../infrastructure/logging/logger.js';
-import {
-  SLACK_NATIVE_APPEND_MAX_LENGTH,
-  splitSlackTextByCodeUnits,
-} from './text-limits.js';
+import { SLACK_NATIVE_APPEND_MAX_LENGTH } from './text-limits.js';
 import {
   clampSlackRetryDelayMs,
   slackRateLimitRetryDelayMs,
@@ -40,15 +37,12 @@ export async function tryNativeStreamAppend(input: {
   app: App | null;
   channelId: string;
   streamTs: string;
-  text: string;
+  chunks: string[];
 }): Promise<{ completed: boolean; sentPrefix: string }> {
-  if (!input.app || !input.text.trim()) {
+  const chunks = input.chunks;
+  if (!input.app || chunks.length === 0) {
     return { completed: true, sentPrefix: '' };
   }
-  const chunks = splitSlackTextByCodeUnits(
-    input.text,
-    SLACK_NATIVE_APPEND_MAX_LENGTH,
-  );
   if (chunks.length > 1) {
     logger.warn(
       {

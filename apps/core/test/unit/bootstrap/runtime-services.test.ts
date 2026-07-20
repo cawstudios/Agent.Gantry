@@ -203,7 +203,6 @@ async function makeConnectedTelegramWiring(
         folderPrefix: 'telegram_',
         isGroupJid: (jid: string) => jid.startsWith('tg:'),
         canStreamToJid: () => false,
-        formatting: 'telegram-html',
         isEnabled: () => true,
         create: () => ({
           name: 'telegram',

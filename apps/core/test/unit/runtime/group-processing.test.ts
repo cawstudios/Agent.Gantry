@@ -77,13 +77,10 @@ vi.mock('@core/memory/app-memory-service.js', () => ({
 
 const mockFormatMessages = vi.fn();
 const mockFormatConversationContextMessages = vi.fn();
-const mockFormatOutboundForChannel = vi.fn();
 vi.mock('@core/messaging/router.js', () => ({
   formatMessages: (...args: unknown[]) => mockFormatMessages(...args),
   formatConversationContextMessages: (...args: unknown[]) =>
     mockFormatConversationContextMessages(...args),
-  formatOutboundForChannel: (...args: unknown[]) =>
-    mockFormatOutboundForChannel(...args),
 }));
 
 const mockIsTriggerAllowed = vi.fn();
@@ -323,9 +320,6 @@ function setupHappyPath(
   mockHandleSessionCommand.mockResolvedValue({ handled: false });
   mockFormatMessages.mockReturnValue('formatted prompt');
   mockFormatConversationContextMessages.mockReturnValue('formatted prompt');
-  mockFormatOutboundForChannel.mockImplementation((raw: string) =>
-    raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim(),
-  );
   mockGetAllJobs.mockReturnValue([]);
   mockGetRecentJobRuns.mockReturnValue([]);
   mockListRecentJobEvents.mockReturnValue([]);

@@ -2918,14 +2918,18 @@ describe('Slack channel', () => {
     );
     await channel.connect();
 
-    await channel.sendMessage('sl:C1234567890', 'hello', {
-      threadId: '1710000000.000111',
-    });
+    await channel.sendMessage(
+      'sl:C1234567890',
+      '**hello** [docs](https://example.com)',
+      {
+        threadId: '1710000000.000111',
+      },
+    );
 
     expect(appRef.current.client.chat.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C1234567890',
-        text: 'hello',
+        text: '*hello* <https://example.com|docs>',
         thread_ts: '1710000000.000111',
       }),
     );
@@ -3306,6 +3310,50 @@ describe('Slack channel', () => {
         }),
       },
     });
+  });
+
+  it('packs rendered Slack Markdown without splitting style tokens', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U_APPROVER']) as any,
+    );
+    await channel.connect();
+
+    vi.mocked(appRef.current.client.chat.postMessage).mockResolvedValueOnce({
+      ok: true,
+      ts: '1710000000.100200',
+    } as any);
+
+    await channel.sendMessage('sl:C1234567890', `${'x'.repeat(3994)}**bold**`);
+
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledTimes(1);
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: `${'x'.repeat(3994)}*bold*` }),
+    );
+  });
+
+  it('keeps styled Slack retry tails in canonical Markdown', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U_APPROVER']) as any,
+    );
+    await channel.connect();
+
+    vi.mocked(appRef.current.client.chat.postMessage)
+      .mockResolvedValueOnce({ ok: true, ts: '1710000000.100200' } as any)
+      .mockRejectedValueOnce(new Error('second chunk failed'));
+
+    await expect(
+      channel.sendMessage('sl:C1234567890', `${'x'.repeat(4000)}**retry me**`),
+    ).rejects.toMatchObject({
+      retryTail: { canonicalText: '**retry me**' },
+    });
+    expect(appRef.current.client.chat.postMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ text: '*retry me*' }),
+    );
   });
 
   it('retries Slack outbound posts on rate limit responses', async () => {
@@ -6413,6 +6461,110 @@ describe('Slack channel', () => {
         channel: 'C1234567890',
         ts: '1710000000.222333',
       }),
+    );
+  });
+
+  it('keeps Slack streaming fallback retry tails canonical', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+    await channel.connect();
+
+    let appendCallCount = 0;
+    vi.mocked(appRef.current.client.apiCall).mockImplementation(
+      async (method: string, payload: Record<string, unknown>) => {
+        if (method === 'chat.startStream') {
+          return { ok: true, stream_ts: '1710000000.222333' };
+        }
+        if (method === 'chat.appendStream') {
+          appendCallCount += 1;
+          if (appendCallCount === 1) return { ok: true, payload };
+          return { ok: false, error: 'append_failed' };
+        }
+        if (method === 'chat.stopStream') return { ok: true };
+        return { ok: false };
+      },
+    );
+    vi.mocked(appRef.current.client.chat.postMessage).mockRejectedValueOnce(
+      new Error('fallback delivery unavailable'),
+    );
+
+    await channel.sendStreamingChunk('sl:C1234567890', 'seed');
+
+    await expect(
+      channel.sendStreamingChunk(
+        'sl:C1234567890',
+        `${'x'.repeat(11999)}**retry me**`,
+        { done: true },
+      ),
+    ).rejects.toMatchObject({
+      retryTail: { canonicalText: '**retry me**' },
+    });
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '*retry me*' }),
+    );
+  });
+
+  it('does not repeat an already streamed formatted prefix in fallback', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+    await channel.connect();
+
+    vi.mocked(appRef.current.client.apiCall).mockImplementation(
+      async (method: string) => {
+        if (method === 'chat.startStream') {
+          return { ok: true, stream_ts: '1710000000.222333' };
+        }
+        if (method === 'chat.appendStream') {
+          return { ok: false, error: 'append_failed' };
+        }
+        if (method === 'chat.stopStream') return { ok: true };
+        return { ok: false };
+      },
+    );
+    vi.mocked(appRef.current.client.chat.postMessage).mockResolvedValueOnce({
+      ok: true,
+      ts: '1710000000.333444',
+    });
+
+    await channel.sendStreamingChunk('sl:C1234567890', '**a**');
+    await expect(
+      channel.sendStreamingChunk('sl:C1234567890', 'x', { done: true }),
+    ).resolves.toBe(true);
+
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'x' }),
+    );
+  });
+
+  it('preserves whitespace-only native stream append chunks', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+    await channel.connect();
+
+    vi.mocked(appRef.current.client.apiCall).mockImplementation(
+      async (method: string) => {
+        if (method === 'chat.startStream') {
+          return { ok: true, stream_ts: '1710000000.222333' };
+        }
+        return { ok: true };
+      },
+    );
+
+    await channel.sendStreamingChunk('sl:C1234567890', 'seed');
+    await channel.sendStreamingChunk('sl:C1234567890', '   ', { done: true });
+
+    expect(appRef.current.client.apiCall).toHaveBeenCalledWith(
+      'chat.appendStream',
+      expect.objectContaining({ markdown_text: '   ' }),
     );
   });
 

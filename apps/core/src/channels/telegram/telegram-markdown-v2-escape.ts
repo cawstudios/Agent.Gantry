@@ -35,7 +35,7 @@ type EscapeTelegramMarkdownV2Options = {
 
 /**
  * Escape text for Telegram MarkdownV2 while preserving markdown formatting
- * markers produced by parseTextStyles (bold/italic/strikethrough/links/code).
+ * markers produced by the Telegram renderer (bold/italic/links/code).
  */
 export function escapeTelegramMarkdownV2(
   text: string,

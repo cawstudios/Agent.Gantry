@@ -6,7 +6,6 @@ import {
   settleDeliveryAttempt,
   type DeliverySettlement,
 } from '../jobs/delivery.js';
-import { formatOutboundForChannel } from '../messaging/router.js';
 import {
   createRuntimeResultSummaryAccumulator,
   createRuntimeUserVisibleResultAccumulator,
@@ -59,7 +58,7 @@ export function createGroupOutputBuffer(input: {
     streamSanitizer = createRuntimeUserVisibleStreamSanitizer();
     pendingOutputRawChars = 0;
     pendingOutputHasParts = false;
-    const text = visibleOutput ? formatOutboundForChannel(visibleOutput) : '';
+    const text = visibleOutput ?? '';
     input.log.info(
       { group: input.groupName },
       `Agent output: ${rawChars} chars`,

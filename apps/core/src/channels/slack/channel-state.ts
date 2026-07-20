@@ -48,6 +48,7 @@ export interface ActiveStreamState {
   rawBuffer: string;
   lastSentText: string;
   lastNativeText: string;
+  lastFallbackCanonicalText: string;
   messageTs?: string;
   fallbackMessageTs: string[];
   nativeStreamTs?: string;
@@ -642,9 +643,14 @@ export abstract class SlackChannelState {
   protected async tryNativeStreamAppend(
     channelId: string,
     streamTs: string,
-    text: string,
+    chunks: string[],
   ): Promise<{ completed: boolean; sentPrefix: string }> {
-    return tryNativeStreamAppend({ app: this.app, channelId, streamTs, text });
+    return tryNativeStreamAppend({
+      app: this.app,
+      channelId,
+      streamTs,
+      chunks,
+    });
   }
 
   protected async tryNativeStreamStop(

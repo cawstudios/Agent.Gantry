@@ -8,6 +8,21 @@ export type ConversationThreadId = BrandedId<'ConversationThreadId'>;
 export type ExternalConversationId = BrandedId<'ExternalConversationId'>;
 export type UserId = BrandedId<'UserId'>;
 
+export function canonicalExternalIdSegment(externalId: string): string {
+  return externalId.replace(
+    /[^a-zA-Z0-9._:-]/g,
+    (codeUnit) => `%${codeUnit.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}
+
+export function conversationParticipantId(
+  conversationId: ConversationId | string,
+  externalUserId: string,
+): string {
+  const encodedUserId = canonicalExternalIdSegment(externalUserId);
+  return `participant:${conversationId}:${encodedUserId}`;
+}
+
 export interface Conversation {
   id: ConversationId;
   appId: AppId;

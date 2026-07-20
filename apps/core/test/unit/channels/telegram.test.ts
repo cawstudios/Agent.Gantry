@@ -2917,11 +2917,14 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      await channel.sendMessage('tg:100200300', 'Hello');
+      await channel.sendMessage(
+        'tg:100200300',
+        '**Hello** [docs](https://example.com)',
+      );
 
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
-        'Hello',
+        '*Hello* [docs](https://example.com)',
         { parse_mode: 'MarkdownV2' },
       );
     });
@@ -3376,7 +3379,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
         3,
         '100200300',
-        expect.stringContaining('*literal*'),
+        expect.stringContaining('_literal_'),
         {},
       );
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
@@ -3467,6 +3470,32 @@ describe('TelegramChannel', () => {
           }),
         },
       });
+    });
+
+    it('keeps styled Telegram retry tails in canonical Markdown', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const apiError = new Error('Network lost on second chunk');
+      currentBot()
+        .api.sendMessage.mockReset()
+        .mockResolvedValueOnce({ message_id: 1 })
+        .mockRejectedValueOnce(apiError)
+        .mockRejectedValueOnce(apiError)
+        .mockRejectedValueOnce(apiError);
+
+      await expect(
+        channel.sendMessage('tg:100200300', `${'x'.repeat(3500)}**retry me**`),
+      ).rejects.toMatchObject({
+        retryTail: { canonicalText: '**retry me**' },
+      });
+      expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        '100200300',
+        '*retry me*',
+        { parse_mode: 'MarkdownV2' },
+      );
     });
 
     it('rejects when bot is not initialized', async () => {
@@ -3688,6 +3717,37 @@ describe('TelegramChannel', () => {
           }),
         },
       });
+    });
+
+    it('keeps Telegram group-stream retry tails canonical', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      currentBot()
+        .api.sendMessage.mockReset()
+        .mockResolvedValueOnce({ message_id: 321 })
+        .mockRejectedValueOnce(new Error('overflow markdown send failed'))
+        .mockRejectedValueOnce(new Error('overflow escaped send failed'))
+        .mockRejectedValueOnce(new Error('overflow plain send failed'));
+      currentBot().api.editMessageText.mockRejectedValue(
+        new Error('Bad Request: failed to edit message'),
+      );
+
+      await channel.sendStreamingChunk(
+        'tg:-1001234567890',
+        `${'x'.repeat(3500)}**retry me**`,
+      );
+      await expect(
+        channel.sendStreamingChunk('tg:-1001234567890', '', { done: true }),
+      ).rejects.toMatchObject({
+        retryTail: { canonicalText: '**retry me**' },
+      });
+      expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        '-1001234567890',
+        '*retry me*',
+        { parse_mode: 'MarkdownV2' },
+      );
     });
 
     it('stops Telegram overflow parts when the stream guard changes mid-send', async () => {

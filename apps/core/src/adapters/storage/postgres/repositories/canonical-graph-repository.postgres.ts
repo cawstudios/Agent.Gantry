@@ -2,6 +2,10 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type { ChatInfo } from '../../../../domain/repositories/domain-types.js';
+import {
+  canonicalExternalIdSegment,
+  conversationParticipantId,
+} from '../../../../domain/conversation/conversation.js';
 import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import {
   normalizeProviderId,
@@ -331,10 +335,13 @@ export class PostgresCanonicalGraphRepository {
     const externalUserId = input.externalUserId.trim();
     if (!externalUserId) return null;
     const safeProvider = input.providerId.replace(/[^a-zA-Z0-9._:-]/g, '_');
-    const safeUser = externalUserId.replace(/[^a-zA-Z0-9._:-]/g, '_');
+    const safeUser = canonicalExternalIdSegment(externalUserId);
     const userId = `user:${CANONICAL_APP_ID}:${safeProvider}:${safeUser}`;
     const aliasId = `user-alias:${CANONICAL_APP_ID}:${safeProvider}:${input.providerAccountId}:${safeUser}`;
-    const participantId = `participant:${input.conversationId}:${safeUser}`;
+    const participantId = conversationParticipantId(
+      input.conversationId,
+      externalUserId,
+    );
     const now = input.timestamp || currentIso();
     const displayName = input.displayName
       ? `${input.displayName} (${input.providerId}:${externalUserId})`

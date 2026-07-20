@@ -31,7 +31,7 @@ lies.
 | 4     | F4   | **VALID**    | Handwritten job model/default/preview types remain in `packages/sdk/src/job-model-types.ts:442-473` beside generated model schemas at `packages/sdk/src/generated/openapi.ts:2143-2221`.                                                                                                                                                                        |
 | 4     | F17  | **VALID**    | `AgentProfileFile*` wire types remain handwritten at `packages/sdk/src/agents.ts:35-55` and duplicated by generated schemas at `packages/sdk/src/generated/openapi.ts:2018-2045`.                                                                                                                                                                               |
 | 5     | AR4  | **VALID**    | The provider CLI still constructs settings/storage dependencies and mutates desired settings directly (`apps/core/src/cli/provider.ts:1-30,292-429`); the canonical conversation approver command still delegates back into the provider command (`apps/core/src/cli/provider.ts:257-264`).                                                                     |
-| 5     | AR5  | **VALID**    | Generic messaging/runtime still owns provider formatting (`apps/core/src/messaging/text-styles.ts`, `apps/core/src/messaging/router.ts:272-285`, `apps/core/src/runtime/group-output-buffer.ts:62`) while the provider registry still carries a `formatting` field (`apps/core/src/channels/provider-registry.ts:37`).                                          |
+| 5     | AR5  | **VALID**    | At audit time, generic messaging/runtime still owned provider formatting (the former generic renderer, `apps/core/src/messaging/router.ts:272-285`, and `apps/core/src/runtime/group-output-buffer.ts:62`) while the provider registry still carried a `formatting` field (`apps/core/src/channels/provider-registry.ts:37`).                                  |
 | 5     | F13  | **VALID**    | Undocumented provider `info`, `control-allowlist`, and `approvers` branches remain (`apps/core/src/cli/provider.ts:135-211`), and `conversation approvers` still calls `runProviderCommand` (`apps/core/src/cli/provider.ts:257-264`).                                                                                                                          |
 | 5     | F20  | **VALID**    | Slack still accepts `LEGACY_CANONICAL_SLACK_THREAD_PREFIX = 'thread:slack:'`, protected by a focused compatibility assertion and stale integration literals (`apps/core/src/channels/slack/thread-ts.ts:3-17`, `apps/core/test/unit/channels/slack-thread-ts.test.ts:17`).                                                                                      |
 | 6     | F2   | **VALID**    | `.codex/scripts/migrate_archived_filesystem_memory.mjs` is still 418 lines and tracked-file search finds no caller outside the prior audit documents.                                                                                                                                                                                                           |
@@ -107,10 +107,11 @@ Ranked by conservative line reduction, then risk.
    are gone, and remaining old-shape tests are reject-only or migration-history
    evidence. No test should be deleted merely for mentioning a retired shape.
 
-The architecture checker also still reports the already-known AR3/AR5 and
-unrelated size-ratchet work (`openapi-schemas.ts`, `apps/core/src/control/server/routes/agents.ts`,
-`async-command-task-service.ts`, `agent-spawn.ts`, and the three Telegram
-tokens in `apps/core/src/messaging/text-styles.ts`). Those are not relabeled as new findings.
+At the time of this revalidation, the architecture checker also reported the
+already-known AR3/AR5 and unrelated size-ratchet work (`openapi-schemas.ts`,
+`apps/core/src/control/server/routes/agents.ts`,
+`async-command-task-service.ts`, `agent-spawn.ts`, and three Telegram tokens in
+the former generic renderer). Those were not relabeled as new findings.
 
 ## Recommended Phase-3 execution batch
 

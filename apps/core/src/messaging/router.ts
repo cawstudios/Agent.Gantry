@@ -1,8 +1,6 @@
 import { ChannelOwnershipPort, NewMessage } from '../domain/types.js';
 import { formatLocalTime } from '../shared/timezone.js';
 import '../channels/register-builtins.js';
-import { getProvider } from '../channels/provider-registry.js';
-import { parseTextStyles } from './text-styles.js';
 
 export interface ConversationContextMessages {
   recentChannelContext: NewMessage[];
@@ -267,21 +265,6 @@ export function stripInternalTags(text: string): string {
 
 export function stripInternalTagsPreserveWhitespace(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '');
-}
-
-export function formatOutboundForChannel(
-  rawText: string,
-  channelId?: string,
-): string {
-  const text = stripInternalTags(rawText);
-  if (!text || !channelId) {
-    return text;
-  }
-  const provider = getProvider(channelId);
-  if (!provider || provider.formatting === 'none') {
-    return text;
-  }
-  return parseTextStyles(text, provider.formatting);
 }
 
 export function findChannel<T extends ChannelOwnershipPort>(

@@ -30,7 +30,6 @@ export const exampleProvider: Provider = {
   jidPrefix: 'ex:',
   folderPrefix: 'example_',
   isGroupJid: (jid) => jid.startsWith('ex:g:'),
-  formatting: 'markdown-native',
   isEnabled: (settings) => settings.providers?.example?.enabled ?? false,
   create: () => null,
   setup: {

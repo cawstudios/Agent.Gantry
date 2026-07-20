@@ -5,7 +5,6 @@ import { streamApi } from '@grammyjs/stream';
 import { PERMISSION_APPROVAL_TIMEOUT_MS } from '../../config/index.js';
 import { logger } from '../../infrastructure/logging/logger.js';
 import type { ChannelOpts } from '../channel-provider.js';
-import { parseTextStyles } from '../../messaging/text-styles.js';
 import { splitTelegramDeliveryTextWithLimits } from './channel-delivery-text-splitting.js';
 import { escapeTelegramMarkdownV2 } from './telegram-markdown-v2-escape.js';
 import { CHANNEL_STREAM_UPDATE_INTERVAL_MS } from '../channel-provider.js';
@@ -217,19 +216,6 @@ export function truncateUtf8ToByteLimit(
     out = next;
   }
   return `${out}${suffix}`;
-}
-
-export function stripInternalTagsPreserveWhitespace(text: string): string {
-  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '');
-}
-
-export function formatTelegramStreamingText(
-  rawText: string,
-  done?: boolean,
-): string {
-  const text = stripInternalTagsPreserveWhitespace(rawText);
-  if (!text) return '';
-  return done ? parseTextStyles(text, 'telegram-html') : text;
 }
 
 export type TelegramSendMessageOptions = NonNullable<

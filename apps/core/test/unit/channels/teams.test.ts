@@ -452,9 +452,9 @@ describe('Teams built-in provider', () => {
         label: 'Teams',
         jidPrefix: 'teams:',
         folderPrefix: 'teams_',
-        formatting: 'markdown-native',
       }),
     );
+    expect(provider).not.toHaveProperty('formatting');
     expect(provider?.setup.envKeys).toEqual([
       'TEAMS_CLIENT_ID',
       'TEAMS_CLIENT_SECRET',

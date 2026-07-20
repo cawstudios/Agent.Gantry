@@ -39,6 +39,12 @@ export interface ConversationAdminSummary {
   controlAllowlist: { userIds: string[] };
 }
 
+export interface AgentConversationSummary extends ConversationAdminSummary {
+  conversation: Pick<Conversation, 'id' | 'title' | 'status'>;
+  agentIds: AgentId[];
+  threadCount: number;
+}
+
 export class ConversationAdministrationService {
   constructor(
     private readonly repositories: {
@@ -64,12 +70,31 @@ export class ConversationAdministrationService {
     };
   }
 
-  async replaceControlAllowlist(input: {
+  async getAgentConversationSummary(input: {
+    appId: AppId;
+    conversationId: ConversationId;
+  }): Promise<AgentConversationSummary> {
+    const { conversation } = await this.requireConversation(input);
+    const [installs, threads, controlAllowlist] = await Promise.all([
+      this.repositories.providerAccounts.listConversationInstalls(input.appId),
+      this.repositories.conversations.listThreads(conversation.id),
+      this.getAdminSummary(input),
+    ]);
+    return {
+      conversation,
+      agentIds: installs
+        .filter((install) => install.conversationId === conversation.id)
+        .map((install) => install.agentId),
+      threadCount: threads.length,
+      controlAllowlist: controlAllowlist.controlAllowlist,
+    };
+  }
+
+  async validateControlApprovers(input: {
     appId: AppId;
     conversationId: ConversationId;
     userIds: string[];
-    updatedAt: string;
-  }): Promise<{ userIds: string[] }> {
+  }): Promise<{ conversation: Conversation; userIds: string[] }> {
     const { conversation, providerAccount } =
       await this.requireConversation(input);
     const userIds = normalizeUserIds(input.userIds);
@@ -100,6 +125,17 @@ export class ConversationAdministrationService {
         );
       }
     }
+    return { conversation, userIds };
+  }
+
+  async replaceControlAllowlist(input: {
+    appId: AppId;
+    conversationId: ConversationId;
+    userIds: string[];
+    updatedAt: string;
+  }): Promise<{ userIds: string[] }> {
+    const { conversation, userIds } =
+      await this.validateControlApprovers(input);
     const rows =
       await this.repositories.conversations.replaceConversationApprovers({
         appId: input.appId,

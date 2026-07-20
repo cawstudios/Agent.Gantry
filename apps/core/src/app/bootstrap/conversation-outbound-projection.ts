@@ -4,7 +4,7 @@ import type { AppId } from '../../domain/app/app.js';
 import type { RuntimeEventPublishInput } from '../../domain/events/events.js';
 import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
 import type { NewMessage } from '../../domain/types.js';
-import { formatOutboundForChannel } from '../../messaging/router.js';
+import { stripInternalTags } from '../../messaging/router.js';
 import { nowIso } from '../../shared/time/datetime.js';
 import {
   canonicalConversationIdForJid,
@@ -40,7 +40,7 @@ export function createConversationOutboundProjection(input: {
       }): Promise<void>;
     }
   | undefined {
-  const formatted = formatOutboundForChannel(input.rawText, input.providerId);
+  const formatted = stripInternalTags(input.rawText);
   if (!formatted) return undefined;
 
   const now = nowIso();

@@ -6,6 +6,7 @@ import {
   escapeTelegramMarkdownV2,
   splitTelegramDeliveryText,
 } from '@core/channels/telegram/channel-shared.js';
+import { planTelegramCanonicalDeliveryChunks } from '@core/channels/telegram/channel-delivery-text-splitting.js';
 
 function hasUnpairedSurrogate(input: string): boolean {
   for (let i = 0; i < input.length; i += 1) {
@@ -32,6 +33,30 @@ function hasOddTrailingBackslashes(input: string): boolean {
 }
 
 describe('Telegram MarkdownV2 chunk planner', () => {
+  it('keeps canonical style tokens intact at a delivery boundary', () => {
+    const canonical = `${'x'.repeat(3495)}**${'b'.repeat(100)}** tail`;
+    const chunks = planTelegramCanonicalDeliveryChunks(canonical, 3500);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]?.canonicalText).toBe(`**${'b'.repeat(100)}** tail`);
+    expect(chunks[1]?.escapedText).toBe(`*${'b'.repeat(100)}* tail`);
+    expect(chunks.map((chunk) => chunk.canonicalText).join('')).toBe(canonical);
+  });
+
+  it('rewraps oversized canonical code blocks into parseable chunks', () => {
+    const chunks = planTelegramCanonicalDeliveryChunks(
+      `\`\`\`ts\n${'const value = 1;\n'.repeat(500)}\`\`\``,
+      3500,
+    );
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.canonicalText).toMatch(/^```ts\n[\s\S]*```$/);
+      expect(chunk.escapedText).toMatch(/^```ts\n[\s\S]*```$/);
+      expect(chunk.escapedText.length).toBeLessThanOrEqual(3500);
+    }
+  });
+
   it('splits 10k fenced code blocks into independently parseable fenced chunks', () => {
     const code = `${'x'.repeat(10000)}\n`;
     const escaped = escapeTelegramMarkdownV2(`\`\`\`ts\n${code}\`\`\``);

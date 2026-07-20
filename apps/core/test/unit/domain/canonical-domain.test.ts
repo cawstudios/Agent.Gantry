@@ -1,11 +1,53 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { conversationParticipantId } from '@core/domain/conversation/conversation.js';
+import { PostgresCanonicalGraphRepository } from '@core/adapters/storage/postgres/repositories/canonical-graph-repository.postgres.js';
 
 describe('canonical Postgres persistence cut', () => {
   const adapterRoot = path.resolve('apps/core/src/adapters/storage/postgres');
   const browserDriverPackagePattern = `${'play'}wright-core`;
+
+  it('keeps distinct external user ids distinct in participant identity', () => {
+    expect(
+      conversationParticipantId('conversation:one', 'alice@example.com'),
+    ).not.toBe(
+      conversationParticipantId('conversation:one', 'alice_example.com'),
+    );
+  });
+
+  it('builds participant identity for unpaired UTF-16 code units', () => {
+    expect(conversationParticipantId('conversation:one', '\ud800')).toBe(
+      'participant:conversation:one:%d800',
+    );
+  });
+
+  it('keeps canonical user and alias rows distinct for colliding legacy-safe ids', async () => {
+    const rows: Array<Record<string, unknown>> = [];
+    const db = {
+      insert: vi.fn(() => ({
+        values: vi.fn((row: Record<string, unknown>) => {
+          rows.push(row);
+          return { onConflictDoUpdate: vi.fn(async () => undefined) };
+        }),
+      })),
+    };
+    const repository = new PostgresCanonicalGraphRepository(db as never);
+
+    for (const externalUserId of ['alice@example.com', 'alice_example.com']) {
+      await repository.ensureParticipant({
+        conversationId: 'conversation:one',
+        providerId: 'slack',
+        providerAccountId: 'workspace-one',
+        externalUserId,
+      });
+    }
+
+    expect(rows[0]?.id).not.toBe(rows[3]?.id);
+    expect(rows[1]?.id).not.toBe(rows[4]?.id);
+  });
 
   it('keeps canonical domain source free of provider/runtime imports', () => {
     const root = path.resolve('apps/core/src/domain');

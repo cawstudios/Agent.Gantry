@@ -41,6 +41,35 @@ describe('provider account schema', () => {
 });
 
 describe('PostgresConversationRepository', () => {
+  it('records externally validated members before approver projection', async () => {
+    const onConflictDoUpdate = vi.fn(async () => undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const db = { insert: vi.fn(() => ({ values })) };
+    const repository = new PostgresConversationRepository(db as never);
+
+    await repository.ensureConversationParticipants({
+      appId: 'app-one' as never,
+      conversationId: 'conversation:one' as never,
+      externalUserIds: ['U/123'],
+      updatedAt: '2026-07-20T00:00:00.000Z',
+    });
+
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'participant:conversation:one:U%002f123',
+        appId: 'app-one',
+        conversationId: 'conversation:one',
+        externalUserId: 'U/123',
+        status: 'active',
+      }),
+    ]);
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({ status: 'active' }),
+      }),
+    );
+  });
+
   it('persists an authoritative-empty approver row without exposing it', async () => {
     const rows: Record<string, unknown>[] = [];
     const values = vi.fn(async (value: Record<string, unknown>[]) => {

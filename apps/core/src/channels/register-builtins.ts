@@ -127,7 +127,6 @@ const telegramProvider: Provider = {
   folderPrefix: 'telegram_',
   isGroupJid: (jid: string) => jid.startsWith('tg:-'),
   canStreamToJid: (jid: string) => jid.startsWith('tg:-'),
-  formatting: 'telegram-markdown-v2',
   isEnabled: (settings) => isChannelEnabled(settings, 'telegram'),
   create: createTelegramBuiltInChannel,
   setup: {
@@ -143,7 +142,6 @@ const slackProvider: Provider = {
   jidPrefix: 'sl:',
   folderPrefix: 'slack_',
   isGroupJid: () => true,
-  formatting: 'mrkdwn',
   isEnabled: (settings) => isChannelEnabled(settings, 'slack'),
   create: createSlackBuiltInChannel,
   setup: {
@@ -160,7 +158,6 @@ const teamsProvider: Provider = {
   jidPrefix: 'teams:',
   folderPrefix: 'teams_',
   isGroupJid: (jid: string) => jid.startsWith('teams:'),
-  formatting: 'markdown-native',
   isEnabled: (settings) => isChannelEnabled(settings, 'teams'),
   create: createTeamsBuiltInChannel,
   setup: {
@@ -177,7 +174,6 @@ const discordProvider: Provider = {
   jidPrefix: 'dc:',
   folderPrefix: 'discord_',
   isGroupJid: (jid: string) => jid.startsWith('dc:'),
-  formatting: 'markdown-native',
   isEnabled: (settings) => isChannelEnabled(settings, 'discord'),
   create: createDiscordBuiltInChannel,
   setup: {
@@ -194,7 +190,6 @@ const appProvider: Provider = {
   jidPrefix: 'app:',
   folderPrefix: 'app_',
   isGroupJid: () => true,
-  formatting: 'none',
   isEnabled: () => true,
   create: createAppBuiltInChannel,
   setup: {

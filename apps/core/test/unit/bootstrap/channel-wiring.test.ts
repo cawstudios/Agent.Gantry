@@ -198,7 +198,6 @@ function makeProvider(
       id === 'telegram' ? jid.startsWith('tg:-') : jid.startsWith('sl:'),
     canStreamToJid:
       id === 'telegram' ? (jid: string) => jid.startsWith('tg:-') : undefined,
-    formatting: id === 'telegram' ? 'telegram-html' : 'mrkdwn',
     isEnabled: (settings: RuntimeSettings) =>
       id === 'telegram'
         ? settings.providers.telegram.enabled
@@ -2176,7 +2175,7 @@ describe('createChannelWiring', () => {
     expect(storeMessage).toHaveBeenCalledWith(msg);
   });
 
-  it('formats outbound messages using provider registry id for the jid', async () => {
+  it('passes canonical Markdown to the provider adapter', async () => {
     const app = makeApp();
     const outbound = makeChannel({
       name: 'telegram-adapter-name',
@@ -2195,10 +2194,14 @@ describe('createChannelWiring', () => {
       makeRuntimeSettings({ telegram: true, slack: false }),
     );
 
-    await wiring.sendMessage('tg:123', '**done**', {
-      durability: 'best_effort',
-    });
-    expect(outbound.sendMessage).toHaveBeenCalledWith('tg:123', '*done*');
+    await wiring.sendMessage(
+      'tg:123',
+      '<internal>thinking</internal>**done**',
+      {
+        durability: 'best_effort',
+      },
+    );
+    expect(outbound.sendMessage).toHaveBeenCalledWith('tg:123', '**done**');
   });
 
   it('does not fall back across Provider Accounts for outbound delivery', async () => {

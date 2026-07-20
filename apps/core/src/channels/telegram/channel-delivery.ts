@@ -17,7 +17,6 @@ import { TelegramChannelConnect } from './channel-connect.js';
 import {
   TELEGRAM_MESSAGE_MAX_LENGTH,
   TELEGRAM_STREAM_CHUNK_MAX_LENGTH,
-  TELEGRAM_USER_QUESTION_TIMEOUT_MS,
   ActiveDraftStreamState,
   createPendingTelegramUserQuestion,
   editTelegramMessage,
@@ -37,12 +36,12 @@ import {
 import { sendTelegramPlannedChunk } from './send-planned-chunk.js';
 import { appendTelegramDocumentMessageIds as appendDocIds } from './file-delivery.js';
 import { renderTelegramChannelAgentTodo } from './agent-todo-delivery.js';
-import { unescapeTelegramEscapedMarkdownV2 } from './markdown-v2-unescape.js';
 import { sendTelegramTyping } from './typing-indicator.js';
 import { renderTelegramRichInteraction } from './rich-interaction.js';
 import { addTelegramReaction } from './reactions.js';
 import { disconnectTelegramDelivery } from './disconnect.js';
 import { requestTelegramPermissionApproval } from './permission-approval-delivery.js';
+import { planTelegramCanonicalDeliveryChunks } from './channel-delivery-text-splitting.js';
 import {
   DurableInteractionPersistenceError,
   recordDurableQuestionAnswerProgress,
@@ -65,20 +64,10 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
       const numericId = jid.replace(/^tg:/, '');
       const sendOptions = telegramThreadOptionsFromString(options.threadId);
 
-      // Split after escaping so each outbound envelope already matches the
-      // exact payload Telegram receives.
-      const escapedText = escapeTelegramMarkdownV2(text, {
-        preserveStyleMarkers: true,
-      });
-      const escapedChunks = splitTelegramDeliveryText(
-        escapedText,
+      const chunks = planTelegramCanonicalDeliveryChunks(
+        text,
         TELEGRAM_STREAM_CHUNK_MAX_LENGTH,
-        TELEGRAM_MESSAGE_MAX_LENGTH,
       );
-      const chunks = escapedChunks.map((escapedChunk) => ({
-        escapedText: escapedChunk,
-        canonicalText: unescapeTelegramEscapedMarkdownV2(escapedChunk),
-      }));
       if (chunks.length === 0) return {};
 
       const warnings: string[] = [];
@@ -106,7 +95,7 @@ export abstract class TelegramChannelDelivery extends TelegramChannelConnect {
               sendOptions: replyMarkup
                 ? { ...sendOptions, reply_markup: replyMarkup }
                 : sendOptions,
-              plainText: chunk.canonicalText,
+              plainText: chunk.plainText,
               allowPlainTextFallback: !usePlainText,
               forcePlainText: usePlainText,
             },

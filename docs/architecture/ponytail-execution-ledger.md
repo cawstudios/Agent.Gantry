@@ -411,3 +411,92 @@ present at Phase 4 start.
 - Independent re-review found the four residual drift defects described above;
   this outcomes update records their fixes. Re-review of the resulting
   uncommitted work remains pending by request.
+
+## Phase 5 outcomes
+
+### Current-tree revalidation
+
+AR4, AR5, F13, and F20 all still applied after Phase 4 and the intervening
+merged changes. The required repo-wide consumer searches covered `apps/`,
+`packages/`, `docs/`, and `.github` before each cut. This checkout still has no
+top-level `tools/`, `test/`, or `tests/` directory.
+
+The searches found that provider-account connect/rotate/install and
+Conversation info/approver behavior still lived in the CLI adapter; canonical
+conversation commands still delegated into undocumented provider aliases;
+messaging/runtime still rendered Slack and Telegram dialect text before
+persistence and channel delivery; the provider registry still advertised a
+formatting policy; and the legacy Slack thread prefix still had one acceptance
+test plus stale integration fixtures. Slack and Discord permission-interaction
+registration also still dominated their oversized general interaction files.
+
+Post-change searches leave the removed provider aliases and `thread:slack:`
+only in rejection tests or historical audit evidence. Removed generic-renderer
+names remain only in historical documents. No Phase 6 deletion or Phase 7-9
+cutover item was pulled into this phase.
+
+| Item                   | Outcome     | Evidence and boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AR4                    | Implemented | Added application-owned provider-account, ConversationInstall, summary, and approver use cases; the CLI now only parses, invokes, and formats. Authority writes remain revision-first through desired state, approver validation records canonical participants before the write, and canonical external identity segments are collision-free for all newly restamped rows. Existing pre-restamp identity rows intentionally receive no compatibility reader or migration in this phase; the approved Phase 8 offline restamp owns that cutover. |
+| AR5                    | Implemented | Runtime/messaging now strips only internal tags and persists canonical visible text. Slack and Telegram render and plan provider-sized chunks at their adapter boundaries. Retry tails stay canonical across direct and streaming partial delivery; Slack native appends are token-aligned, whitespace-lossless, and use a linear canonical/rendered segment map. The provider registry formatting field and generic renderer were deleted.                                                                                                              |
+| F13                    | Implemented | Deleted undocumented `provider info`, `provider control-allowlist`, and `provider approvers`; retained only canonical Conversation info/approver commands backed by the application service.                                                                                                                                                                                                                                                                                                                                                              |
+| F20                    | Implemented | Deleted accepted `thread:slack:` compatibility and normalized active fixtures. The stale prefix remains only in an explicit rejection test and audit history.                                                                                                                                                                                                                                                                                                                                                                                           |
+| Slack/Discord file cut | Implemented | Split permission-interaction registration into owned Slack and Discord files and added an architecture boundary test. The resulting general/permission files are 89/515 lines for Slack and 315/402 for Discord.                                                                                                                                                                                                                                                                                                                                          |
+
+### Surface impact
+
+| Surface                     | Classification       | Reason                                                                                                                                                        |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime behavior            | Changed              | Canonical text persists before adapter rendering; partial-delivery retry tails remain canonical; provider/conversation mutations use application services.     |
+| `settings.yaml`             | Changed              | Existing provider-account, install, and approver writes keep the same readable schema but now go exclusively through revision-first desired-state operations. |
+| Postgres/runtime projection | Changed              | Validated approvers are recorded as canonical participants and outbound message/event text is canonical; no schema or migration changed.                      |
+| Control API                 | Unchanged by design  | Existing control routes and application service contracts are unchanged by the CLI/adapter cut.                                                              |
+| SDK/contracts               | Unchanged by design  | No public contract or generated SDK surface changed, so an SDK rebuild is not required.                                                                       |
+| CLI                         | Changed              | Provider aliases were deleted and remaining provider/conversation commands invoke application-owned use cases.                                               |
+| Gantry MCP/admin tools      | Unchanged by design  | No tool schema, capability, or admin-tool path changed.                                                                                                       |
+| Channel/provider adapters   | Changed              | Slack/Telegram own rendering and chunk planning; Slack/Discord permission registration is split by responsibility.                                            |
+| Docs/prompts                | Changed              | Architecture/audit references and this ledger describe the new ownership; agent prompts are unchanged.                                                       |
+| Audit/events                | Changed              | Existing event shapes remain, but persisted outbound visible text is now canonical rather than provider-rendered.                                             |
+| Tests/verification          | Changed              | Canonical rendering/retry, application ownership, alias rejection, thread-prefix rejection, participant identity, and split-boundary invariants are covered.  |
+
+### Net line delta
+
+Measured before adding this ledger section, tracked files are +1,016/-1,617
+and six new source/test files add 1,670 lines: complete Phase 5 code, test, and
+supporting-doc delta +2,686/-1,617, net **+1,069 lines**. The positive delta is
+primarily the application-owned provider/conversation use-case seam, the shared
+canonical chunk/retry planner, and regression coverage; the Slack/Discord
+physical splits preserve behavior instead of claiming moved lines as deletion.
+No dependency was added.
+
+### Verification notes
+
+- `npm run typecheck` passed and includes a successful
+  `npm run build:contracts`. No contracts changed, so `build:sdk` was not run.
+- Final focused provider/conversation/rendering matrix: nine files, 472 tests
+  passed. Phase 5 source lint passed with zero errors and 39 existing-style
+  warnings. Whole-repo lint remains blocked by the unrelated baseline of 23
+  errors and 999 warnings.
+- The definitive full unit run is recorded below after completion.
+- The focused onboarding integration file could not start in this symlinked
+  worktree: the standard loader was denied writing `node_modules/.vite-temp`
+  (`EPERM`), the runner loader evaluated CommonJS `__dirname` as undefined, and
+  the native loader could not resolve `vitest.shared.js`. No integration test
+  body ran.
+- Architecture checking began with 15 production findings: nine file-size
+  ratchets, one existing control-route layer edge, three provider-specific
+  Telegram findings in the generic renderer, and two active-doc references.
+  It ends with 12 production findings: the same nine size ratchets, layer edge,
+  and two active-doc references. The checker additionally reports two stale
+  exception-hygiene entries for the deleted renderer; the sandbox makes
+  `.codex/architecture-exceptions.json` read-only, so those entries could not be
+  removed here. Phase 5-created Slack/Telegram size ratchets were reduced below
+  their existing budgets before closeout.
+- Local autoreview drove consolidation of two recurring invariants: approver
+  validation now records collision-free canonical participant/user/alias
+  identity before revision-first settings projection, and all Slack/Telegram
+  delivery/retry producers use canonical text with token-aware provider
+  planning. Final review left one deliberate P2 requesting migration of
+  pre-restamp identity rows; that is rejected for this phase because the
+  approved plan and user direction prohibit compatibility work and assign the
+  only preserved machine to the Phase 8 offline restamp.

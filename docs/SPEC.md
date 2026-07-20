@@ -146,7 +146,6 @@ export interface Provider {
   jidPrefix: string;
   folderPrefix: string;
   isGroupJid: (jid: string) => boolean;
-  formatting: ChannelFormattingDialect;
   isEnabled: (settings: ChannelProviderSettingsLike) => boolean;
   create: ChannelFactory;
   setup: ChannelProviderSetup;

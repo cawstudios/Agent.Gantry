@@ -1050,13 +1050,6 @@
     "maxViolations": 4
   },
   {
-    "file": "apps/core/src/messaging/text-styles.ts",
-    "rule": "provider_specific_path",
-    "reason": "Baseline channel formatting dialect name remains in the messaging formatter until provider-specific rendering is moved fully behind channel adapters.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
     "file": "apps/core/src/shared/model-catalog.ts",
     "rule": "provider_specific_path",
     "reason": "Exact shared model-catalog provider debt after removing the broad shared provider allowlist; capped so new provider-specific shared leakage fails.",

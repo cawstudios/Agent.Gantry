@@ -240,7 +240,6 @@ beforeEach(() => {
       jidPrefix: 'tp:',
       folderPrefix: 'test_',
       isGroupJid: () => false,
-      formatting: 'none',
       isEnabled: () => false,
       create: () => null,
       setup: {

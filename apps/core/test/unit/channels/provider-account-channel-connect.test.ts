@@ -25,7 +25,6 @@ function provider(create: Provider['create']): Provider {
     jidPrefix: 'sl:',
     folderPrefix: 'slack_',
     isGroupJid: () => true,
-    formatting: 'mrkdwn',
     isEnabled: () => true,
     create,
     setup: {

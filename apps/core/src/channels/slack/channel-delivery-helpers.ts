@@ -17,10 +17,7 @@ import {
   ActiveStreamState,
   PendingUserQuestionState,
 } from './channel-state.js';
-import {
-  SLACK_FALLBACK_CHUNK_MAX_LENGTH,
-  splitSlackTextByCodeUnits,
-} from './text-limits.js';
+import { SLACK_FALLBACK_CHUNK_MAX_LENGTH } from './text-limits.js';
 import { nowIso } from '../../shared/time/datetime.js';
 import { slackMessageActionBlocks } from './message-action-affordances.js';
 import { slackThreadTsFromThreadId } from './thread-ts.js';
@@ -33,6 +30,9 @@ import {
   slackRateLimitRetryDelayMs,
 } from './channel-retry-delay.js';
 import { uploadSlackAttachments } from './file-delivery.js';
+import { renderSlackText } from '../text-rendering.js';
+import { planCanonicalMarkdownDeliveryChunks } from '../canonical-markdown-delivery.js';
+import type { CanonicalMarkdownDeliveryChunk } from '../canonical-markdown-delivery.js';
 type SlackPostMessagePayload = {
   channel: string;
   text: string;
@@ -138,7 +138,7 @@ export async function sendSlackMessage(input: {
   app: App | null;
   jid: string;
   channelId: string;
-  formattedText: string;
+  canonicalText: string;
   options: MessageSendOptions;
   log: SlackDeliveryLogger;
   sendSnippetFallback: (
@@ -146,24 +146,24 @@ export async function sendSlackMessage(input: {
   ) => Promise<SlackSnippetFallbackResult | null>;
 }): Promise<MessageDeliveryResult | void> {
   if (!input.app) return;
-
-  const formatted = input.formattedText;
+  const formatted = renderSlackText(input.canonicalText);
   if (!formatted) return;
-
-  const parts = splitSlackTextByCodeUnits(
-    formatted,
-    SLACK_FALLBACK_CHUNK_MAX_LENGTH,
-  );
+  const chunks = planCanonicalMarkdownDeliveryChunks({
+    canonicalText: input.canonicalText,
+    maxRenderedCodeUnits: SLACK_FALLBACK_CHUNK_MAX_LENGTH,
+    render: renderSlackText,
+  });
   const warnings: string[] = [];
-  if (parts.length > 1) warnings.push(`slack.message.chunked:${parts.length}`);
+  if (chunks.length > 1)
+    warnings.push(`slack.message.chunked:${chunks.length}`);
   const threadTs = slackThreadTsFromThreadId(input.options.threadId);
-
   const externalMessageIds: string[] = [];
   let deliveredParts = 0;
-  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-    const part = parts[partIndex];
+  for (let partIndex = 0; partIndex < chunks.length; partIndex += 1) {
+    const chunk = chunks[partIndex];
+    const part = chunk.renderedText;
     const actionBlocks =
-      partIndex === parts.length - 1
+      partIndex === chunks.length - 1
         ? slackActionBlocks(part, input.options)
         : undefined;
     try {
@@ -175,7 +175,7 @@ export async function sendSlackMessage(input: {
           ...(threadTs ? { thread_ts: threadTs } : {}),
           ...(actionBlocks ? { blocks: actionBlocks } : {}),
         },
-        { jid: input.jid, part: partIndex + 1, totalParts: parts.length },
+        { jid: input.jid, part: partIndex + 1, totalParts: chunks.length },
         warnings,
         input.log,
       );
@@ -198,25 +198,28 @@ export async function sendSlackMessage(input: {
             ...(ids[0] ? { externalMessageId: ids[0] } : {}),
             ...(ids.length > 0 ? { externalMessageIds: ids } : {}),
             deliveredParts: ids.length,
-            totalParts: parts.length,
+            totalParts: chunks.length,
             warnings,
             fallbackArtifactId: fallback.fallbackArtifactId,
           };
         }
       }
       if (deliveredParts > 0) {
-        const unsentTail = parts.slice(deliveredParts).join('');
+        const unsentTail = chunks
+          .slice(deliveredParts)
+          .map((pending) => pending.canonicalText)
+          .join('');
         const partial = new PartialMessageDeliveryError({
           cause: err,
           deliveredChunks: deliveredParts,
           name: 'PartialSlackDeliveryError',
-          message: `Slack message partially delivered (${deliveredParts}/${parts.length} parts)`,
-          totalChunks: parts.length,
+          message: `Slack message partially delivered (${deliveredParts}/${chunks.length} parts)`,
+          totalChunks: chunks.length,
         });
         Object.assign(partial, {
           provider: 'slack',
           deliveredParts,
-          totalParts: parts.length,
+          totalParts: chunks.length,
           externalMessageIds,
           ...(unsentTail.trim()
             ? {
@@ -256,7 +259,7 @@ export async function sendSlackMessage(input: {
       : {}),
     ...(externalMessageIds.length > 0 ? { externalMessageIds } : {}),
     deliveredParts,
-    totalParts: parts.length,
+    totalParts: chunks.length,
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
@@ -265,7 +268,7 @@ export async function sendSlackFallbackStreamParts(input: {
   app: App | null;
   jid: string;
   state: ActiveStreamState;
-  fallbackParts: string[];
+  fallbackParts: CanonicalMarkdownDeliveryChunk[];
   log: SlackDeliveryLogger;
   shouldContinue: () => boolean;
 }): Promise<void> {
@@ -275,25 +278,19 @@ export async function sendSlackFallbackStreamParts(input: {
   const visibleFallbackMessageIds = () =>
     input.state.fallbackMessageTs.filter(Boolean);
   const retryTailFromFallbackParts = () => {
-    const tail = input.fallbackParts.slice(deliveredParts).join('');
+    const tail = input.fallbackParts
+      .slice(deliveredParts)
+      .map((part) => part.canonicalText)
+      .join('');
     if (deliveredParts > 0 || !tail) return tail;
-    const previousFallbackText =
-      input.state.lastNativeText &&
-      input.state.lastSentText.startsWith(input.state.lastNativeText)
-        ? input.state.lastSentText.slice(input.state.lastNativeText.length)
-        : input.state.lastSentText;
+    const previousFallbackText = input.state.lastFallbackCanonicalText;
     if (previousFallbackText && tail.startsWith(previousFallbackText)) {
       return tail.slice(previousFallbackText.length);
     }
     return tail;
   };
-  for (
-    let partIndex = 0;
-    partIndex < input.fallbackParts.length;
-    partIndex += 1
-  ) {
-    const part = input.fallbackParts[partIndex];
-    if (!part) continue;
+  for (const [partIndex, part] of input.fallbackParts.entries()) {
+    if (!part?.renderedText) continue;
     if (!input.shouldContinue()) return;
     try {
       const existingTs = input.state.fallbackMessageTs[partIndex];
@@ -301,7 +298,7 @@ export async function sendSlackFallbackStreamParts(input: {
         await input.app.client.chat.update({
           channel: input.state.channelId,
           ts: existingTs,
-          text: part,
+          text: part.renderedText,
         });
         deliveredParts += 1;
         continue;
@@ -310,7 +307,7 @@ export async function sendSlackFallbackStreamParts(input: {
         input.app,
         {
           channel: input.state.channelId,
-          text: part,
+          text: part.renderedText,
           ...(threadTs ? { thread_ts: threadTs } : {}),
         },
         {
@@ -385,6 +382,9 @@ export async function sendSlackFallbackStreamParts(input: {
     }
   }
   input.state.messageTs = input.state.fallbackMessageTs[0];
+  input.state.lastFallbackCanonicalText = input.fallbackParts
+    .map((part) => part.canonicalText)
+    .join('');
 }
 
 export async function sendSlackProgressUpdate(input: {

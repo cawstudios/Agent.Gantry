@@ -218,6 +218,12 @@ export interface ConversationRepository {
   listParticipantExternalUserIds(
     conversationId: ConversationId,
   ): Promise<string[]>;
+  ensureConversationParticipants(input: {
+    appId: AppId;
+    conversationId: ConversationId;
+    externalUserIds: string[];
+    updatedAt: string;
+  }): Promise<void>;
   listConversationApprovers(
     conversationId: ConversationId,
   ): Promise<ConversationApprover[]>;

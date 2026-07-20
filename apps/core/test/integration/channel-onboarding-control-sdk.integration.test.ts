@@ -361,8 +361,8 @@ describe('provider conversation onboarding control SDK integration', () => {
         updatedAt: '2026-04-28T00:00:00.000Z',
       };
       state.conversations.set(conversation.id, conversation);
-      state.threads.set('thread:slack:C123:1700.1', {
-        id: 'thread:slack:C123:1700.1',
+      state.threads.set('thread:sl:C123:1700.1', {
+        id: 'thread:sl:C123:1700.1',
         appId: 'app-one',
         conversationId: conversation.id,
         externalRef: { kind: 'conversation_thread', value: '1700.1' },
@@ -381,7 +381,7 @@ describe('provider conversation onboarding control SDK integration', () => {
             displayName: 'Engineering',
             permissionPolicyIds: ['permission-policy:deploy'],
             memoryScope: 'conversation',
-            threadId: 'thread:slack:C123:1700.1',
+            threadId: 'thread:sl:C123:1700.1',
           },
         ),
       );
@@ -435,7 +435,7 @@ describe('provider conversation onboarding control SDK integration', () => {
       await client.agents.conversationInstalls.disable(
         'agent:one',
         conversation.id,
-        { threadId: 'thread:slack:C123:1700.1' },
+        { threadId: 'thread:sl:C123:1700.1' },
       );
       expect(runtimeApp.app.unregisterConversationRoute).toHaveBeenCalledWith(
         projectedThreadRouteKey,
