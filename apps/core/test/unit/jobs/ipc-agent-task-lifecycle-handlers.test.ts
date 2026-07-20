@@ -4,7 +4,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   AsyncTaskCreateInput,
@@ -15,7 +15,13 @@ import type {
   AsyncTaskTransitionInput,
 } from '@core/domain/ports/async-tasks.js';
 import { isAsyncTaskTerminal } from '@core/domain/ports/async-tasks.js';
+import { DEFAULT_ASYNC_RESOURCE_LIMITS } from '@core/jobs/async-command-sandbox-runner.js';
+import { readEncryptedAsyncTaskPayload } from '@core/jobs/async-task-execution-payload.js';
 import type { RunnerSandboxProvider } from '@core/shared/runner-sandbox-provider.js';
+import {
+  callableAgentToolName,
+  projectCallableAgentTools,
+} from '@core/application/core-tools/callable-agent-tools.js';
 
 const runtimeHomes: string[] = [];
 
@@ -59,6 +65,9 @@ class MemoryAsyncTaskRepository implements AsyncTaskRepository {
           (!filter.agentId || task.agentId === filter.agentId) &&
           (filter.conversationId === undefined ||
             task.conversationId === filter.conversationId) &&
+          (filter.providerAccountId === undefined ||
+            (task.privateCorrelationJson.providerAccountId ?? null) ===
+              filter.providerAccountId) &&
           (filter.parentTaskId === undefined ||
             task.privateCorrelationJson.parentTaskId === filter.parentTaskId) &&
           (!filter.statuses || filter.statuses.includes(task.status)),
@@ -256,6 +265,10 @@ afterEach(() => {
 });
 
 describe('agent task lifecycle IPC handlers', () => {
+  beforeEach(() => {
+    vi.stubEnv('SECRET_ENCRYPTION_KEY', Buffer.alloc(32, 7).toString('base64'));
+  });
+
   it('renders bounded todo state and returns stable user copy', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-task-ipc-'),
@@ -300,9 +313,45 @@ describe('agent task lifecycle IPC handlers', () => {
         ],
         stop: { label: 'Stop', actionToken: 'stop-token-1' },
         threadId: 'thread-1',
+        updatedAt: expect.any(String),
       }),
+      undefined,
     );
     expect(readResponse(runtimeHome, 'todo-ok')).toMatchObject({
+      ok: true,
+      message: 'Plan updated.',
+    });
+  });
+
+  it('accepts scheduled todo state without rendering it to the channel', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-task-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const { agentTaskLifecycleHandlers, taskData } =
+      await loadTaskLifecycleHandlers(runtimeHome);
+    const renderAgentTodo = vi.fn(async () => undefined);
+
+    await agentTaskLifecycleHandlers.todo_update(
+      contextFor({
+        data: {
+          ...taskData('todo-scheduled', 'todo_update', {
+            items: [
+              {
+                id: 'step-1',
+                title: 'Run scheduled work',
+                status: 'inProgress',
+              },
+            ],
+          }),
+          jobId: 'job-1',
+        },
+        renderAgentTodo,
+      }),
+    );
+
+    expect(renderAgentTodo).not.toHaveBeenCalled();
+    expect(readResponse(runtimeHome, 'todo-scheduled')).toMatchObject({
       ok: true,
       message: 'Plan updated.',
     });
@@ -335,6 +384,53 @@ describe('agent task lifecycle IPC handlers', () => {
       code: 'invalid_request',
       error:
         'todo_update requires 1-50 unique items with id, title, and status.',
+    });
+  });
+
+  it('provides task lifecycle service without an enforcing sandbox', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-task-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const {
+      agentTaskLifecycleHandlers,
+      taskData,
+      registerAsyncCommandSandboxPolicy,
+    } = await loadTaskLifecycleHandlers(runtimeHome);
+    const repository = new MemoryAsyncTaskRepository();
+    registerAsyncCommandSandboxPolicy({
+      sourceAgentFolder: 'main_agent',
+      runHandle: 'run-1',
+      policy: {
+        appId: 'app:test',
+        agentId: 'agent:main_agent',
+        conversationId: 'sl:C123',
+        threadId: 'thread-1',
+        runId: 'run-id-1',
+        protectedReadPaths: [],
+        protectedWritePaths: [],
+        allowedNetworkHosts: [],
+        resourceLimits: DEFAULT_ASYNC_RESOURCE_LIMITS,
+      },
+    });
+
+    await agentTaskLifecycleHandlers.task_list(
+      contextFor({
+        data: taskData('direct-task-list', 'task_list'),
+        deps: {
+          getAsyncTaskRepository: () => repository,
+          runnerSandboxProvider: {
+            id: 'direct',
+            enforcing: false,
+            start: vi.fn(),
+          },
+        },
+      }),
+    );
+
+    expect(readResponse(runtimeHome, 'direct-task-list')).toMatchObject({
+      ok: true,
+      data: { tasks: [] },
     });
   });
 
@@ -436,7 +532,7 @@ describe('agent task lifecycle IPC handlers', () => {
     });
     expect(readResponse(runtimeHome, 'async-start')).toMatchObject({
       ok: true,
-      message: 'Started: echo ok',
+      message: 'Queued: echo ok',
       data: { id: taskId, status: 'queued', kind: 'async_command' },
     });
 
@@ -510,7 +606,7 @@ describe('agent task lifecycle IPC handlers', () => {
     });
   });
 
-  it('scopes delegated child task tools to child-created async tasks', async () => {
+  it('scopes a targeted delegate to child-created async tasks', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-task-ipc-'),
     );
@@ -525,7 +621,7 @@ describe('agent task lifecycle IPC handlers', () => {
     const parent = await repository.createTask({
       id: 'task_parent',
       appId: 'app:test',
-      agentId: 'agent:main_agent',
+      agentId: 'agent:caller',
       conversationId: 'sl:C123',
       threadId: 'thread-1',
       parentRunId: 'run-id-1',
@@ -533,7 +629,7 @@ describe('agent task lifecycle IPC handlers', () => {
       status: 'running',
       admissionClass: 'task',
       authoritySnapshotJson: { toolName: 'delegate_task' },
-      privateCorrelationJson: {},
+      privateCorrelationJson: { targetAgentId: 'agent:main_agent' },
       leaseToken: 'parent-lease',
       fencingVersion: 1,
       now,
@@ -798,7 +894,7 @@ describe('agent task lifecycle IPC handlers', () => {
     );
   });
 
-  it('delegates an async child agent run and sends steering messages', async () => {
+  it('delegates an async child run to a bound target agent', async () => {
     const runtimeHome = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gantry-task-ipc-'),
     );
@@ -809,8 +905,38 @@ describe('agent task lifecycle IPC handlers', () => {
       registerAsyncCommandSandboxPolicy,
     } = await loadTaskLifecycleHandlers(runtimeHome);
     const repository = new MemoryAsyncTaskRepository();
+    const callableAgents = [
+      {
+        id: 'agent:main_agent',
+        appId: 'app:test',
+        name: 'Main',
+        status: 'active',
+      },
+      {
+        id: 'agent:reviewer',
+        appId: 'app:test',
+        name: 'Reviewer',
+        status: 'active',
+      },
+    ] as never;
+    let configuredDelegates = ['reviewer'];
+    const syntheticToolName = callableAgentToolName(
+      projectCallableAgentTools({
+        agents: callableAgents,
+        callerAppId: 'app:test',
+        callerAgentId: 'agent:main_agent',
+        callerFolder: 'main_agent',
+        delegates: ['reviewer'],
+        conversationBoundAgentIds: new Set(['agent:reviewer']),
+        toolPolicyRules: ['AgentDelegation'],
+      })[0]!,
+    );
+    let reviewerFileReadActive = true;
+    const sendMessage = vi.fn(async () => {
+      reviewerFileReadActive = false;
+    });
     const runAgent = vi.fn(
-      async (_group, input, onProcess, onOutput, options) => {
+      async (group, input, onProcess, onOutput, options) => {
         const child = new EventEmitter() as EventEmitter & {
           pid: number;
           killed: boolean;
@@ -828,6 +954,13 @@ describe('agent task lifecycle IPC handlers', () => {
           result: 'halfway',
         });
         expect(input.prompt).toContain('Objective: Research lead sources');
+        expect(group.folder).toBe('reviewer');
+        expect(group.providerAccountId).toBe('slack-two');
+        expect(input.agentId).toBe('agent:reviewer');
+        expect(input.workspaceFolder).toBe('reviewer');
+        if (sendMessage.mock.calls.length > 0) {
+          expect(input.toolPolicyRules).not.toContain('FileRead');
+        }
         expect(options?.asyncTaskRepositoryAvailable).toBe(true);
         return { status: 'success', result: 'delegated done' };
       },
@@ -837,51 +970,143 @@ describe('agent task lifecycle IPC handlers', () => {
       getToolRepository: () =>
         ({
           listTools: async () => [],
-          listAgentToolBindings: async () => [
+          listAgentToolBindings: async (query: { agentId: string }) => [
             { status: 'active', toolId: 'tool:delegation' },
+            ...(query.agentId === 'agent:reviewer' && reviewerFileReadActive
+              ? [{ status: 'active', toolId: 'tool:file-read' }]
+              : []),
           ],
-          getTool: async () => ({
+          getTool: async (toolId: string) => ({
             appId: 'app:test',
-            name: 'AgentDelegation',
+            name: toolId === 'tool:file-read' ? 'FileRead' : 'AgentDelegation',
           }),
         }) as never,
       runnerSandboxProvider: fakeEnforcingSandboxProvider(),
+      getAgentRepository: () =>
+        ({ listAgents: async () => callableAgents }) as never,
+      getPermissionRuntimeSettings: () =>
+        ({
+          agents: { main_agent: { delegates: configuredDelegates } },
+        }) as never,
+      sendMessage,
       runAgent,
+    };
+    const interactiveSandboxPolicy = {
+      appId: 'app:test',
+      agentId: 'agent:main_agent',
+      conversationId: 'sl:C123',
+      providerAccountId: 'slack-one',
+      threadId: 'thread-1',
+      correlationRunId: 'turn-correlation-1',
+      protectedReadPaths: [],
+      protectedWritePaths: [],
+      allowedNetworkHosts: [],
+      resourceLimits: {
+        cpuSeconds: 300,
+        memoryMb: 1024,
+        maxProcesses: 64,
+      },
     };
     registerAsyncCommandSandboxPolicy({
       sourceAgentFolder: 'main_agent',
       runHandle: 'run-1',
-      policy: {
-        appId: 'app:test',
-        agentId: 'agent:main_agent',
-        conversationId: 'sl:C123',
-        threadId: 'thread-1',
-        runId: 'run-id-1',
-        protectedReadPaths: [],
-        protectedWritePaths: [],
-        allowedNetworkHosts: [],
-        resourceLimits: {
-          cpuSeconds: 300,
-          memoryMb: 1024,
-          maxProcesses: 64,
-        },
-      },
+      policy: interactiveSandboxPolicy,
     });
+
+    const conversationBindings = {
+      'sl:C123': {
+        jid: 'sl:C123',
+        name: 'Lead gen',
+        folder: 'main_agent',
+        providerAccountId: 'slack-one',
+        conversationId: 'conversation:shared',
+        isRegistered: true,
+      },
+      'sl:C123::thread:thread-1::agent:agent%3Areviewer': {
+        jid: 'sl:C123',
+        name: 'Reviewer',
+        folder: 'reviewer',
+        agentId: 'agent:reviewer',
+        providerAccountId: 'slack-two',
+        conversationId: 'conversation:other',
+        isRegistered: true,
+      },
+    };
 
     await agentTaskLifecycleHandlers.delegate_task(
       contextFor({
-        data: taskData('delegate-start', 'delegate_task', {
-          objective: 'Research lead sources',
-        }),
-        deps,
-        conversationBindings: {
-          'sl:C123': {
-            jid: 'sl:C123',
-            name: 'Lead gen',
-            folder: 'main_agent',
-            isRegistered: true,
-          },
+        data: {
+          ...taskData('delegate-wrong-account', 'delegate_task', {
+            objective: 'Research lead sources',
+            targetAgentId: 'agent:reviewer',
+          }),
+          providerAccountId: 'slack-two',
         },
+        deps,
+        conversationBindings,
+      }),
+    );
+    expect(readResponse(runtimeHome, 'delegate-wrong-account')).toMatchObject({
+      ok: false,
+      code: 'forbidden',
+    });
+    expect(repository.tasks.size).toBe(0);
+
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...taskData('delegate-other-conversation', 'delegate_task', {
+            objective: 'Research lead sources',
+            targetAgentId: 'agent:reviewer',
+          }),
+          providerAccountId: 'slack-one',
+        },
+        deps,
+        conversationBindings,
+      }),
+    );
+    expect(
+      readResponse(runtimeHome, 'delegate-other-conversation'),
+    ).toMatchObject({ ok: false, code: 'not_found' });
+    expect(repository.tasks.size).toBe(0);
+    conversationBindings[
+      'sl:C123::thread:thread-1::agent:agent%3Areviewer'
+    ].conversationId = 'conversation:shared';
+
+    configuredDelegates = [];
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...taskData('delegate-not-allowlisted', 'delegate_task', {
+            objective: 'Research lead sources',
+            targetAgentId: 'agent:reviewer',
+          }),
+          providerAccountId: 'slack-one',
+        },
+        deps,
+        conversationBindings,
+      }),
+    );
+    expect(readResponse(runtimeHome, 'delegate-not-allowlisted')).toMatchObject(
+      {
+        ok: false,
+        code: 'forbidden',
+      },
+    );
+    expect(repository.tasks.size).toBe(0);
+    configuredDelegates = ['reviewer'];
+
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...taskData('delegate-start', 'delegate_task', {
+            objective: 'Research lead sources',
+            targetAgentId: 'agent:reviewer',
+          }),
+          providerAccountId: 'slack-one',
+        },
+        deps,
+        conversationBindings,
       }),
     );
 
@@ -891,14 +1116,229 @@ describe('agent task lifecycle IPC handlers', () => {
       ok: true,
       data: { id: taskId, kind: 'delegated_agent' },
     });
+    expect(repository.tasks.get(taskId!)?.privateCorrelationJson).toMatchObject(
+      { targetAgentId: 'agent:reviewer', workspaceFolder: 'reviewer' },
+    );
+    expect(repository.tasks.get(taskId!)?.authoritySnapshotJson).toEqual({
+      toolName: 'delegate_task',
+      maxDepth: 1,
+    });
+    expect(
+      readEncryptedAsyncTaskPayload<{ providerAccountId?: string }>(
+        repository.tasks.get(taskId!)!,
+      ),
+    ).toMatchObject({ providerAccountId: 'slack-one' });
     await waitForStatus(repository, 'completed');
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    const { runId: runnerSuppliedRunId, ...syntheticDelegationData } = taskData(
+      'delegate-synthetic',
+      'delegate_task',
+      {
+        objective: 'Research lead sources',
+        targetAgentId: 'agent:reviewer',
+        callableAgentToolName: syntheticToolName,
+        syncWaitTimeoutMs: 60_000,
+      },
+    );
+    expect(runnerSuppliedRunId).toBe('run-id-1');
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...syntheticDelegationData,
+          providerAccountId: 'slack-one',
+        },
+        deps,
+        conversationBindings,
+      }),
+    );
+    expect(
+      [...repository.tasks.values()].find(
+        (task) => task.authoritySnapshotJson.toolName === 'AgentDelegation',
+      )?.authoritySnapshotJson,
+    ).toEqual({ toolName: 'AgentDelegation', maxDepth: 1 });
+    expect(readResponse(runtimeHome, 'delegate-synthetic')).toMatchObject({
+      ok: true,
+      data: { status: 'completed' },
+    });
+    expect(runAgent).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ parentRunId: 'turn-correlation-1' }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Object),
+    );
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    expect(sendMessage).toHaveBeenNthCalledWith(
+      1,
+      'sl:C123',
+      'Checking with the Reviewer agent about: Research lead sources…',
+      {
+        threadId: 'thread-1',
+        providerAccountId: 'slack-one',
+        files: undefined,
+      },
+    );
+    expect(sendMessage).toHaveBeenNthCalledWith(
+      2,
+      'sl:C123',
+      'Reviewer responded.',
+      {
+        threadId: 'thread-1',
+        providerAccountId: 'slack-one',
+        files: undefined,
+      },
+    );
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual([
+      'Checking with the Reviewer agent about: Research lead sources…',
+      'Reviewer responded.',
+    ]);
+
+    sendMessage.mockClear();
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...taskData('delegate-synthetic-spoofed-job', 'delegate_task', {
+            objective: 'Research lead sources',
+            targetAgentId: 'agent:reviewer',
+            callableAgentToolName: syntheticToolName,
+            syncWaitTimeoutMs: 60_000,
+          }),
+          providerAccountId: 'slack-one',
+          jobId: 'spoofed-job',
+        },
+        deps,
+        conversationBindings,
+      }),
+    );
+    expect(
+      readResponse(runtimeHome, 'delegate-synthetic-spoofed-job'),
+    ).toMatchObject({ ok: true, data: { status: 'completed' } });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+
+    sendMessage.mockClear();
+    registerAsyncCommandSandboxPolicy({
+      sourceAgentFolder: 'main_agent',
+      runHandle: 'run-1',
+      policy: { ...interactiveSandboxPolicy, jobId: 'job-1' },
+    });
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...taskData('delegate-synthetic-scheduled', 'delegate_task', {
+            objective: 'Research lead sources',
+            targetAgentId: 'agent:reviewer',
+            callableAgentToolName: syntheticToolName,
+            syncWaitTimeoutMs: 60_000,
+          }),
+          providerAccountId: 'slack-one',
+          jobId: 'job-1',
+        },
+        deps,
+        conversationBindings,
+      }),
+    );
+    expect(
+      readResponse(runtimeHome, 'delegate-synthetic-scheduled'),
+    ).toMatchObject({ ok: true, data: { status: 'completed' } });
+    expect(sendMessage).not.toHaveBeenCalled();
+    registerAsyncCommandSandboxPolicy({
+      sourceAgentFolder: 'main_agent',
+      runHandle: 'run-1',
+      policy: interactiveSandboxPolicy,
+    });
+
+    runAgent.mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Reviewed three sources.',
+        });
+        return {
+          status: 'error',
+          result: null,
+          error: 'Lead source review failed.',
+        };
+      },
+    );
+    await agentTaskLifecycleHandlers.delegate_task(
+      contextFor({
+        data: {
+          ...taskData('delegate-failure', 'delegate_task', {
+            objective: 'Review lead sources',
+            targetAgentId: 'agent:reviewer',
+          }),
+          providerAccountId: 'slack-one',
+        },
+        deps,
+        conversationBindings,
+      }),
+    );
+    const failedTaskId = await waitForStatus(repository, 'failed');
+    await agentTaskLifecycleHandlers.task_get(
+      contextFor({
+        data: {
+          ...taskData('delegate-failure-get', 'task_get', {
+            taskId: failedTaskId,
+          }),
+          providerAccountId: 'slack-one',
+        },
+        deps,
+      }),
+    );
+    expect(readResponse(runtimeHome, 'delegate-failure-get')).toMatchObject({
+      ok: true,
+      data: {
+        status: 'failed',
+        failure: {
+          type: 'execution',
+          attemptedAction: 'Review lead sources',
+          partialResult: 'Reviewed three sources.',
+        },
+      },
+    });
+
+    registerAsyncCommandSandboxPolicy({
+      sourceAgentFolder: 'main_agent',
+      runHandle: 'run-other-account',
+      policy: {
+        appId: 'app:test',
+        agentId: 'agent:main_agent',
+        conversationId: 'sl:C123',
+        providerAccountId: 'slack-two',
+        threadId: 'thread-1',
+        runId: 'run-id-2',
+        protectedReadPaths: [],
+        protectedWritePaths: [],
+        allowedNetworkHosts: [],
+        resourceLimits: { cpuSeconds: 300, memoryMb: 1024, maxProcesses: 64 },
+      },
+    });
+    await agentTaskLifecycleHandlers.task_get(
+      contextFor({
+        data: {
+          ...taskData('delegate-cross-account-get', 'task_get', { taskId }),
+          providerAccountId: 'slack-two',
+          runHandle: 'run-other-account',
+          runId: 'run-id-2',
+        },
+        deps,
+      }),
+    );
+    expect(
+      readResponse(runtimeHome, 'delegate-cross-account-get'),
+    ).toMatchObject({ ok: false, code: 'not_found' });
 
     await agentTaskLifecycleHandlers.task_message(
       contextFor({
-        data: taskData('delegate-message', 'task_message', {
-          taskId,
-          message: 'Narrow the scope.',
-        }),
+        data: {
+          ...taskData('delegate-message', 'task_message', {
+            taskId,
+            message: 'Narrow the scope.',
+          }),
+          providerAccountId: 'slack-one',
+        },
         deps,
       }),
     );

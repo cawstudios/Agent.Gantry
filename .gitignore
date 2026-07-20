@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+/node_modules
 .npm-cache/
 # Build output
 dist/
@@ -60,3 +61,4 @@ tmp-coverage/
 agents-sdk-docs
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+.codex-wt-*

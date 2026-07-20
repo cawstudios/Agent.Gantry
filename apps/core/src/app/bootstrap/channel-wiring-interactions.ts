@@ -1,7 +1,5 @@
 import {
   RICH_INTERACTION_NATIVE_FALLBACK_TEXT,
-  type PermissionApprovalDecision,
-  type PermissionApprovalRequest,
   type RichInteractionRequest,
   type UserQuestionRequest,
   type UserQuestionResponse,
@@ -10,8 +8,7 @@ import type {
   AgentTodoCardStatus,
   AgentTodoRender,
 } from '../../domain/ports/task-lifecycle.js';
-import { formatDuration } from '../../shared/human-format.js';
-import { PERMISSION_APPROVAL_TIMEOUT_MS } from '../../shared/permission-timeout.js';
+import { DurableInteractionPersistenceError } from '../../application/interactions/pending-interaction-durability.js';
 
 type ChannelLike = object;
 
@@ -20,18 +17,20 @@ interface ChannelWiringInteractionsLogger {
   error: (dataOrMsg: string | Record<string, unknown>, msg?: string) => void;
 }
 
-interface PermissionApprovalSurfaceLike {
-  requestPermissionApproval: (
-    targetJid: string,
-    request: PermissionApprovalRequest,
-  ) => Promise<PermissionApprovalDecision>;
-}
-
 interface UserQuestionSurfaceLike {
   requestUserAnswer: (
     targetJid: string,
     request: UserQuestionRequest,
+    onPromptDelivered?: (messageId: string, questionIndex?: number) => void,
   ) => Promise<UserQuestionResponse>;
+  questionIndexesForDeliveredPrompt?: (
+    request: UserQuestionRequest,
+    firstQuestionIndex: number,
+  ) => number[];
+  dropPendingInteraction?: (
+    kind: 'permission' | 'question',
+    request: UserQuestionRequest,
+  ) => void;
 }
 
 interface AgentTodoSurfaceLike {
@@ -48,8 +47,14 @@ interface RichInteractionSurfaceLike {
   ) => Promise<void | boolean>;
 }
 
+type ProviderAccountOptions = { providerAccountId?: string };
+
 export interface AgentTodoRenderer {
-  (jid: string, render: AgentTodoRender): Promise<boolean>;
+  (
+    jid: string,
+    render: AgentTodoRender,
+    options?: ProviderAccountOptions,
+  ): Promise<boolean>;
   finalize: (
     jid: string,
     input: {
@@ -57,136 +62,25 @@ export interface AgentTodoRenderer {
       cardKind?: AgentTodoRender['cardKind'];
       status: AgentTodoCardStatus;
     },
+    options?: ProviderAccountOptions,
   ) => Promise<boolean>;
 }
 
-interface PermissionApprovalTargetResolution {
-  targetJid: string;
-  request: PermissionApprovalRequest;
-}
-
-interface PermissionApprovalTargetBlocked {
-  blockedReason: string;
-}
-
-const permissionTimeoutDecision = (
-  _request: PermissionApprovalRequest,
-): PermissionApprovalDecision => ({
-  approved: false,
-  decidedBy: 'system',
-  reason: `No approval received within ${formatDuration(PERMISSION_APPROVAL_TIMEOUT_MS)}. Retry when an approver is available.`,
-  decisionClassification: 'user_reject',
-});
-
-function resolvePermissionApprovalTarget(
-  request: PermissionApprovalRequest,
-): PermissionApprovalTargetResolution | PermissionApprovalTargetBlocked {
-  const targetJid = request.targetJid;
-  if (!targetJid) {
-    return { blockedReason: 'Permission approval target is missing' };
-  }
-  return { targetJid, request };
-}
-
-export function createPermissionApprovalRequester(input: {
-  findBoundChannel: (jid: string) => ChannelLike | undefined;
-  asPermissionApprovalSurface: (
-    channel: ChannelLike,
-  ) => PermissionApprovalSurfaceLike | undefined;
-  logger: Pick<ChannelWiringInteractionsLogger, 'error'>;
-}): (
-  request: PermissionApprovalRequest,
-) => Promise<PermissionApprovalDecision> {
-  return async (
-    request: PermissionApprovalRequest,
-  ): Promise<PermissionApprovalDecision> => {
-    if (!request.targetJid) {
-      return {
-        approved: false,
-        reason: 'Permission approval target is missing',
-      };
-    }
-
-    const routed = resolvePermissionApprovalTarget(request);
-    if ('blockedReason' in routed) {
-      return { approved: false, reason: routed.blockedReason };
-    }
-    const channel = input.findBoundChannel(routed.targetJid);
-    const approvalSurface = channel
-      ? input.asPermissionApprovalSurface(channel)
-      : undefined;
-    if (!approvalSurface) {
-      return {
-        approved: false,
-        reason: 'Target channel does not support permission approvals',
-      };
-    }
-    try {
-      return await new Promise<PermissionApprovalDecision>((resolve) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          resolve(permissionTimeoutDecision(request));
-        }, PERMISSION_APPROVAL_TIMEOUT_MS);
-        approvalSurface
-          .requestPermissionApproval(routed.targetJid, routed.request)
-          .then((decision) => {
-            if (settled) {
-              input.logger.error({
-                targetJid: routed.targetJid,
-                requestId: request.requestId,
-                message: 'Late permission approval ignored after timeout',
-              });
-              return;
-            }
-            settled = true;
-            clearTimeout(timer);
-            resolve(decision);
-          })
-          .catch((err: unknown) => {
-            if (settled) {
-              input.logger.error({
-                err,
-                targetJid: routed.targetJid,
-                requestId: request.requestId,
-                message:
-                  'Late permission approval failure ignored after timeout',
-              });
-              return;
-            }
-            settled = true;
-            clearTimeout(timer);
-            input.logger.error({
-              err,
-              targetJid: routed.targetJid,
-              requestId: request.requestId,
-              message: 'Target channel permission approval flow failed',
-            });
-            resolve({
-              approved: false,
-              reason: 'Permission approval flow failed',
-            });
-          });
-      });
-    } catch (err) {
-      input.logger.error({
-        err,
-        targetJid: routed.targetJid,
-        requestId: request.requestId,
-        message: 'Target channel permission approval flow failed',
-      });
-      return { approved: false, reason: 'Permission approval flow failed' };
-    }
-  };
-}
-
 export function createUserQuestionResponder(input: {
-  findBoundChannel: (jid: string) => ChannelLike | undefined;
+  findBoundChannel: (
+    jid: string,
+    request?: UserQuestionRequest,
+  ) => ChannelLike | undefined;
   asUserQuestionSurface: (
     channel: ChannelLike,
   ) => UserQuestionSurfaceLike | undefined;
-  logger: ChannelWiringInteractionsLogger;
+  interactionLifecycle: {
+    logger: ChannelWiringInteractionsLogger;
+    resetStreaming?: (
+      jid: string,
+      options?: { providerAccountId?: string; threadId?: string },
+    ) => void;
+  };
 }): {
   requestUserAnswer: (
     request: UserQuestionRequest,
@@ -195,17 +89,15 @@ export function createUserQuestionResponder(input: {
 } {
   const userQuestionResponseCache = new Map<string, UserQuestionResponse>();
 
-  async function requestUserAnswer(
+  async function dispatchUserAnswer(
     request: UserQuestionRequest,
+    onPromptDelivered?: (messageId: string, questionIndex?: number) => void,
   ): Promise<UserQuestionResponse> {
     if (!request.targetJid) {
       return { requestId: request.requestId, answers: {} };
     }
 
-    const requestKey = `${request.targetJid}:${request.requestId}`;
-    const cached = userQuestionResponseCache.get(requestKey);
-    if (cached) return cached;
-    const channel = input.findBoundChannel(request.targetJid);
+    const channel = input.findBoundChannel(request.targetJid, request);
     const questionSurface = channel
       ? input.asUserQuestionSurface(channel)
       : undefined;
@@ -216,11 +108,32 @@ export function createUserQuestionResponder(input: {
       const response = await questionSurface.requestUserAnswer(
         request.targetJid,
         request,
+        (messageId, questionIndex) => {
+          input.interactionLifecycle.resetStreaming?.(request.targetJid!, {
+            providerAccountId: request.providerAccountId,
+            threadId: request.threadId,
+          });
+          if (questionIndex === undefined) {
+            onPromptDelivered?.(messageId);
+            return;
+          }
+          const deliveredIndexes =
+            questionSurface.questionIndexesForDeliveredPrompt?.(
+              request,
+              questionIndex,
+            ) ?? [questionIndex];
+          deliveredIndexes.forEach((index) =>
+            onPromptDelivered?.(messageId, index),
+          );
+        },
       );
-      userQuestionResponseCache.set(requestKey, response);
       return response;
     } catch (err) {
-      input.logger.error({
+      if (err instanceof DurableInteractionPersistenceError) {
+        questionSurface.dropPendingInteraction?.('question', request);
+        throw err;
+      }
+      input.interactionLifecycle.logger.error({
         err,
         targetJid: request.targetJid,
         requestId: request.requestId,
@@ -228,6 +141,17 @@ export function createUserQuestionResponder(input: {
       });
       return { requestId: request.requestId, answers: {} };
     }
+  }
+
+  async function requestUserAnswer(
+    request: UserQuestionRequest,
+  ): Promise<UserQuestionResponse> {
+    const requestKey = `${request.targetJid}:${request.requestId}`;
+    const cached = userQuestionResponseCache.get(requestKey);
+    if (cached) return cached;
+    const response = await dispatchUserAnswer(request);
+    userQuestionResponseCache.set(requestKey, response);
+    return response;
   }
 
   return {
@@ -239,19 +163,28 @@ export function createUserQuestionResponder(input: {
 }
 
 export function createRichInteractionRenderer(input: {
-  findBoundChannel: (jid: string) => ChannelLike | undefined;
+  findBoundChannel: (
+    jid: string,
+    providerAccountId?: string,
+  ) => ChannelLike | undefined;
   asRichInteractionSurface: (
     channel: ChannelLike,
   ) => RichInteractionSurfaceLike | undefined;
   sendMessage: (
     jid: string,
     text: string,
-    options?: { threadId?: string },
+    options?: { threadId?: string; providerAccountId?: string },
   ) => Promise<unknown>;
   logger: Pick<ChannelWiringInteractionsLogger, 'error'>;
-}): (jid: string, request: RichInteractionRequest) => Promise<boolean> {
-  return async (jid, request): Promise<boolean> => {
-    const channel = input.findBoundChannel(jid);
+}): (
+  jid: string,
+  request: RichInteractionRequest,
+  options?: ProviderAccountOptions,
+) => Promise<boolean> {
+  return async (jid, request, options): Promise<boolean> => {
+    const providerAccountId =
+      options?.providerAccountId ?? request.providerAccountId;
+    const channel = input.findBoundChannel(jid, providerAccountId);
     const surface = channel
       ? input.asRichInteractionSurface(channel)
       : undefined;
@@ -272,7 +205,10 @@ export function createRichInteractionRenderer(input: {
     await input.sendMessage(
       jid,
       `${RICH_INTERACTION_NATIVE_FALLBACK_TEXT}\n\n${request.descriptor.rich?.fallbackText ?? request.descriptor.fallbackText ?? ''}`.trim(),
-      { ...(request.threadId ? { threadId: request.threadId } : {}) },
+      {
+        ...(request.threadId ? { threadId: request.threadId } : {}),
+        ...(providerAccountId ? { providerAccountId } : {}),
+      },
     );
     return true;
   };
@@ -291,7 +227,10 @@ export function createRichInteractionRenderer(input: {
 const AGENT_TODO_RENDER_THROTTLE_MS = 1000;
 
 export function createAgentTodoRenderer(input: {
-  findBoundChannel: (jid: string) => ChannelLike | undefined;
+  findBoundChannel: (
+    jid: string,
+    providerAccountId?: string,
+  ) => ChannelLike | undefined;
   asAgentTodoSurface: (
     channel: ChannelLike,
   ) => AgentTodoSurfaceLike | undefined;
@@ -304,16 +243,20 @@ export function createAgentTodoRenderer(input: {
   // ponytail: ceiling is the latest in-memory render only; todo state stays non-durable.
   const latest = new Map<string, AgentTodoRender>();
 
-  const getSurface = (jid: string): AgentTodoSurfaceLike | undefined => {
-    const channel = input.findBoundChannel(jid);
+  const getSurface = (
+    jid: string,
+    options?: ProviderAccountOptions,
+  ): AgentTodoSurfaceLike | undefined => {
+    const channel = input.findBoundChannel(jid, options?.providerAccountId);
     return channel ? input.asAgentTodoSurface(channel) : undefined;
   };
 
   const flush = async (
     jid: string,
     render: AgentTodoRender,
+    options?: ProviderAccountOptions,
   ): Promise<boolean> => {
-    const surface = getSurface(jid);
+    const surface = getSurface(jid, options);
     if (!surface) return false;
     try {
       return (await surface.renderAgentTodo(jid, render)) !== false;
@@ -327,18 +270,26 @@ export function createAgentTodoRenderer(input: {
     }
   };
 
-  const renderKey = (jid: string, render: AgentTodoRender): string =>
-    `${jid}:${render.threadId ?? ''}:${render.cardKind ?? 'todo'}`;
+  const renderKey = (
+    jid: string,
+    render: AgentTodoRender,
+    options?: ProviderAccountOptions,
+  ): string =>
+    `${options?.providerAccountId ?? ''}:${jid}:${render.threadId ?? ''}:${render.cardKind ?? 'todo'}`;
 
-  const openWindow = (key: string, jid: string): void => {
+  const openWindow = (
+    key: string,
+    jid: string,
+    options?: ProviderAccountOptions,
+  ): void => {
     const timer = setTimeout(() => {
       const entry = windows.get(key);
       if (!entry) return;
       const next = entry.pending;
       if (next) {
         entry.pending = null;
-        openWindow(key, jid);
-        void flush(jid, next);
+        openWindow(key, jid, options);
+        void flush(jid, next, options);
       } else {
         windows.delete(key);
       }
@@ -351,9 +302,10 @@ export function createAgentTodoRenderer(input: {
   const renderTodo = (async (
     jid: string,
     render: AgentTodoRender,
+    options?: ProviderAccountOptions,
   ): Promise<boolean> => {
-    if (!jid || !getSurface(jid)) return false;
-    const key = renderKey(jid, render);
+    if (!jid || !getSurface(jid, options)) return false;
+    const key = renderKey(jid, render, options);
     latest.set(key, render);
     if (render.flush) {
       const existing = windows.get(key);
@@ -361,7 +313,7 @@ export function createAgentTodoRenderer(input: {
         clearTimeout(existing.timer);
         windows.delete(key);
       }
-      return flush(jid, render);
+      return flush(jid, render, options);
     }
     const existing = windows.get(key);
     if (existing) {
@@ -369,8 +321,8 @@ export function createAgentTodoRenderer(input: {
       existing.pending = render;
       return true;
     }
-    openWindow(key, jid);
-    return flush(jid, render);
+    openWindow(key, jid, options);
+    return flush(jid, render, options);
   }) as AgentTodoRenderer;
 
   renderTodo.finalize = async (
@@ -380,23 +332,32 @@ export function createAgentTodoRenderer(input: {
       cardKind?: AgentTodoRender['cardKind'];
       status: AgentTodoCardStatus;
     },
+    options?: ProviderAccountOptions,
   ): Promise<boolean> => {
-    if (!jid || !getSurface(jid)) return false;
-    const key = renderKey(jid, {
-      summary: null,
-      items: [],
-      threadId: final.threadId ?? null,
-      cardKind: final.cardKind ?? 'todo',
-    });
+    if (!jid || !getSurface(jid, options)) return false;
+    const key = renderKey(
+      jid,
+      {
+        summary: null,
+        items: [],
+        threadId: final.threadId ?? null,
+        cardKind: final.cardKind ?? 'todo',
+      },
+      options,
+    );
     const render = latest.get(key);
     if (!render) return false;
-    return renderTodo(jid, {
-      ...render,
-      status: final.status,
-      stop: undefined,
-      updatedAt: new Date().toISOString(),
-      flush: true,
-    });
+    return renderTodo(
+      jid,
+      {
+        ...render,
+        status: final.status,
+        stop: undefined,
+        updatedAt: new Date().toISOString(),
+        flush: true,
+      },
+      options,
+    );
   };
 
   return renderTodo;

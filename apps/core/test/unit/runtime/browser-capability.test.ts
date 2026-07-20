@@ -115,6 +115,8 @@ vi.mock('@core/infrastructure/logging/logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
   },
+  withLogContext: (_context: unknown, callback: () => unknown) => callback(),
+  updateLogContext: vi.fn(),
 }));
 
 function cdpResponse(body: unknown): Response {
@@ -195,8 +197,10 @@ describe('browser-capability', () => {
   let existsSyncSpy: ReturnType<typeof vi.spyOn>;
   let rmSyncSpy: ReturnType<typeof vi.spyOn>;
   let statSyncSpy: ReturnType<typeof vi.spyOn>;
+  let readFileSyncSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    vi.useRealTimers();
     vi.resetModules();
     fs.mkdirSync('/tmp/gantry-browser-capability-test', { recursive: true });
     fs.writeFileSync(
@@ -226,6 +230,15 @@ describe('browser-capability', () => {
       return true;
     });
     existsSyncSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    const originalReadFileSync = fs.readFileSync;
+    readFileSyncSpy = vi
+      .spyOn(fs, 'readFileSync')
+      .mockImplementation((filePath, ...args: any[]) => {
+        if (String(filePath).startsWith('/proc/')) {
+          throw new Error('mock proc error');
+        }
+        return originalReadFileSync(filePath, ...(args as [any]));
+      });
     statSyncSpy = vi.spyOn(fs, 'statSync').mockImplementation((filePath) => {
       const value = String(filePath);
       if (value.endsWith('/Default/Cookies')) {
@@ -239,10 +252,12 @@ describe('browser-capability', () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     const manager = await import('@core/runtime/browser-capability.js');
     await manager.closeAllBrowsers();
     killSpy.mockRestore();
     existsSyncSpy.mockRestore();
+    readFileSyncSpy.mockRestore();
     rmSyncSpy.mockRestore();
     statSyncSpy.mockRestore();
     fs.rmSync('/tmp/gantry-browser-capability-test', {

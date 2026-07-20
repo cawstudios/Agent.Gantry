@@ -8,14 +8,14 @@ import {
 async function createTelegramBuiltInChannel(
   opts: ChannelOpts,
 ): Promise<ChannelAdapter | null> {
-  const mod = await import('./telegram.js');
+  const mod = await import('./telegram/channel-adapter.js');
   return await mod.createTelegramChannel(opts);
 }
 
 async function createSlackBuiltInChannel(
   opts: ChannelOpts,
 ): Promise<ChannelAdapter | null> {
-  const mod = await import('./slack.js');
+  const mod = await import('./slack/channel-adapter.js');
   return await mod.createSlackChannel(opts);
 }
 
@@ -42,10 +42,14 @@ async function createAppBuiltInChannel(
 
 async function runBuiltInSetup(
   providerLabel: string,
-  setup: (runtimeHome: string) => Promise<number>,
+  setup: (
+    runtimeHome: string,
+    agentId?: string,
+    agentName?: string,
+  ) => Promise<number>,
   ctx: ChannelProviderSetupContext,
 ): Promise<void> {
-  const code = await setup(ctx.runtimeHome);
+  const code = await setup(ctx.runtimeHome, ctx.agentId, ctx.agentName);
   if (code !== 0) {
     throw new Error(
       `${providerLabel} connect command exited with status ${code}`,
@@ -53,24 +57,58 @@ async function runBuiltInSetup(
   }
 }
 
-async function runTelegramSetup(runtimeHome: string): Promise<number> {
+async function runTelegramSetup(
+  runtimeHome: string,
+  agentId?: string,
+  agentName?: string,
+): Promise<number> {
   const mod = await import('../cli/telegram-connect.js');
-  return await mod.runTelegramConnectCommand(runtimeHome);
+  return agentId
+    ? await mod.runTelegramConnectCommand(runtimeHome, agentId, agentName)
+    : await mod.runTelegramConnectCommand(runtimeHome);
 }
 
-async function runSlackSetup(runtimeHome: string): Promise<number> {
+async function runSlackSetup(
+  runtimeHome: string,
+  agentId?: string,
+  agentName?: string,
+): Promise<number> {
   const mod = await import('../cli/slack.js');
-  return await mod.runSlackConnectCommand(runtimeHome);
+  return agentId
+    ? await mod.runSlackConnectCommand(runtimeHome, agentId, agentName)
+    : await mod.runSlackConnectCommand(runtimeHome);
 }
 
-async function runTeamsSetup(runtimeHome: string): Promise<number> {
+async function runTeamsSetup(
+  runtimeHome: string,
+  agentId?: string,
+  agentName?: string,
+): Promise<number> {
   const mod = await import('../cli/teams.js');
-  return await mod.runTeamsConnectCommand(runtimeHome);
+  return agentId
+    ? await mod.runTeamsConnectCommand(
+        runtimeHome,
+        undefined,
+        agentId,
+        agentName,
+      )
+    : await mod.runTeamsConnectCommand(runtimeHome);
 }
 
-async function runDiscordSetup(runtimeHome: string): Promise<number> {
+async function runDiscordSetup(
+  runtimeHome: string,
+  agentId?: string,
+  agentName?: string,
+): Promise<number> {
   const mod = await import('../cli/discord.js');
-  return await mod.runDiscordConnectCommand(runtimeHome);
+  return agentId
+    ? await mod.runDiscordConnectCommand(
+        runtimeHome,
+        undefined,
+        agentId,
+        agentName,
+      )
+    : await mod.runDiscordConnectCommand(runtimeHome);
 }
 
 function isChannelEnabled(
@@ -89,7 +127,7 @@ const telegramProvider: Provider = {
   folderPrefix: 'telegram_',
   isGroupJid: (jid: string) => jid.startsWith('tg:-'),
   canStreamToJid: (jid: string) => jid.startsWith('tg:-'),
-  formatting: 'telegram-html',
+  formatting: 'telegram-markdown-v2',
   isEnabled: (settings) => isChannelEnabled(settings, 'telegram'),
   create: createTelegramBuiltInChannel,
   setup: {

@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -5,9 +7,11 @@ import type {
   SettingsRevision,
   SettingsRevisionRepository,
 } from '@core/domain/ports/fleet-capability-state.js';
-import type { ProviderConnectionRepository } from '@core/domain/ports/repositories.js';
-import type { ProviderConnection } from '@core/domain/provider/provider.js';
+import type { ProviderAccountRepository } from '@core/domain/ports/repositories.js';
+import type { ProviderAccount } from '@core/domain/provider/provider.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings-defaults.js';
+import { parseRuntimeSettings } from '@core/config/settings/runtime-settings.js';
+import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 import {
   CURRENT_SETTINGS_READER_VERSION,
   importFleetSettingsRevision,
@@ -110,8 +114,25 @@ function baseDeps(repo: SettingsRevisionRepository) {
   };
 }
 
+function settingsWithDuplicateCapability(agentName: string) {
+  const settings = createDefaultRuntimeSettings();
+  settings.agents.main_agent = {
+    name: agentName,
+    folder: 'main_agent',
+    delegates: [],
+    bindings: {},
+    sources: { skills: [], mcpServers: [], tools: [] },
+    capabilities: [
+      { id: 'browser.use', version: 'builtin' },
+      { id: 'browser.use', version: 'builtin' },
+    ],
+    accessPreset: 'full',
+  };
+  return settings;
+}
+
 describe('importFleetSettingsRevision', () => {
-  it('workstation import can mirror the applied settings into settings revisions', async () => {
+  it('returns revision_created when workstation import appends a revision', async () => {
     capabilityErrors = [];
     const inputSettings = createDefaultRuntimeSettings();
     inputSettings.agent.name = 'Input Agent';
@@ -137,7 +158,7 @@ describe('importFleetSettingsRevision', () => {
       inputSettings,
     );
 
-    expect(outcome).toEqual({ revision: 1 });
+    expect(outcome).toEqual({ status: 'revision_created', revision: 1 });
     expect(repo.rows[0]).toMatchObject({
       revision: 1,
       createdBy: 'test:workstation',
@@ -175,13 +196,31 @@ describe('importFleetSettingsRevision', () => {
       createDefaultRuntimeSettings(),
     );
 
-    expect(outcome).toEqual({});
+    expect(outcome).toEqual({ status: 'applied_no_revision' });
     expect(repo.rows).toHaveLength(0);
     expect(applyRuntimeSettingsDesiredState).toHaveBeenCalled();
     expect(logWarn).toHaveBeenCalledWith(
       { err: repo.appendError },
       'settings revision mirror failed after workstation settings applied',
     );
+  });
+
+  it('returns applied_no_revision without a revision mirror', async () => {
+    capabilityErrors = [];
+    const settings = createDefaultRuntimeSettings();
+    applyRuntimeSettingsDesiredState.mockResolvedValue(settings);
+
+    const outcome = await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+      },
+      settings,
+    );
+
+    expect(outcome).toEqual({ status: 'applied_no_revision' });
   });
 
   it('required workstation mirror propagates append failure', async () => {
@@ -211,7 +250,7 @@ describe('importFleetSettingsRevision', () => {
     ).rejects.toThrow('settings revisions unavailable');
   });
 
-  it('skips a mirrored append when the applied settings already match latest', async () => {
+  it('returns no_op when the required mirror already matches latest', async () => {
     capabilityErrors = [];
     const appliedSettings = createDefaultRuntimeSettings();
     applyRuntimeSettingsDesiredState.mockImplementation(
@@ -241,7 +280,37 @@ describe('importFleetSettingsRevision', () => {
       createDefaultRuntimeSettings(),
     );
 
-    expect(outcome).toEqual({});
+    expect(outcome).toEqual({ status: 'no_op' });
+    expect(repo.rows).toHaveLength(1);
+  });
+
+  it('returns applied_no_revision when the optional mirror already matches after apply', async () => {
+    capabilityErrors = [];
+    const appliedSettings = createDefaultRuntimeSettings();
+    applyRuntimeSettingsDesiredState.mockResolvedValue(appliedSettings);
+    const repo = new FakeRevisionRepo();
+    await repo.appendSettingsRevision({
+      appId: 'default',
+      settingsDocument: settingsToRevisionDocument(appliedSettings),
+      minReaderVersion: CURRENT_SETTINGS_READER_VERSION,
+      createdBy: 'seed',
+    });
+
+    const outcome = await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+        revisionMirror: {
+          settingsRevisions: repo,
+          createdBy: 'test:workstation',
+        },
+      },
+      appliedSettings,
+    );
+
+    expect(outcome).toEqual({ status: 'applied_no_revision' });
     expect(repo.rows).toHaveLength(1);
   });
 
@@ -281,29 +350,48 @@ describe('importFleetSettingsRevision', () => {
     expect(repo.rows).toHaveLength(2);
   });
 
-  it('accepts previous settings canonicalized from the latest revision document', async () => {
+  it('canonicalizes old revision rows before stale revision comparison', async () => {
     capabilityErrors = [];
     applyRuntimeSettingsDesiredState.mockReset();
     applyRuntimeSettingsDesiredState.mockImplementation(
       async (input: { settings: unknown }) => input.settings,
     );
-    const seedSettings = createDefaultRuntimeSettings();
-    const latestDocument = settingsToRevisionDocument(seedSettings);
-    delete latestDocument.browser;
-    delete latestDocument.model_aliases;
-    const previousSettings = settingsFromRevisionDocument(latestDocument);
-    const nextSettings = structuredClone(previousSettings);
-    nextSettings.agent.name = 'updated';
+    const previousSettings = createDefaultRuntimeSettings();
+    previousSettings.providerAccounts.telegram_default = {
+      agentId: 'main_agent',
+      provider: 'telegram',
+      label: 'Telegram',
+      runtimeSecretRefs: {},
+    };
+    previousSettings.agents.main_agent = {
+      name: 'Main Agent',
+      folder: 'main_agent',
+      delegates: [],
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+      relationshipMode: 'personal',
+    };
+    const legacyDocument = settingsToRevisionDocument(previousSettings);
+    (
+      legacyDocument.provider_accounts as Record<
+        string,
+        Record<string, unknown>
+      >
+    ).telegram_default.config = {};
+    (
+      legacyDocument.agents as Record<string, Record<string, unknown>>
+    ).main_agent.relationship_mode = 'personal';
     const repo = new FakeRevisionRepo();
-    repo.rows.push({
+    await repo.appendSettingsRevision({
       appId: 'default',
-      revision: 1,
-      settingsDocument: latestDocument,
+      settingsDocument: legacyDocument,
       minReaderVersion: CURRENT_SETTINGS_READER_VERSION,
       createdBy: 'seed',
-      note: null,
-      createdAt: new Date().toISOString(),
     });
+    const nextSettings = structuredClone(previousSettings);
+    nextSettings.agent.name = 'next';
 
     await importWorkstationSettings(
       {
@@ -321,11 +409,65 @@ describe('importFleetSettingsRevision', () => {
       nextSettings,
     );
 
-    expect(repo.lastAppendExpectedRevision).toBe(1);
     expect(repo.rows).toHaveLength(2);
     expect(
       (repo.rows[1]?.settingsDocument.agent as { name?: string }).name,
-    ).toBe('updated');
+    ).toBe('next');
+  });
+
+  it('normalizes previous settings before stale revision comparison', async () => {
+    capabilityErrors = [];
+    applyRuntimeSettingsDesiredState.mockReset();
+    applyRuntimeSettingsDesiredState.mockImplementation(
+      async (input: { settings: unknown }) => {
+        return input.settings;
+      },
+    );
+    const repo = new FakeRevisionRepo();
+    const firstSettings = settingsWithDuplicateCapability('first');
+
+    await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+        previousSettings: createDefaultRuntimeSettings(),
+        revisionMirror: {
+          settingsRevisions: repo,
+          createdBy: 'test:fleet',
+        },
+        revisionMirrorRequired: true,
+      },
+      firstSettings,
+    );
+
+    const secondSettings = settingsWithDuplicateCapability('second');
+    await importWorkstationSettings(
+      {
+        runtimeHome: '/tmp/gantry-import-test',
+        ops: {} as never,
+        repositories: {} as never,
+        appId: 'default' as never,
+        previousSettings: structuredClone(firstSettings),
+        revisionMirror: {
+          settingsRevisions: repo,
+          createdBy: 'test:fleet',
+        },
+        revisionMirrorRequired: true,
+      },
+      secondSettings,
+    );
+
+    expect(repo.rows).toHaveLength(2);
+    const latestAgent = (
+      repo.rows[1]?.settingsDocument.agents as Record<
+        string,
+        { name?: string; access?: { selections?: unknown[] } }
+      >
+    ).main_agent;
+    expect(latestAgent.name).toBe('second');
+    expect(latestAgent.access?.selections).toHaveLength(1);
   });
 
   it('required workstation mirror rejects stale expected revisions', async () => {
@@ -505,16 +647,25 @@ describe('importFleetSettingsRevision', () => {
     const nextSettings = createDefaultRuntimeSettings();
     nextSettings.providers.slack = {
       enabled: true,
-      defaultConnection: 'workspace',
     };
-    nextSettings.providerConnections.workspace = {
+    nextSettings.agents.main_agent = {
+      name: 'Main',
+      folder: 'main_agent',
+      delegates: [],
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    nextSettings.providerAccounts.workspace = {
+      agentId: 'main_agent',
       provider: 'slack',
       label: 'Slack',
       runtimeSecretRefs: {},
     };
     const repo = new FakeRevisionRepo();
-    const providerConnections = {
-      async getProviderConnection() {
+    const providerAccounts = {
+      async getProviderAccount() {
         return {
           id: 'workspace',
           appId: 'default',
@@ -525,16 +676,16 @@ describe('importFleetSettingsRevision', () => {
           runtimeSecretRefs: {},
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        } satisfies ProviderConnection;
+        } satisfies ProviderAccount;
       },
-    } as Pick<ProviderConnectionRepository, 'getProviderConnection'>;
+    } as Pick<ProviderAccountRepository, 'getProviderAccount'>;
 
     await expect(
       importWorkstationSettings(
         {
           runtimeHome: '/tmp/gantry-import-test',
           ops: {} as never,
-          repositories: { providerConnections } as never,
+          repositories: { providerAccounts } as never,
           appId: 'default' as never,
           previousSettings,
           revisionMirror: {
@@ -546,13 +697,14 @@ describe('importFleetSettingsRevision', () => {
         nextSettings,
       ),
     ).rejects.toThrow(
-      'provider_connections.workspace.provider cannot change from telegram to slack; use a new provider connection id.',
+      'provider_accounts.workspace.provider cannot change from telegram to slack; use a new provider account id.',
     );
     expect(repo.rows).toHaveLength(0);
     expect(applyRuntimeSettingsDesiredState).not.toHaveBeenCalled();
   });
 
   it('appends a revision stamped with the current reader version', async () => {
+    expect(CURRENT_SETTINGS_READER_VERSION).toBe(14);
     capabilityErrors = [];
     const repo = new FakeRevisionRepo();
     const outcome = await importFleetSettingsRevision(
@@ -634,6 +786,14 @@ describe('importFleetSettingsRevision', () => {
     settings.agent.name = 'Agent "quoted" \\ path';
     settings.agent.agentHarness = 'deepagents';
     settings.memory.llm.extractorMinConfidence = 0.73;
+    settings.permissions.autoMode.model = 'sonnet';
+    settings.observability.tracing = {
+      enabled: true,
+      endpoint: 'https://otel.example.test/v1/traces',
+      captureContent: false,
+      sampleRate: 0.25,
+      environment: 'test',
+    };
     settings.modelAliases['fast-job'] = {
       provider: 'groq',
       providerModelId: 'llama-3.1-8b-instant',
@@ -651,8 +811,14 @@ describe('importFleetSettingsRevision', () => {
     settings.agents.researcher = {
       name: 'Researcher',
       folder: 'researcher',
+      delegates: [],
       agentHarness: 'anthropic_sdk',
-      model: undefined,
+      permissionMode: 'auto',
+      maxTurns: 14,
+      maxRunTokens: 32_000,
+      effort: 'medium',
+      thinking: { mode: 'on', budgetTokens: 8192 },
+      model: 'opus-4.6',
       oneTimeJobDefaultModel: undefined,
       recurringJobDefaultModel: undefined,
       bindings: {},
@@ -663,6 +829,60 @@ describe('importFleetSettingsRevision', () => {
       },
       capabilities: [{ id: 'browser.use', version: '1' }],
       accessPreset: 'locked',
+      toolRules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests must pass first',
+        },
+      ],
+    };
+    settings.agents.analyst = {
+      name: 'Analyst',
+      folder: 'analyst',
+      delegates: [],
+      agentHarness: 'deepagents',
+      model: 'gpt',
+      maxOutputTokens: 4096,
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.providerAccounts.telegram_main = {
+      agentId: 'researcher',
+      provider: 'telegram',
+      label: 'Telegram Main',
+      status: 'active',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    settings.providerAccounts.telegram_paused = {
+      agentId: 'researcher',
+      provider: 'telegram',
+      label: 'Telegram Paused',
+      status: 'disabled',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_PAUSED_BOT_TOKEN' },
+    };
+    settings.conversations.shared_channel = {
+      providerConnection: 'telegram_main',
+      providerAccount: 'telegram_main',
+      externalId: 'telegram:C123',
+      kind: 'group',
+      displayName: 'Shared Channel',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: [],
+      installedAgents: {
+        'researcher_171.1': {
+          agentId: 'researcher',
+          providerAccountId: 'telegram_main',
+          threadId: '171.1',
+          status: 'active',
+          addedAt: new Date(0).toISOString(),
+          memoryScope: 'conversation',
+          permissionMode: 'auto',
+        },
+      },
     };
     const document = settingsToRevisionDocument(settings);
     // The stored/wire document is the typed object form, not the legacy
@@ -682,6 +902,32 @@ describe('importFleetSettingsRevision', () => {
         .agent_harness,
     ).toBe('anthropic_sdk');
     expect(
+      (document.agents as Record<string, Record<string, unknown>>).researcher
+        .permission_mode,
+    ).toBe('auto');
+    expect(
+      (document.agents as Record<string, Record<string, unknown>>).researcher,
+    ).toMatchObject({
+      max_turns: 14,
+      max_run_tokens: 32_000,
+      effort: 'medium',
+      thinking: { mode: 'on', budget_tokens: 8192 },
+      tool_rules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests must pass first',
+        },
+      ],
+    });
+    expect(
+      (document.agents as Record<string, Record<string, unknown>>).researcher,
+    ).not.toHaveProperty('delegates');
+    expect(
+      (document.agents as Record<string, Record<string, unknown>>).analyst,
+    ).toMatchObject({ max_output_tokens: 4096 });
+    expect(
       (
         (document.memory as Record<string, unknown>).llm as Record<
           string,
@@ -689,6 +935,23 @@ describe('importFleetSettingsRevision', () => {
         >
       ).extractor_min_confidence,
     ).toBe(0.73);
+    expect(
+      (
+        (document.permissions as Record<string, unknown>).auto_mode as Record<
+          string,
+          unknown
+        >
+      ).model,
+    ).toBe('sonnet');
+    expect(document.observability).toEqual({
+      tracing: {
+        enabled: true,
+        endpoint: 'https://otel.example.test/v1/traces',
+        capture_content: false,
+        sample_rate: 0.25,
+        environment: 'test',
+      },
+    });
     expect(
       (
         (document.agents as Record<string, Record<string, unknown>>).researcher
@@ -700,6 +963,32 @@ describe('importFleetSettingsRevision', () => {
         'fast-job'
       ].provider_model_id,
     ).toBe('llama-3.1-8b-instant');
+    expect(
+      (document.provider_accounts as Record<string, Record<string, unknown>>)
+        .telegram_main.status,
+    ).toBeUndefined();
+    expect(
+      (document.provider_accounts as Record<string, Record<string, unknown>>)
+        .telegram_paused.status,
+    ).toBe('disabled');
+    expect(
+      (
+        (document.conversations as Record<string, Record<string, unknown>>)
+          .shared_channel.installed_agents as Record<
+          string,
+          Record<string, unknown>
+        >
+      )['researcher_171.1'].agent,
+    ).toBe('researcher');
+    expect(
+      (
+        (document.conversations as Record<string, Record<string, unknown>>)
+          .shared_channel.installed_agents as Record<
+          string,
+          Record<string, unknown>
+        >
+      )['researcher_171.1'].permission_mode,
+    ).toBe('auto');
     const restored = settingsFromRevisionDocument(document);
     expect(restored.agent.name).toBe(settings.agent.name);
     expect(restored.agent.agentHarness).toBe('deepagents');
@@ -707,11 +996,199 @@ describe('importFleetSettingsRevision', () => {
     expect(restored.runtime.deploymentMode).toBe('fleet');
     expect(restored.agents.researcher.accessPreset).toBe('locked');
     expect(restored.agents.researcher.agentHarness).toBe('anthropic_sdk');
+    expect(restored.agents.researcher.permissionMode).toBe('auto');
+    expect(restored.agents.researcher.delegates).toEqual([]);
+    expect(restored.permissions.autoMode).toEqual({ model: 'sonnet' });
+    expect(restored.observability).toEqual(settings.observability);
+    expect(restored.agents.researcher).toMatchObject({
+      maxTurns: 14,
+      maxRunTokens: 32_000,
+      effort: 'medium',
+      thinking: { mode: 'on', budgetTokens: 8192 },
+      toolRules: [
+        {
+          tool: 'Deploy',
+          action: 'require_prior',
+          prior: 'Test',
+          reason: 'tests must pass first',
+        },
+      ],
+    });
+    expect(restored.agents.analyst.maxOutputTokens).toBe(4096);
     expect(restored.agents.researcher.capabilities).toEqual([
       { id: 'browser.use', version: '1' },
     ]);
     expect(restored.modelAliases['fast-job']?.providerModelId).toBe(
       'llama-3.1-8b-instant',
     );
+    expect(restored.providerAccounts.telegram_main).toMatchObject({
+      agentId: 'researcher',
+      provider: 'telegram',
+      label: 'Telegram Main',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    });
+    expect(restored.providerAccounts.telegram_paused?.status).toBe('disabled');
+    expect(
+      restored.conversations.shared_channel.installedAgents['researcher_171.1']
+        ?.agentId,
+    ).toBe('researcher');
+    expect(
+      restored.conversations.shared_channel.installedAgents['researcher_171.1']
+        ?.permissionMode,
+    ).toBe('auto');
+  });
+
+  it('serializes a conversation with missing installedAgents as an empty map', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.main_agent = {
+      name: 'Main Agent',
+      folder: 'main_agent',
+      delegates: [],
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.providerAccounts.telegram_main = {
+      agentId: 'main_agent',
+      provider: 'telegram',
+      label: 'Telegram Main',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    settings.conversations.ops = {
+      providerConnection: 'telegram_main',
+      providerAccount: 'telegram_main',
+      externalId: '-1001234',
+      kind: 'channel',
+      displayName: 'Ops',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['42'],
+    } as never;
+
+    const document = settingsToRevisionDocument(settings);
+
+    expect(
+      (document.conversations as Record<string, Record<string, unknown>>).ops
+        .installed_agents,
+    ).toEqual({});
+  });
+
+  it('round-trips unresolved delegate folder refs through revision documents', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.agents.orchestrator = {
+      name: 'Orchestrator',
+      folder: 'orchestrator',
+      delegates: ['future_researcher', 'future_analyst'],
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+
+    const document = settingsToRevisionDocument(settings);
+
+    expect(
+      (document.agents as Record<string, Record<string, unknown>>).orchestrator
+        .delegates,
+    ).toEqual(['future_researcher', 'future_analyst']);
+    expect(
+      settingsFromRevisionDocument(document).agents.orchestrator.delegates,
+    ).toEqual(['future_researcher', 'future_analyst']);
+  });
+
+  it('guards settings.yaml revision identity', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.runtime.deploymentMode = 'fleet';
+    settings.agent.name = 'Revision Guard';
+    settings.agents.researcher = {
+      name: 'Researcher',
+      folder: 'researcher',
+      delegates: [],
+      bindings: {},
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [],
+      accessPreset: 'full',
+    };
+    settings.providerAccounts.telegram_main = {
+      agentId: 'researcher',
+      provider: 'telegram',
+      label: 'Telegram Main',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    settings.conversations.shared_channel = {
+      providerConnection: 'telegram_main',
+      providerAccount: 'telegram_main',
+      externalId: 'telegram:C123',
+      kind: 'group',
+      displayName: 'Shared Channel',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: [],
+      installedAgents: {
+        researcher: {
+          agentId: 'researcher',
+          providerAccountId: 'telegram_main',
+          status: 'active',
+          addedAt: new Date(0).toISOString(),
+          memoryScope: 'conversation',
+        },
+      },
+    };
+
+    const parsed = parseRuntimeSettings(renderRuntimeSettingsYaml(settings));
+    expect(
+      isDeepStrictEqual(
+        settingsToRevisionDocument(parsed),
+        settingsToRevisionDocument(settings),
+      ),
+    ).toBe(true);
+  });
+
+  it('migrates legacy per-agent bindings when reading settings revisions', () => {
+    const restored = settingsFromRevisionDocument({
+      providers: { slack: { enabled: true } },
+      provider_accounts: {
+        slack_main: {
+          agent: 'control',
+          provider: 'slack',
+          label: 'Slack Main',
+        },
+      },
+      conversations: {
+        shared_channel: {
+          provider_account: 'slack_main',
+          external_id: 'C123',
+          kind: 'channel',
+          display_name: 'Shared',
+        },
+      },
+      agents: {
+        control: {
+          name: 'Control',
+          bindings: {
+            control_binding: {
+              jid: 'sl:C123',
+              providerAccountId: 'slack_main',
+              trigger: '@control',
+              addedAt: '2026-01-01T00:00:00.000Z',
+              requiresTrigger: true,
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      restored.conversations.shared_channel.installedAgents.control_binding,
+    ).toMatchObject({
+      agentId: 'control',
+      providerAccountId: 'slack_main',
+      trigger: '@control',
+      requiresTrigger: true,
+    });
+    expect(Object.values(restored.agents.control.bindings)[0]).toMatchObject({
+      jid: 'sl:C123',
+      trigger: '@control',
+      requiresTrigger: true,
+    });
   });
 });

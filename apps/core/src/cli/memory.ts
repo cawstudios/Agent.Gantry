@@ -14,8 +14,9 @@ import { envFilePath } from '../config/settings/runtime-home.js';
 import {
   DEFAULT_EMBED_DIMENSIONS,
   DEFAULT_EMBED_MODEL,
-  getPresetManagedMemoryDefaults,
+  getProviderManagedMemoryDefaults,
   loadRuntimeSettings,
+  noteRestartRequired,
   writeDesiredRuntimeSettings,
   type EmbeddingProviderName,
 } from '../config/settings/runtime-settings.js';
@@ -25,7 +26,7 @@ function usage(): string {
   return [
     'Usage:',
     '  gantry memory status [--json]',
-    '  gantry memory embeddings <off|disabled|provider>',
+    '  gantry memory embeddings <off|disabled|openai>',
     '  gantry memory embeddings backfill [--limit N] [--mode auto|inline|provider_batch]',
     '  gantry memory dreaming <on|off>',
     '  gantry model memory',
@@ -59,7 +60,7 @@ function formatMemoryStatus(runtimeHome: string): string {
   const env = readEnvFile(envFilePath(runtimeHome));
   const health = inspectMemoryHealth(runtimeHome, settings, env);
   const globalModel = settings.agent.defaultModel;
-  const hardDefaults = getPresetManagedMemoryDefaults();
+  const hardDefaults = getProviderManagedMemoryDefaults();
   const extractorModel = resolveEffectiveModel(
     settings.memory.llm.models.extractor,
     globalModel,
@@ -118,7 +119,7 @@ async function setEmbeddings(
   } else {
     return {
       ok: false,
-      message: `Unknown embedding provider "${provider}". Register the provider before enabling it, or keep embeddings off.`,
+      message: `Unknown embedding provider "${provider}". Use openai, or keep embeddings off.`,
     };
   }
   settings.memory.embeddings.provider = provider;
@@ -129,11 +130,12 @@ async function setEmbeddings(
   } else if (!settings.memory.embeddings.model.trim()) {
     settings.memory.embeddings.model = DEFAULT_EMBED_MODEL;
   }
-  await writeDesiredRuntimeSettings({
+  const result = await writeDesiredRuntimeSettings({
     runtimeHome,
     settings,
     previousSettings,
   });
+  noteRestartRequired(result);
   return { ok: true };
 }
 
@@ -145,11 +147,12 @@ async function setDreaming(
   const previousSettings = structuredClone(settings);
   settings.memory.dreaming.enabled = enabled;
   if (enabled && !settings.memory.enabled) settings.memory.enabled = true;
-  await writeDesiredRuntimeSettings({
+  const result = await writeDesiredRuntimeSettings({
     runtimeHome,
     settings,
     previousSettings,
   });
+  noteRestartRequired(result);
 }
 
 export async function runMemoryCommand(

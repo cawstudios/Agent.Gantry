@@ -1,25 +1,17 @@
-import { randomUUID } from 'crypto';
 import fs from 'fs';
-import {
-  ASSISTANT_NAME,
-  getEffectiveModelConfig,
-  getRuntimeSettingsForConfig,
-  getSelectedAgentHarness,
-} from '../config/index.js';
+// prettier-ignore
+import { ASSISTANT_NAME, getEffectiveModelConfig, getRuntimeSettingsForConfig, getSelectedAgentHarness } from '../config/index.js';
 import type { Job } from '../domain/types.js';
-import { logger } from '../infrastructure/logging/logger.js';
-import {
-  getRuntimeControlRepository,
-  getRuntimeEventExchange,
-  getConfiguredModelProvidersForApp,
-  getWorkerCoordinationRepository,
-} from '../adapters/storage/postgres/runtime-store.js';
+import { logger, updateLogContext } from '../infrastructure/logging/logger.js';
+// prettier-ignore
+import { getRuntimeControlRepository, getRuntimeEventExchange, getConfiguredModelProvidersForApp, getWorkerCoordinationRepository } from '../adapters/storage/postgres/runtime-store.js';
 import { DEFAULT_JOB_RUNTIME_APP_ID } from '../application/jobs/job-access.js';
 import { splitAccessRequirements } from '../application/jobs/job-access-requirements.js';
 import * as jobToolPolicy from '../application/jobs/job-tool-policy.js';
 import { SETUP_REQUIRED_PAUSE_REASON } from '../application/jobs/job-readiness-service.js';
 import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
 import { nowIso, nowMs, toIso } from '../shared/time/datetime.js';
+import { accumulateModelUsage } from '../shared/model-usage.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
 import { AgentOutput, spawnAgent } from '../runtime/agent-spawn.js';
 import { resolveModelFamilyCandidatesForApp } from '../runtime/model-family-resolution.js';
@@ -37,10 +29,8 @@ import {
   resolveTurnSelectedMcpServerIds,
   resolveTurnSelectedSkillContext,
 } from '../runtime/group-run-context.js';
-import {
-  collectCompactBoundaryMemory,
-  collectJobCompletionMemory,
-} from './compact-memory.js';
+// prettier-ignore
+import { collectCompactBoundaryMemory, collectJobCompletionMemory } from './compact-memory.js';
 import { normalizeCleanupAfterMs } from './cleanup.js';
 import {
   buildExecutionTurnContextInput,
@@ -49,7 +39,6 @@ import {
 } from './execution-context.js';
 import {
   logMemoryDreamJobFailure,
-  notifySchedulerRunStart,
   notifySchedulerTerminalRunState,
 } from './execution-notifications.js';
 import {
@@ -67,18 +56,9 @@ import {
   modelUseKindForJobSchedule,
   resolveJobExecutionProviderId,
   resolveJobModel,
-  type NormalizedModelUsage,
 } from './model-resolution.js';
-import {
-  createJobRunDiagnostics,
-  createStreamingEventFlusher,
-  filterUnforwardedRunnerRuntimeEvents,
-  formatTerminalToolDenial,
-  forwardRunnerRuntimeEvents,
-  runnerRuntimeEventKey,
-  terminalDiagnosticsPayload,
-  toolDenialEventPayload,
-} from './execution-diagnostics.js';
+// prettier-ignore
+import { createJobRunDiagnostics, createStreamingEventFlusher, filterUnforwardedRunnerRuntimeEvents, formatTerminalToolDenial, forwardRunnerRuntimeEvents, runnerRuntimeEventKey, terminalDiagnosticsPayload, toolDenialEventPayload } from './execution-diagnostics.js';
 import { pauseJobForSetupIfNeeded } from './execution-readiness.js';
 import {
   bindSchedulerRunEventState,
@@ -95,6 +75,11 @@ import { isTrustedSystemJob } from '../shared/system-job-identity.js';
 import { completeFailedRunFailsafe } from './run-failsafe.js';
 import { createRunProviderMetadataUpdater } from './run-provider-metadata.js';
 import { hasAsyncTaskRepository } from './async-command-task-helpers.js';
+import { runActiveJobWithLogContext } from './execution-log-context.js';
+import {
+  recordJobAgentRunFailure,
+  requireTerminalSettlement,
+} from './execution-operational-errors.js';
 import type {
   JobTurnContext,
   SchedulerDependencies,
@@ -108,11 +93,32 @@ export async function runJob(
   dispatch?: SchedulerDispatchPayload,
   control?: { abortSignal?: AbortSignal },
 ): Promise<void> {
-  const currentJob = await deps.opsRepository.getJobById(job.id);
-  if (!currentJob || currentJob.status !== 'active') return;
-  const scheduledFor =
-    dispatch?.scheduledFor || currentJob.next_run || nowIso();
-  const runId = dispatch?.runId ?? randomUUID();
+  return runActiveJobWithLogContext({
+    requestedJob: job,
+    dispatch,
+    getJobById: (jobId) => deps.opsRepository.getJobById(jobId),
+    run: ({ job: currentJob, scheduledFor, runId }) =>
+      runActiveJob(
+        currentJob,
+        deps,
+        queueJid,
+        dispatch,
+        control,
+        scheduledFor,
+        runId,
+      ),
+  });
+}
+
+async function runActiveJob(
+  currentJob: Job,
+  deps: SchedulerDependencies,
+  queueJid: string,
+  dispatch: SchedulerDispatchPayload | undefined,
+  control: { abortSignal?: AbortSignal } | undefined,
+  scheduledFor: string,
+  runId: string,
+): Promise<void> {
   const startedAtMs = nowMs();
   const startedAt = toIso(startedAtMs);
   const runtimeAppId = DEFAULT_JOB_RUNTIME_APP_ID;
@@ -259,8 +265,8 @@ export async function runJob(
       if (!delta) return;
       resultSummaryAccumulator.append(delta);
     };
-    let latestUsage: NormalizedModelUsage | undefined;
-    let startNotified = false;
+    let accumulatedUsage: AgentOutput['usage'];
+    const startNotified = false;
     try {
       const groupDir = resolveWorkspaceFolderPath(execution.group.folder);
       fs.mkdirSync(groupDir, { recursive: true });
@@ -271,15 +277,6 @@ export async function runJob(
       conversationKind: execution.group.conversationKind,
       executionJid: execution.executionJid,
     });
-    if (!(await deletionGuard.shouldSuppressDelivery())) {
-      startNotified = await notifySchedulerRunStart({
-        job: currentJob,
-        runId,
-        runShortId,
-        sendMessage: deps.sendMessage,
-      });
-      deletionGuard.resetDeliveryDeletionCheck();
-    }
     if (!error && isTrustedSystemJob(currentJob)) {
       const systemOutcome = await runSystemJobTurn({
         currentJob,
@@ -343,6 +340,10 @@ export async function runJob(
           const executionAgentId =
             turnContext?.agentId ??
             jobToolPolicy.agentIdForJobWorkspaceKey(execution.group.folder);
+          updateLogContext({
+            appId: executionAppId,
+            agentId: executionAgentId,
+          });
           const [
             toolPolicy,
             selectedSkillContext,
@@ -429,6 +430,7 @@ export async function runJob(
               executionAdapters: deps.executionAdapters,
               runnerSandboxProvider: deps.runnerSandboxProvider,
               asyncTaskRepositoryAvailable: hasAsyncTaskRepository(deps),
+              conversationRoutes: groups,
               skillContext: {
                 appId: executionAppId,
                 agentId: executionAgentId,
@@ -523,7 +525,11 @@ export async function runJob(
                   diagnostics,
                   emitJobEvent,
                 });
-                if (streamedOutput.usage) latestUsage = streamedOutput.usage;
+                if (streamedOutput.usage)
+                  accumulatedUsage = accumulateModelUsage(
+                    accumulatedUsage,
+                    streamedOutput.usage,
+                  );
                 const streamedProviderSessionId =
                   providerSessionExternalSessionId(streamedOutput);
                 if (streamedProviderSessionId) {
@@ -567,6 +573,7 @@ export async function runJob(
               });
               await updateRunProviderMetadata({ force: true });
               if (output.status === 'error') {
+                recordJobAgentRunFailure();
                 if (!error) error = output.error || 'Unknown error';
                 await failRun();
               } else if (output.result && !hasStreamedResult) {
@@ -604,6 +611,7 @@ export async function runJob(
             }
           }
         } catch (err) {
+          recordJobAgentRunFailure();
           error = runLeaseAbort.errorFor(err);
           if (!runLeaseAbort.isAborted()) {
             await updateRunProviderMetadata({ force: true });
@@ -643,59 +651,49 @@ export async function runJob(
       updateJobState: async (jobUpdates, state) => {
         if (deletionGuard.deletedDuringRun) return;
         const finalizeWithLease = deps.opsRepository.finalizeJobRunWithLease;
-        if (!finalizeWithLease) {
-          throw new Error(
-            'Scheduler run lease finalization is unavailable for terminal job write.',
-          );
-        }
-        const finalized = await finalizeWithLease.call(deps.opsRepository, {
-          jobId: currentJob.id,
-          runId,
-          leaseToken: leaseContext.lease.leaseToken,
-          workerInstanceId: leaseContext.lease.workerInstanceId,
-          fencingVersion: leaseContext.lease.fencingVersion,
-          leaseOutcome: error ? 'failed' : 'completed',
-          runStatus: state.runStatus,
-          resultSummary: safeResultSummary
-            ? safeResultSummary.slice(0, 500)
-            : null,
-          errorSummary: state.safeErrorSummary
-            ? state.safeErrorSummary.slice(0, 500)
-            : null,
-          jobUpdates,
-        });
-        if (!finalized) {
-          throw new Error(
-            'Scheduler run lease is no longer active during terminal finalization.',
-          );
-        }
+        await requireTerminalSettlement(
+          finalizeWithLease?.call(deps.opsRepository, {
+            jobId: currentJob.id,
+            runId,
+            leaseToken: leaseContext.lease.leaseToken,
+            workerInstanceId: leaseContext.lease.workerInstanceId,
+            fencingVersion: leaseContext.lease.fencingVersion,
+            leaseOutcome: error ? 'failed' : 'completed',
+            runStatus: state.runStatus,
+            resultSummary: safeResultSummary
+              ? safeResultSummary.slice(0, 500)
+              : null,
+            errorSummary: state.safeErrorSummary
+              ? state.safeErrorSummary.slice(0, 500)
+              : null,
+            jobUpdates,
+          }),
+          'Scheduler run lease finalization is unavailable for terminal job write.',
+          'Scheduler run lease is no longer active during terminal finalization.',
+        );
         terminalRunRecorded = true;
       },
     });
     if (!terminalRunRecorded && !deletionGuard.deletedDuringRun) {
       const finalizeRunLease = deps.opsRepository.finalizeJobRunLease;
-      if (!finalizeRunLease) {
-        throw new Error(
-          'Scheduler run lease finalization is unavailable for terminal run write.',
-        );
-      }
-      const finalized = await finalizeRunLease.call(deps.opsRepository, {
-        runId,
-        leaseToken: leaseContext.lease.leaseToken,
-        workerInstanceId: leaseContext.lease.workerInstanceId,
-        fencingVersion: leaseContext.lease.fencingVersion,
-        leaseOutcome: error ? 'failed' : 'completed',
-        runStatus,
-        resultSummary: safeResultSummary
-          ? safeResultSummary.slice(0, 500)
-          : null,
-        errorSummary: safeErrorSummary ? safeErrorSummary.slice(0, 500) : null,
-      });
-      if (!finalized) {
-        throw new Error(
-          'Scheduler run lease is no longer active during terminal finalization.',
-        );
-      }
+      await requireTerminalSettlement(
+        finalizeRunLease?.call(deps.opsRepository, {
+          runId,
+          leaseToken: leaseContext.lease.leaseToken,
+          workerInstanceId: leaseContext.lease.workerInstanceId,
+          fencingVersion: leaseContext.lease.fencingVersion,
+          leaseOutcome: error ? 'failed' : 'completed',
+          runStatus,
+          resultSummary: safeResultSummary
+            ? safeResultSummary.slice(0, 500)
+            : null,
+          errorSummary: safeErrorSummary
+            ? safeErrorSummary.slice(0, 500)
+            : null,
+        }),
+        'Scheduler run lease finalization is unavailable for terminal run write.',
+        'Scheduler run lease is no longer active during terminal finalization.',
+      );
       terminalRunRecorded = true;
     }
     if (runLeaseAbort.isAborted())
@@ -749,19 +747,16 @@ export async function runJob(
         sendMessage: deps.sendMessage,
       }));
     if (notified) {
-      const markedNotified = await deps.opsRepository.markJobRunNotified(
-        runId,
-        {
+      const markJobRunNotified = deps.opsRepository.markJobRunNotified;
+      await requireTerminalSettlement(
+        markJobRunNotified?.call(deps.opsRepository, runId, {
           leaseToken: leaseContext.lease.leaseToken,
           workerInstanceId: leaseContext.lease.workerInstanceId,
           fencingVersion: leaseContext.lease.fencingVersion,
-        },
+        }),
+        'Scheduler run lease notification finalization is unavailable.',
+        'Scheduler run lease is no longer valid during notification finalization.',
       );
-      if (!markedNotified) {
-        throw new Error(
-          'Scheduler run lease is no longer valid during notification finalization.',
-        );
-      }
     }
     await emitJobEvent(
       runStatus === 'completed'
@@ -776,7 +771,7 @@ export async function runJob(
         pause_reason: pauseReason,
         notified,
         summary,
-        ...jobCompletedModelPayload(resolvedModel, latestUsage),
+        ...jobCompletedModelPayload(resolvedModel, accumulatedUsage),
         diagnostics: terminalDiagnosticsPayload(diagnostics),
       },
     );

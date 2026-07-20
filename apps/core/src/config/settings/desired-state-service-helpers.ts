@@ -5,11 +5,15 @@ import type {
   UserId,
 } from '../../domain/conversation/conversation.js';
 import type { MemorySubject } from '../../domain/memory/memory.js';
-import type { ConversationApprover } from '../../domain/provider/provider.js';
+import type {
+  ConversationApprover,
+  ProviderId,
+} from '../../domain/provider/provider.js';
 import type {
   McpServerRepository,
   ToolCatalogRepository,
 } from '../../domain/ports/repositories.js';
+import { normalizeRuntimeSecretRefString } from '../../domain/ports/runtime-secret-provider.js';
 import {
   jidForConfiguredConversation,
   providerTopology,
@@ -17,6 +21,7 @@ import {
 import type {
   ConfiguredRoutingBinding,
   SettingsChangeClassification,
+  StoredAgentBinding,
 } from './desired-state-service-types.js';
 import type {
   RuntimeConfiguredAgent,
@@ -24,6 +29,7 @@ import type {
   RuntimeConfiguredConversation,
   RuntimeSettings,
 } from './runtime-settings-types.js';
+import type { AgentConfig } from '../../domain/types.js';
 export {
   agentIdForFolder,
   folderForAgentId,
@@ -41,6 +47,19 @@ export function configuredRoutingBindingsByAgent(
   return result;
 }
 
+export function configuredAgentConfig(
+  binding: Pick<ConfiguredRoutingBinding, 'model' | 'permissionMode'>,
+  agent?: Pick<RuntimeConfiguredAgent, 'persona' | 'relationshipMode'>,
+): AgentConfig | undefined {
+  const config: AgentConfig = {
+    model: binding.model,
+    permissionMode: binding.permissionMode,
+    persona: agent?.persona,
+    relationshipMode: agent?.relationshipMode,
+  };
+  return Object.values(config).some(Boolean) ? config : undefined;
+}
+
 export function configuredRoutingBindings(
   settings: RuntimeSettings,
 ): ConfiguredRoutingBinding[] {
@@ -48,22 +67,50 @@ export function configuredRoutingBindings(
 
   for (const [folder, agent] of Object.entries(settings.agents)) {
     for (const binding of Object.values(agent.bindings)) {
-      byAgentAndJid.set(`${folder}\0${binding.jid}`, {
-        agentFolder: folder,
-        jid: binding.jid,
-        name: binding.name,
-        trigger: binding.trigger,
-        addedAt: binding.addedAt,
-        requiresTrigger: binding.requiresTrigger,
-        model: binding.model,
-        conversation: Object.values(settings.conversations).find(
-          (candidate) =>
-            jidForConfiguredConversation(
-              candidate,
-              settings.providerConnections,
-            ) === binding.jid,
-        ),
+      const configuredConversationCandidates = Object.entries(
+        settings.conversations,
+      ).filter(([, candidate]) => {
+        if (
+          jidForConfiguredConversation(candidate, settings.providerAccounts) !==
+          binding.jid
+        ) {
+          return false;
+        }
+        if (!binding.providerAccountId) return true;
+        const candidateInstall =
+          candidate.installedAgents[folder] ??
+          Object.values(candidate.installedAgents).find(
+            (install) =>
+              install.agentId === folder &&
+              (install.threadId ?? '') === (binding.threadId ?? ''),
+          );
+        const candidateProviderAccountId =
+          candidateInstall?.providerAccountId ??
+          candidate.providerAccount ??
+          candidate.providerConnection;
+        return candidateProviderAccountId === binding.providerAccountId;
       });
+      const configuredConversation =
+        configuredConversationCandidates.length === 1
+          ? configuredConversationCandidates[0]
+          : undefined;
+      byAgentAndJid.set(
+        `${folder}\0${binding.providerAccountId ?? ''}\0${binding.jid}\0${binding.threadId ?? ''}`,
+        {
+          agentFolder: folder,
+          conversationId: configuredConversation?.[0],
+          jid: binding.jid,
+          threadId: binding.threadId,
+          providerAccountId: binding.providerAccountId,
+          name: binding.name,
+          trigger: binding.trigger,
+          addedAt: binding.addedAt,
+          requiresTrigger: binding.requiresTrigger,
+          model: binding.model,
+          permissionMode: binding.permissionMode,
+          conversation: configuredConversation?.[1],
+        },
+      );
     }
   }
 
@@ -73,23 +120,37 @@ export function configuredRoutingBindings(
     if (!conversation) continue;
     const jid = jidForConfiguredConversation(
       conversation,
-      settings.providerConnections,
+      settings.providerAccounts,
     );
-    byAgentAndJid.set(`${binding.agent}\0${jid}`, {
-      agentFolder: binding.agent,
-      jid,
-      name: conversation.displayName,
-      trigger: binding.trigger,
-      addedAt: binding.addedAt,
-      requiresTrigger: binding.requiresTrigger,
-      model: binding.model,
-      conversation,
-    });
+    const install =
+      conversation.installedAgents?.[binding.installKey ?? binding.agent];
+    const providerAccountId =
+      install?.providerAccountId ??
+      conversation.providerAccount ??
+      conversation.providerConnection;
+    byAgentAndJid.set(
+      `${binding.agent}\0${providerAccountId ?? ''}\0${jid}\0${binding.threadId ?? ''}`,
+      {
+        agentFolder: binding.agent,
+        conversationId: binding.conversation,
+        jid,
+        installKey: binding.installKey,
+        threadId: binding.threadId,
+        providerAccountId,
+        name: conversation.displayName,
+        trigger: binding.trigger,
+        addedAt: binding.addedAt,
+        requiresTrigger: binding.requiresTrigger,
+        model: binding.model,
+        permissionMode: binding.permissionMode,
+        conversation,
+      },
+    );
   }
 
   return [...byAgentAndJid.values()].sort((left, right) =>
-    `${left.agentFolder}:${left.jid}`.localeCompare(
-      `${right.agentFolder}:${right.jid}`,
+    `${left.agentFolder}:${left.providerAccountId ?? ''}:${left.jid}`.localeCompare(
+      `${right.agentFolder}:${right.providerAccountId ?? ''}:${right.jid}`,
     ),
   );
 }
@@ -102,6 +163,11 @@ export function memorySubjectForConfiguredBinding(input: {
   conversationId: ConversationId;
 }): MemorySubject {
   switch (input.memoryScope) {
+    case 'app':
+      return {
+        kind: 'app',
+        appId: input.appId,
+      };
     case 'agent':
       return {
         kind: 'agent',
@@ -135,6 +201,54 @@ export function memorySubjectForConfiguredBinding(input: {
 
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+export function listDbOnlyGroupJids(input: {
+  groups: Record<string, StoredAgentBinding>;
+  chats: Array<{ jid: string; is_group?: number }>;
+  configuredJids: Set<string>;
+}): string[] {
+  return [
+    ...new Set([
+      ...Object.keys(input.groups),
+      ...input.chats
+        .filter((chat) => chat.is_group === 1)
+        .map((chat) => chat.jid),
+    ]),
+  ]
+    .filter((jid) => !input.configuredJids.has(jid))
+    .sort();
+}
+
+export function normalizeUserIds(userIds: string[]): string[] {
+  return [
+    ...new Set(
+      userIds
+        .filter((id): id is string => typeof id === 'string')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+}
+
+export function isValidExternalUserId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(value);
+}
+
+export function isInternalProviderAccount(providerId: ProviderId): boolean {
+  return providerId === 'app' || providerId === 'control-http';
+}
+
+export function normalizeRuntimeSecretRefs(input: {
+  refs: Record<string, string>;
+  pathPrefix: string;
+}): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input.refs).map(([key, value]) => [
+      key,
+      normalizeRuntimeSecretRefString(value, `${input.pathPrefix}.${key}`),
+    ]),
+  );
 }
 
 export function classifySettingsChanges(
@@ -175,6 +289,10 @@ export function classifySettingsChanges(
   }
   if (!jsonEqual(before.runtime, after.runtime)) {
     restartRequired.push('runtime');
+  }
+  // Tracing initializes once at boot from authoritative settings.
+  if (!jsonEqual(before.observability, after.observability)) {
+    restartRequired.push('observability');
   }
 
   return {

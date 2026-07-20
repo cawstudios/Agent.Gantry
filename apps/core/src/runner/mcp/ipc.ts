@@ -26,6 +26,7 @@ import {
   agentId,
   appId,
   chatJid,
+  providerAccountId,
   memoryDefaultScope,
   memoryIpcAllowedActions,
   memoryReviewerIsControlApprover,
@@ -35,7 +36,7 @@ import {
 import {
   createSignedIpcRequestEnvelope,
   verifyIpcResponsePayload,
-} from './signing.js';
+} from '../../shared/ipc-signing.js';
 import {
   ensurePrivateDirSync,
   writePrivateFileSync,
@@ -70,6 +71,7 @@ export function writeIpcFile(dir: string, data: object): string {
     ...existingContext,
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     ...(threadId ? { threadId } : {}),
     ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),
   };
@@ -118,6 +120,8 @@ export async function requestMemoryAction(
     payload,
     context: {
       chatJid,
+      ...(appId ? { appId } : {}),
+      ...(agentId ? { agentId } : {}),
       ...(threadId ? { threadId } : {}),
       ...(memoryUserId ? { userId: memoryUserId } : {}),
       ...(IPC_RESPONSE_KEY_ID ? { responseKeyId: IPC_RESPONSE_KEY_ID } : {}),

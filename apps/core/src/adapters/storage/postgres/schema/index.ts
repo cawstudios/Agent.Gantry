@@ -1,6 +1,7 @@
 export * from './apps.js';
 export * from './agents.js';
 export * from './async-tasks.js';
+export * from './brain.js';
 export * from './browser.js';
 export * from './capability-secrets.js';
 export * from './providers.js';
@@ -10,6 +11,7 @@ export * from './events.js';
 export * from './external-ingress.js';
 export * from './file-artifacts.js';
 export * from './fleet-capability-state.js';
+export * from './group-join-onboarding.js';
 export * from './jobs.js';
 export * from './live-turns.js';
 export * from './memory.js';

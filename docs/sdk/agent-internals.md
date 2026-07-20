@@ -37,6 +37,31 @@ The preset is an operator setting, not an SDK call; the SDK contract is unchange
 whether an agent is `full` or `locked`. See
 [Locked Preset](../decisions/2026-06-11-locked-preset.md).
 
+## Auto-permission mode
+
+`agents.<id>.permission_mode: auto` (default `ask`) lets an LLM classifier
+auto-approve gray-zone tool calls — third-party MCP operations and shell —
+that would otherwise interrupt a human, with `allow | ask` as the only
+verdict space (deny stays deterministic). The classifier is consulted only
+for trusted requesters: an unattended job turn with no human sender, or a
+sender who is a configured conversation approver — DMs and channels alike are
+approver-gated, and a conversation without approver configuration fails
+closed to a normal ask. A failed, timed-out, or unavailable classifier also
+falls back to ask, never allow. Every verdict is audited as a
+`permission.classifier_decision` runtime event (visible via `/v1/runs/:id/events`
+and webhooks), and auto-allow decisions carry `decidedBy: auto_classifier`.
+The classifier is allow-leaning: it allows unless it identifies concrete
+risk (destructive actions, credential access, exfiltration, obfuscated
+execution, out-of-workspace writes). `permission_mode: auto_strict`
+restores deterministic-proof-only behavior (unproven commands always ask,
+no classifier). Repeated explicitly human-attributed approvals (two or
+more) of the same rule shape promote the persistent option to the primary
+button on the normal permission prompt. Like the access preset this is
+a settings-level knob, not an SDK call; a per-request API override is
+deliberately out of scope for v1. See
+[capability management](../architecture/capability-management.md) for the
+full decision ladder.
+
 ## Message Flow
 
 ```mermaid
@@ -101,20 +126,20 @@ sequenceDiagram
   participant Store as Postgres
   participant Provider as Provider Adapter
 
-  App->>SDK: providerConnections.create()
-  SDK->>Control: POST /v1/provider-connections
+  App->>SDK: providerAccounts.create()
+  SDK->>Control: POST /v1/provider-accounts
   Control->>Store: persist non-secret config + runtimeSecretRefs
-  App->>SDK: providerConnections.discoverConversations()
-  SDK->>Control: POST /v1/provider-connections/:id/discover-conversations
+  App->>SDK: providerAccounts.discoverConversations()
+  SDK->>Control: POST /v1/provider-accounts/:id/discover-conversations
   Control->>Provider: discover conversations with runtime-owned secret
   Control->>Store: upsert normalized conversations
-  App->>SDK: agents.conversationBindings.enable()
-  SDK->>Control: PUT /v1/agents/:agentId/conversation-bindings/:conversationId
-  Control->>Store: upsert active AgentConversationBinding
+  App->>SDK: agents.conversationInstalls.enable()
+  SDK->>Control: PUT /v1/agents/:agentId/conversation-installs/:conversationId
+  Control->>Store: upsert active ConversationInstall
 ```
 
 The control API never accepts raw Slack, Telegram, Teams, or WhatsApp tokens in
-providerConnection payloads. Backend apps pass runtime secret references, and the host
+Provider Account payloads. Backend apps pass runtime secret references, and the host
 runtime resolves those references through `RuntimeSecretProvider`. Teams and
 WhatsApp are catalog placeholders until provider adapters exist.
 
@@ -147,6 +172,22 @@ Postgres is the runtime store:
 - `pgvector` and embedding cache tables support optional semantic memory recall when embeddings are enabled and backfilled.
 - Postgres full-text search remains the always-available retrieval path and the lexical fallback when query embedding is unavailable.
 - Control events, messages, jobs, runs, triggers, sessions, webhooks, deliveries, and memory records are first-party Gantry tables.
+
+## Tool Errors
+
+Gantry's built-in tools return a structured error envelope alongside the MCP
+`isError` flag: `category` (`transient | validation | business | permission`),
+`isRetryable`, and a human-readable message. Agents use it to decide between
+retry, alternative approaches, and escalation instead of guessing from prose.
+
+Remote MCP tools called through `mcp_call_tool` keep their nested `isError` and
+`structuredContent` — a failing remote tool is visible to the agent as a
+failure, so remote MCP servers should return accurate `isError` flags and
+structured error detail rather than encoding failures as plain success text.
+
+Delegated subagent tasks that fail carry typed failure metadata (failure type,
+what was attempted, partial results when available) through `task_get` and the
+parent agent's tool result, instead of a generic failure string.
 
 ## Event Contract
 

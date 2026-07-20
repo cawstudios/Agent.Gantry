@@ -610,6 +610,104 @@
       "when": 1777306200000,
       "tag": "0089_proactive_surfacing_opt_ins",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1777309800000,
+      "tag": "0090_provider_accounts_conversation_installs",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1777313400000,
+      "tag": "0091_provider_accounts_post_cutover_repairs",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1777317000000,
+      "tag": "0092_provider_accounts_final_repairs",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1777320600000,
+      "tag": "0093_company_brain_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1777324200000,
+      "tag": "0094_brain_dreaming",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1777327800000,
+      "tag": "0095_memory_review_content_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1777331400000,
+      "tag": "0096_lifecycle_webhook_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1777335000000,
+      "tag": "0097_runtime_usage_query_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1777338600000,
+      "tag": "0098_permission_promotion_counters",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1783864800000,
+      "tag": "0099_permission_promotion_denied_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1783909802426,
+      "tag": "0100_run_permission_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1783924932751,
+      "tag": "0101_drop_run_permission_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1784393767889,
+      "tag": "0102_group_join_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1784430629236,
+      "tag": "0103_permission_durable_storage_cutover",
+      "breakpoints": true
     }
   ]
 }

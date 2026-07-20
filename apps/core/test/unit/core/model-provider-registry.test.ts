@@ -90,6 +90,18 @@ describe('model provider registry', () => {
     });
   });
 
+  it('declares the provider reasoning capability source', () => {
+    expect(getModelProviderDefinition('anthropic')).toMatchObject({
+      sdkModelCapabilityMetadata: true,
+    });
+    expect(getModelProviderDefinition('openrouter')).toMatchObject({
+      supportsReasoningEffort: true,
+    });
+    expect(getModelProviderDefinition('openai')).toMatchObject({
+      supportsReasoningEffort: true,
+    });
+  });
+
   it('makes OpenAI an executable chat and memory model route', () => {
     const openai = getModelProviderDefinition('openai');
     expect(openai?.executable).toBe(true);
@@ -599,7 +611,7 @@ describe('model provider registry', () => {
         },
       }),
     ).toEqual({
-      origin: 'https://bedrock-runtime.ap-south-1.amazonaws.com',
+      origin: 'https://bedrock-mantle.ap-south-1.api.aws',
       pathPrefix: '/v1',
     });
     expect(bedrock!.cacheSupport.prompt.mode).toBe('none');
@@ -607,6 +619,9 @@ describe('model provider registry', () => {
       'chat',
       'one_time_job',
       'recurring_job',
+      'memory_extractor',
+      'memory_dreaming',
+      'memory_consolidation',
     ]);
 
     const vertex = getModelProviderDefinition('vertex');
@@ -647,6 +662,9 @@ describe('model provider registry', () => {
       'chat',
       'one_time_job',
       'recurring_job',
+      'memory_extractor',
+      'memory_dreaming',
+      'memory_consolidation',
     ]);
   });
 });

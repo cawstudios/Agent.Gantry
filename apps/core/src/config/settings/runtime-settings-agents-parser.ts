@@ -1,17 +1,21 @@
-import { resolveModelSelectionForWorkload } from '../../shared/model-catalog.js';
+import {
+  resolveModelSelectionForWorkloadWithFamilies,
+  type FamilyOrderOverrides,
+} from '../../shared/model-families.js';
 import {
   isAgentHarness,
   type AgentHarness,
 } from '../../shared/agent-engine.js';
 import { parseAgentPersona } from '../../shared/agent-persona.js';
 import { parseAgentRelationshipMode } from '../../shared/agent-relationship-mode.js';
+import type { PermissionMode } from '../../shared/permission-mode.js';
 import type {
   AgentAccessPreset,
   RuntimeConfiguredAgent,
-  RuntimeConfiguredAgentBinding,
   RuntimeConfiguredAgentCapability,
   RuntimeConfiguredAgentSourceRef,
   RuntimeConfiguredAgentSources,
+  RuntimeConfiguredToolRule,
   RuntimeDesiredStateSettings,
 } from './runtime-settings-types.js';
 import {
@@ -19,6 +23,17 @@ import {
   parseStringArrayValue,
   parseStringValue,
 } from './runtime-settings-parse-primitives.js';
+import {
+  formatInlineAgentWorkerOnlyConfigError,
+  configuredAgentControlConstraintErrors,
+  inlineConfiguredSkillEngineConstraintError,
+  inlineWorkerOnlyConfiguredCapabilityLabels,
+  parseAgentEffortValue,
+  parseAgentMaxTurnsValue,
+  parseAgentPositiveIntegerValue,
+  parseAgentRuntimeValue,
+  parseAgentThinkingValue,
+} from './runtime-settings-agent-runtime.js';
 
 function parseOptionalAgentHarnessValue(
   raw: unknown,
@@ -29,6 +44,17 @@ function parseOptionalAgentHarnessValue(
     throw new Error(
       `${pathPrefix} must be one of auto, anthropic_sdk, or deepagents`,
     );
+  }
+  return raw;
+}
+
+function parseOptionalPermissionModeValue(
+  raw: unknown,
+  pathPrefix: string,
+): PermissionMode | undefined {
+  if (raw === undefined) return undefined;
+  if (raw !== 'ask' && raw !== 'auto' && raw !== 'auto_strict') {
+    throw new Error(`${pathPrefix} must be one of ask, auto, or auto_strict`);
   }
   return raw;
 }
@@ -253,118 +279,84 @@ function parseConfiguredAgentSelections(
   });
 }
 
-function parseConfiguredAgentBindings(
+function parseConfiguredAgentToolRules(
   raw: unknown,
   pathPrefix: string,
-  fallback: {
-    jid?: unknown;
-    name?: string;
-    trigger?: unknown;
-    addedAt?: unknown;
-    requiresTrigger?: unknown;
-    model?: string;
-  },
-): Record<string, RuntimeConfiguredAgentBinding> {
-  if (raw === undefined) {
-    const jid =
-      fallback.jid === undefined
-        ? ''
-        : parseStringValue(fallback.jid, `${pathPrefix}.primary.jid`);
-    if (!jid) return {};
-    return {
-      primary: {
-        jid,
-        name: fallback.name,
-        trigger: parseStringValue(
-          fallback.trigger,
-          `${pathPrefix}.primary.trigger`,
-          '@Default Agent',
-        ),
-        addedAt: parseStringValue(
-          fallback.addedAt,
-          `${pathPrefix}.primary.added_at`,
-          new Date(0).toISOString(),
-        ),
-        requiresTrigger: parseOptionalBooleanValue(
-          fallback.requiresTrigger,
-          `${pathPrefix}.primary.requires_trigger`,
-          true,
-        ),
-        model: fallback.model,
-      },
-    };
+): RuntimeConfiguredToolRule[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(`${pathPrefix} must be an array`);
   }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error(`${pathPrefix} must be a mapping`);
-  }
-  const result: Record<string, RuntimeConfiguredAgentBinding> = {};
-  for (const [bindingId, bindingRaw] of Object.entries(
-    raw as Record<string, unknown>,
-  )) {
-    const bindingPath = `${pathPrefix}.${bindingId}`;
-    if (!/^[A-Za-z0-9_.:@-]{1,96}$/.test(bindingId)) {
-      throw new Error(`${bindingPath} must use a stable binding id`);
+  return raw.map((item, index) => {
+    const itemPath = `${pathPrefix}[${index}]`;
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error(`${itemPath} must be a mapping`);
     }
-    if (
-      typeof bindingRaw !== 'object' ||
-      bindingRaw === null ||
-      Array.isArray(bindingRaw)
-    ) {
-      throw new Error(`${bindingPath} must be a mapping`);
+    const map = item as Record<string, unknown>;
+    const action = parseStringValue(map.action, `${itemPath}.action`);
+    if (action !== 'block' && action !== 'require_prior') {
+      throw new Error(`${itemPath}.action must be block or require_prior`);
     }
-    const map = bindingRaw as Record<string, unknown>;
+    const allowedKeys =
+      action === 'block'
+        ? new Set(['tool', 'when', 'action', 'reason'])
+        : new Set(['tool', 'action', 'prior', 'reason']);
     for (const key of Object.keys(map)) {
-      if (
-        key !== 'jid' &&
-        key !== 'provider' &&
-        key !== 'name' &&
-        key !== 'trigger' &&
-        key !== 'added_at' &&
-        key !== 'requires_trigger' &&
-        key !== 'model'
-      ) {
-        throw new Error(
-          `${bindingPath}.${key} is not supported. Configure jid, provider, name, trigger, added_at, requires_trigger, or model.`,
-        );
+      if (!allowedKeys.has(key)) {
+        throw new Error(`${itemPath}.${key} is not supported`);
       }
     }
-    const model =
-      map.model === undefined
-        ? undefined
-        : typeof map.model === 'string' && map.model.trim() === ''
-          ? undefined
-          : parseStringValue(map.model, `${bindingPath}.model`);
-    if (model) {
-      const resolved = resolveModelSelectionForWorkload(model, 'chat');
-      if (!resolved.ok) {
-        throw new Error(`${bindingPath}.model is invalid: ${resolved.message}`);
+    const tool = parseStringValue(map.tool, `${itemPath}.tool`);
+    const reason = parseStringValue(map.reason, `${itemPath}.reason`);
+    if (action === 'require_prior') {
+      return {
+        tool,
+        action,
+        prior: parseStringValue(map.prior, `${itemPath}.prior`),
+        reason,
+      };
+    }
+    if (map.when === undefined) return { tool, action, reason };
+    if (
+      typeof map.when !== 'object' ||
+      map.when === null ||
+      Array.isArray(map.when)
+    ) {
+      throw new Error(`${itemPath}.when must be a mapping`);
+    }
+    const when = map.when as Record<string, unknown>;
+    for (const key of Object.keys(when)) {
+      if (key !== 'arg' && key !== 'matches') {
+        throw new Error(`${itemPath}.when.${key} is not supported`);
       }
     }
-    result[bindingId] = {
-      jid: parseStringValue(map.jid, `${bindingPath}.jid`),
-      provider:
-        map.provider === undefined
-          ? undefined
-          : parseStringValue(map.provider, `${bindingPath}.provider`),
-      name:
-        map.name === undefined
-          ? undefined
-          : parseStringValue(map.name, `${bindingPath}.name`),
-      trigger: parseStringValue(map.trigger, `${bindingPath}.trigger`),
-      addedAt: parseStringValue(map.added_at, `${bindingPath}.added_at`),
-      requiresTrigger: parseOptionalBooleanValue(
-        map.requires_trigger,
-        `${bindingPath}.requires_trigger`,
-        true,
-      ),
-      model,
-    };
-  }
-  return result;
+    const arg = parseStringValue(when.arg, `${itemPath}.when.arg`);
+    if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(arg)) {
+      throw new Error(`${itemPath}.when.arg must be a dot path`);
+    }
+    const matches = parseStringValue(when.matches, `${itemPath}.when.matches`);
+    try {
+      new RegExp(matches);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      throw new Error(
+        `${itemPath}.when.matches must be a valid regular expression`,
+        { cause: error },
+      );
+    }
+    return { tool, when: { arg, matches }, action, reason };
+  });
 }
 
 export function parseConfiguredAgents(
   raw: unknown,
+  defaults: {
+    model?: string;
+    oneTimeJobDefaultModel?: string;
+    recurringJobDefaultModel?: string;
+    agentHarness?: AgentHarness;
+    modelFamilyOrder?: FamilyOrderOverrides;
+  } = {},
 ): Record<string, RuntimeConfiguredAgent> {
   if (raw === undefined) return {};
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -391,22 +383,30 @@ export function parseConfiguredAgents(
         key !== 'name' &&
         key !== 'persona' &&
         key !== 'relationship_mode' &&
-        key !== 'jid' &&
-        key !== 'trigger' &&
-        key !== 'added_at' &&
-        key !== 'requires_trigger' &&
+        key !== 'runtime' &&
+        key !== 'max_turns' &&
+        key !== 'max_run_tokens' &&
+        key !== 'effort' &&
+        key !== 'thinking' &&
+        key !== 'max_output_tokens' &&
         key !== 'model' &&
         key !== 'agent_harness' &&
+        key !== 'permission_mode' &&
         key !== 'one_time_job_default_model' &&
         key !== 'recurring_job_default_model' &&
-        key !== 'bindings' &&
+        key !== 'delegates' &&
+        key !== 'tool_rules' &&
         key !== 'access'
       ) {
         throw new Error(
-          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, model, agent_harness, job model defaults, bindings, or access.`,
+          `${pathPrefix}.${key} is not supported. Configure name, persona, relationship_mode, runtime, max_turns, max_run_tokens, effort, thinking, max_output_tokens, model, agent_harness, permission_mode, job model defaults, delegates, tool_rules, or access. Install agents under conversations.*.installed_agents.`,
         );
       }
     }
+    const runtime = parseAgentRuntimeValue(
+      map.runtime,
+      `${pathPrefix}.runtime`,
+    );
     const model =
       map.model === undefined
         ? undefined
@@ -414,7 +414,10 @@ export function parseConfiguredAgents(
           ? undefined
           : parseStringValue(map.model, `${pathPrefix}.model`);
     if (model) {
-      const resolved = resolveModelSelectionForWorkload(model, 'chat');
+      const resolved = resolveModelSelectionForWorkloadWithFamilies(
+        model,
+        'chat',
+      );
       if (!resolved.ok) {
         throw new Error(`${pathPrefix}.model is invalid: ${resolved.message}`);
       }
@@ -427,7 +430,7 @@ export function parseConfiguredAgents(
             `${pathPrefix}.one_time_job_default_model`,
           );
     if (oneTimeJobDefaultModel) {
-      const resolved = resolveModelSelectionForWorkload(
+      const resolved = resolveModelSelectionForWorkloadWithFamilies(
         oneTimeJobDefaultModel,
         'one_time_job',
       );
@@ -445,7 +448,7 @@ export function parseConfiguredAgents(
             `${pathPrefix}.recurring_job_default_model`,
           );
     if (recurringJobDefaultModel) {
-      const resolved = resolveModelSelectionForWorkload(
+      const resolved = resolveModelSelectionForWorkloadWithFamilies(
         recurringJobDefaultModel,
         'recurring_job',
       );
@@ -455,9 +458,24 @@ export function parseConfiguredAgents(
         );
       }
     }
-    result[folder] = {
+    const agent: RuntimeConfiguredAgent = {
       name: parseStringValue(map.name, `${pathPrefix}.name`),
       folder,
+      runtime,
+      maxTurns: parseAgentMaxTurnsValue(
+        map.max_turns,
+        `${pathPrefix}.max_turns`,
+      ),
+      maxRunTokens: parseAgentPositiveIntegerValue(
+        map.max_run_tokens,
+        `${pathPrefix}.max_run_tokens`,
+      ),
+      effort: parseAgentEffortValue(map.effort, `${pathPrefix}.effort`),
+      thinking: parseAgentThinkingValue(map.thinking, `${pathPrefix}.thinking`),
+      maxOutputTokens: parseAgentPositiveIntegerValue(
+        map.max_output_tokens,
+        `${pathPrefix}.max_output_tokens`,
+      ),
       persona: parseAgentPersona(map.persona, `${pathPrefix}.persona`),
       relationshipMode: parseAgentRelationshipMode(
         map.relationship_mode,
@@ -468,36 +486,61 @@ export function parseConfiguredAgents(
         map.agent_harness,
         `${pathPrefix}.agent_harness`,
       ),
+      permissionMode: parseOptionalPermissionModeValue(
+        map.permission_mode,
+        `${pathPrefix}.permission_mode`,
+      ),
       oneTimeJobDefaultModel,
       recurringJobDefaultModel,
-      bindings: parseConfiguredAgentBindings(
-        map.bindings,
-        `${pathPrefix}.bindings`,
-        {
-          jid: map.jid,
-          name:
-            typeof map.name === 'string' && map.name.trim()
-              ? map.name.trim()
-              : undefined,
-          trigger: map.trigger,
-          addedAt: map.added_at,
-          requiresTrigger: map.requires_trigger,
-          model,
-        },
+      delegates: parseStringArrayValue(
+        map.delegates,
+        `${pathPrefix}.delegates`,
+        [],
       ),
+      toolRules: parseConfiguredAgentToolRules(
+        map.tool_rules,
+        `${pathPrefix}.tool_rules`,
+      ),
+      bindings: {},
       ...parseConfiguredAgentAccess(map.access, `${pathPrefix}.access`),
     };
+    const blockers = inlineWorkerOnlyConfiguredCapabilityLabels({ agent });
+    const controlErrors = configuredAgentControlConstraintErrors({
+      subject: pathPrefix,
+      agent,
+      defaultModel: defaults.model,
+      defaultOneTimeJobDefaultModel: defaults.oneTimeJobDefaultModel,
+      defaultRecurringJobDefaultModel: defaults.recurringJobDefaultModel,
+      defaultAgentHarness: defaults.agentHarness,
+      modelFamilyOrder: defaults.modelFamilyOrder,
+    });
+    const skillEngineError = inlineConfiguredSkillEngineConstraintError({
+      subject: pathPrefix,
+      agent,
+      defaultModel: defaults.model,
+      defaultOneTimeJobDefaultModel: defaults.oneTimeJobDefaultModel,
+      defaultRecurringJobDefaultModel: defaults.recurringJobDefaultModel,
+      modelFamilyOrder: defaults.modelFamilyOrder,
+    });
+    const workerOnlyError =
+      blockers.length > 0
+        ? formatInlineAgentWorkerOnlyConfigError(pathPrefix, blockers)
+        : null;
+    const inlineError = [...controlErrors, skillEngineError, workerOnlyError]
+      .filter(Boolean)
+      .join('; ');
+    if (inlineError) throw new Error(inlineError);
+    result[folder] = agent;
   }
-  const seenJids = new Map<string, string>();
   for (const [folder, agent] of Object.entries(result)) {
+    const seenJids = new Set<string>();
     for (const binding of Object.values(agent.bindings)) {
-      const existing = seenJids.get(binding.jid);
-      if (existing) {
+      if (seenJids.has(binding.jid)) {
         throw new Error(
-          `agents.${folder}.bindings contains duplicate jid ${binding.jid}; already configured by agents.${existing}`,
+          `agents.${folder}.bindings contains duplicate jid ${binding.jid}`,
         );
       }
-      seenJids.set(binding.jid, folder);
+      seenJids.add(binding.jid);
     }
   }
   return result;

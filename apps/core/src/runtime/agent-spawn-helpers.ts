@@ -44,6 +44,7 @@ export function deepAgentsFilesystemEnabledEnv(
 
 export type RunnerAgentInput = Omit<AgentInput, 'toolPolicyRules'> & {
   allowedTools?: string[];
+  egressDenylist?: string[];
   modelCredentialEnv?: Record<string, string>;
   toolNetworkEnv?: Record<string, string>;
   deepAgentCheckpointer?: {
@@ -70,6 +71,7 @@ export function buildBaseRunnerEnv(input: {
   ipcInputDir: string;
   ipcAuthToken: string;
   chatJid: string;
+  providerAccountId?: string;
   jobId?: string;
   jobName?: string;
   runId?: string;
@@ -89,6 +91,8 @@ export function buildBaseRunnerEnv(input: {
   hideAuthorityTools: boolean;
   agentAccessPreset: string;
   deploymentMode: string;
+  permissionMode: NonNullable<AgentInput['permissionMode']>;
+  turnIntentSummary: string;
   permissionTimeoutMs: number;
   egressProxyUrl: string;
   sandboxRuntimeProxy: boolean;
@@ -122,6 +126,9 @@ export function buildBaseRunnerEnv(input: {
     GANTRY_IPC_INPUT_DIR: input.ipcInputDir,
     GANTRY_IPC_AUTH_TOKEN: input.ipcAuthToken,
     GANTRY_CHAT_JID: input.chatJid,
+    ...(input.providerAccountId
+      ? { GANTRY_PROVIDER_ACCOUNT_ID: input.providerAccountId }
+      : {}),
     ...(input.jobId ? { GANTRY_JOB_ID: input.jobId } : {}),
     ...(input.jobName ? { GANTRY_JOB_NAME: input.jobName } : {}),
     ...(input.runId ? { GANTRY_JOB_RUN_ID: input.runId } : {}),
@@ -158,6 +165,9 @@ export function buildBaseRunnerEnv(input: {
     GANTRY_NO_PERMISSION_TOOLS: input.hideAuthorityTools ? '1' : '',
     GANTRY_AGENT_ACCESS_PRESET: input.agentAccessPreset,
     GANTRY_DEPLOYMENT_MODE: input.deploymentMode,
+    GANTRY_PERMISSION_MODE:
+      input.permissionMode === 'auto_strict' ? 'auto' : input.permissionMode,
+    GANTRY_TURN_INTENT_SUMMARY: input.turnIntentSummary.slice(0, 1_500),
     GANTRY_INTERACTIVE_PERMISSION_TIMEOUT_MS: String(input.permissionTimeoutMs),
     GANTRY_PERMISSION_TIMEOUT_MS: String(input.permissionTimeoutMs),
     GANTRY_EGRESS_PROXY_URL: input.egressProxyUrl,

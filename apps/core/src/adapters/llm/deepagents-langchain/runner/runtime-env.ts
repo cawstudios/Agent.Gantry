@@ -27,6 +27,7 @@ export function buildPermissionIpcRuntimeEnv(): PermissionIpcRuntimeEnv {
     appId: readEnv('GANTRY_APP_ID') || 'default',
     agentId: readEnv('GANTRY_AGENT_ID'),
     chatJid: readEnv('GANTRY_CHAT_JID'),
+    providerAccountId: readEnv('GANTRY_PROVIDER_ACCOUNT_ID') || undefined,
     jobId,
     jobName: readEnv('GANTRY_JOB_NAME'),
     jobRunId: readEnv('GANTRY_JOB_RUN_ID'),
@@ -39,6 +40,12 @@ export function buildPermissionIpcRuntimeEnv(): PermissionIpcRuntimeEnv {
     permissionRequestTimeoutMs: getPermissionTimeoutMs(
       jobId ? 'autonomous' : 'interactive',
     ),
+    permissionMode:
+      readEnv('GANTRY_PERMISSION_MODE') === 'auto' ? 'auto' : 'ask',
+    senderId: jobId ? undefined : readEnv('GANTRY_MEMORY_USER_ID') || undefined,
+    senderIsControlApprover:
+      readEnv('GANTRY_MEMORY_REVIEWER_IS_CONTROL_APPROVER') === '1',
+    turnIntentSummary: readEnv('GANTRY_TURN_INTENT_SUMMARY') || undefined,
     resolveWorkspaceIpcDir,
   };
 }

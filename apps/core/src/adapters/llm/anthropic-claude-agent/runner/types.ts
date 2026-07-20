@@ -5,9 +5,12 @@ import type {
 } from '../../../../shared/model-catalog.js';
 import type { AgentPersona } from '../../../../shared/agent-persona.js';
 import type { YoloModeSettings } from '../../../../shared/yolo-mode-policy.js';
+import type { PermissionMode } from '../../../../shared/permission-mode.js';
 import type { CapabilityRuntimeAccess } from '../../../../shared/capability-runtime-access.js';
 import type { SemanticCapabilityDefinition } from '../../../../shared/semantic-capabilities.js';
 import type { GantryAgentPromptMode } from '../../../../runner/gantry-agent-system-prompt.js';
+import type { DeclarativeToolRule } from '../../../../runner/tool-gate-core.js';
+import type { CallableAgentToolManifestEntry } from '../../../../application/core-tools/callable-agent-tools.js';
 
 export interface AgentRunnerInput {
   prompt: string;
@@ -24,6 +27,7 @@ export interface AgentRunnerInput {
   persona?: AgentPersona;
   browserProfileName?: string;
   allowedTools?: string[];
+  toolRules?: DeclarativeToolRule[];
   toolAccessRequirements?: string[];
   attachedSkillSourceIds?: string[];
   selectedSkillDisplays?: string[];
@@ -34,6 +38,7 @@ export interface AgentRunnerInput {
   jobId?: string;
   runId?: string;
   parentTaskId?: string;
+  callableAgentManifest?: CallableAgentToolManifestEntry[];
   runLeaseToken?: string;
   runLeaseFencingVersion?: number;
   assistantName?: string;
@@ -41,6 +46,8 @@ export interface AgentRunnerInput {
   compiledSystemPrompt?: string;
   memoryContextBlock?: string;
   yoloMode?: YoloModeSettings;
+  egressDenylist?: string[];
+  permissionMode: PermissionMode;
   modelCredentialEnv?: Record<string, string>;
   toolNetworkEnv?: Record<string, string>;
   runtimeAccess?: CapabilityRuntimeAccess[];
@@ -50,6 +57,10 @@ export interface AgentRunnerInput {
     budgetTokens?: number;
     display?: 'summarized' | 'omitted';
   };
+  effort?: EffortLevel;
+  configuredThinking?:
+    | { mode: 'off'; budgetTokens?: never }
+    | { mode: 'on'; budgetTokens?: number };
 }
 
 export interface AgentRunnerOutput {
@@ -105,16 +116,11 @@ export interface AgentRunnerRuntimeEventOutput {
 
 export interface PermissionDecision {
   approved: boolean;
-  mode?:
-    | 'allow_once'
-    | 'allow_persistent_rule'
-    | 'allow_timed_grant'
-    | 'cancel';
+  mode?: 'allow_once' | 'allow_persistent_rule' | 'cancel';
   decidedBy?: string;
   reason?: string;
   updatedPermissions?: unknown[];
   decisionClassification?: 'user_temporary' | 'user_permanent' | 'user_reject';
-  timedGrantExpiresAtMs?: number;
 }
 
 export interface SessionSlashCommand {

@@ -24,6 +24,8 @@ export type Scope =
   | 'webhooks:write'
   | 'ingresses:read'
   | 'ingresses:write'
+  | 'usage:read'
+  | 'llm:invoke'
   | 'memory:read'
   | 'memory:admin';
 
@@ -32,6 +34,7 @@ export type ApiKeyRecord = {
   tokenHash: Buffer;
   scopes: Set<Scope>;
   appId: string;
+  maxTokens?: number;
 };
 
 export const CONTROL_API_SCOPES: readonly Scope[] = [
@@ -55,6 +58,8 @@ export const CONTROL_API_SCOPES: readonly Scope[] = [
   'webhooks:write',
   'ingresses:read',
   'ingresses:write',
+  'usage:read',
+  'llm:invoke',
   'memory:read',
   'memory:admin',
 ];
@@ -64,8 +69,13 @@ function isApiKeyJsonEntry(value: unknown): value is {
   token?: string;
   scopes?: string[];
   appId?: string;
+  maxTokens?: number;
 } {
   return Boolean(value && typeof value === 'object');
+}
+
+function isValidMaxTokens(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 export function parseControlApiKeys(input: {
@@ -83,6 +93,10 @@ export function parseControlApiKeys(input: {
   return parsed
     .filter(isApiKeyJsonEntry)
     .filter((entry) => entry.kid && entry.token)
+    .filter(
+      (entry) =>
+        entry.maxTokens === undefined || isValidMaxTokens(entry.maxTokens),
+    )
     .map((entry) => ({
       kid: String(entry.kid),
       tokenHash: createHash('sha256').update(String(entry.token)).digest(),
@@ -92,6 +106,7 @@ export function parseControlApiKeys(input: {
         ),
       ),
       appId: typeof entry.appId === 'string' ? entry.appId.trim() : '',
+      ...(entry.maxTokens !== undefined ? { maxTokens: entry.maxTokens } : {}),
     }))
     .filter((entry) => isValidControlId(entry.appId));
 }
@@ -170,11 +185,17 @@ export function parseControlApiKeysStrict(input: {
         `GANTRY_CONTROL_API_KEYS_JSON[${index}].scopes must include at least one scope for production or remote control mode.`,
       );
     }
+    if (entry.maxTokens !== undefined && !isValidMaxTokens(entry.maxTokens)) {
+      throw new Error(
+        `GANTRY_CONTROL_API_KEYS_JSON[${index}].maxTokens must be a positive integer.`,
+      );
+    }
     return {
       kid,
       tokenHash: createHash('sha256').update(token).digest(),
       scopes: new Set(entry.scopes as Scope[]),
       appId,
+      ...(entry.maxTokens !== undefined ? { maxTokens: entry.maxTokens } : {}),
     };
   });
 }

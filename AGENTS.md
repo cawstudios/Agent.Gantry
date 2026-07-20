@@ -28,12 +28,116 @@ Use `python3 .codex/scripts/stage_orchestrator.py` to get current phase commands
 
 ## Execution Standards
 
+- Feature implementation follows the Gantry goal pipeline — always, not optionally:
+  approved plan → a goal-prompt doc in `docs/architecture/` (basename
+  ending in -goal-prompt.md) → MANDATORY Codex validation pass of the plan
+  (gaps, simpler shapes, repo-reality mismatches, ignored risks — findings
+  fixed in the doc before any implementation) → staged Codex handoffs (Claude orchestrates, Codex
+  implements) → per-stage focused checks + local autoreview before each commit →
+  branch-wide autoreview + runtime smoke at closeout → PR. The orchestrator
+  contract lives in `.claude/skills/gantry-goal-pipeline/SKILL.md` (Codex twin:
+  `.codex/skills/gantry-goal-pipeline/SKILL.md`). Do not implement feature work
+  inline outside this pipeline.
 - Always choose the best proven performance technique for the task and context.
 - Do not use laid-back approaches or loose thinking; reason precisely and verify assumptions.
 - Do the work, critique the work, and make sure the task is completed properly end-to-end.
 - Do not take shortcuts. Keep work well-structured, neat, and clean.
 - Do not overcomplicate. Make a plan, seal the flaws, and execute that plan through completion.
+- Every Codex handoff prompt MUST include an escalation clause telling Codex:
+  "The orchestrator (Claude) is monitoring your run and can answer. If you hit
+  a contradiction, an ambiguous or missing requirement, or a decision that
+  changes behavior/security, STOP and state the question explicitly in your
+  output (a line beginning 'DECISION NEEDED:' or 'QUESTION:') and wait rather
+  than silently assuming or abandoning the task — the orchestrator will read it
+  and respond." The persistent Monitor keys on these markers, so a surfaced
+  question reaches the orchestrator promptly and it makes the judgement.
+- MANDATORY: arm a persistent `Monitor` over the Codex job logs whenever Codex
+  tasks run, watching each `task-*.log` for question/blocker/decision markers
+  (decision required, which option, please confirm, awaiting input/approval,
+  blocker, cannot proceed, needs a user/product decision, …) with file-based
+  dedup so each distinct line fires once. This is the event-driven channel for
+  Codex mid-run questions (Codex has no back-channel to the conversation, but
+  its output stream is watchable). Answer any surfaced question promptly by
+  resuming that task rather than letting it stall. Keep the monitor session-
+  length; do not rely on polling or the terminal notification alone. After a
+  task ends, still scan its result for buried questions/deviations AND read
+  that stage's assumptions ledger, ratifying anything that changes behavior.
+  Monitor shape (jobs dir under
+  ~/.claude/plugins/data/codex-openai-codex/state/<repo>/jobs): scan only logs
+  modified recently (`find -mmin -25`) — NOT all history; grep for real
+  question/decision phrasing (decision required, which option should, please
+  confirm, awaiting input/approval, cannot proceed without, mutually
+  incompatible, need you to decide/clarify); EXCLUDE benign section headers
+  (`grep -viE 'blockers?:? *(none|n/a)?$'`) or it floods; dedup via a seen-file
+  keyed on `<task>:<line>`. Keep it session-length (persistent).
+- Review-process liveness: judge a detached review by its LOG mtime (`stat`),
+  never by `ps | grep` — a crashed/finished review leaves a process the grep
+  still matches while the log went stale; a COMPLETE verdict can then sit
+  unprocessed for hours. If a review's log hasn't advanced but the verdict is
+  present, process it; if it died mid-run (model-capacity error, truncated
+  verdict), relaunch. Background waiters get culled by this environment
+  constantly — that is expected; the detached work survives, so just re-arm,
+  and prefer a single combined waiter that re-checks state over many fragile
+  per-task ones.
+- Forwarder task ids drift: the codex:codex-rescue wrapper sometimes reports a
+  task id that differs from the one actually running. Don't chase the reported
+  id — verify by the worktree/tree diff and test results directly, or find the
+  newest running task via `codex-companion status`.
+- Verify each parallel writer IN ITS OWN worktree (symlink node_modules from
+  the primary checkout: `ln -sfn <primary>/node_modules <wt>/node_modules`,
+  then `./node_modules/.bin/tsc` and `npm run test:unit` in that dir).
+- Prefer git WORKTREES for parallel writer streams: whenever independent work
+  can branch off `main` (a separate PR-to-be — different subsystem, own review,
+  own commit), run it in its own `git worktree` off `origin/main` so it never
+  collides with in-progress uncommitted work. Symlink `node_modules` from the
+  primary checkout into the worktree for verification. Each worktree stream is
+  verified and reviewed independently and merges as its own PR. Use worktrees
+  by default for any stream that is disjoint from the current branch; reserve
+  same-worktree parallel writers for tightly-coupled disjoint edits.
+- Parallelize Codex tasks where possible: read-only tasks (plan validations,
+  surveys, audits) always run in parallel with writers and each other. Writer
+  tasks may ALSO run in parallel when their bounded write scopes are provably
+  disjoint — including tests, docs, and the assumptions ledger (assign shared
+  files like the ledger to exactly one task, or the orchestrator writes those
+  rows itself). Overlapping or unclear scopes = serialize. The orchestrator
+  runs unified verification (tsc, suites, gates) once after parallel writers
+  land, before any commit.
 - Do not bias toward the user's ideas or the agent's first idea. Be logical, push back when warranted, and prefer the simplest correct solution.
+- Review-loop escalation rule: when review rounds or live testing surface the
+  SAME class of issue more than twice in one area, stop patching findings
+  individually. Step back and re-examine the architecture and the feature's
+  implementation shape: write the invariant/spec the area must satisfy, look
+  for a simplification that removes the failure class structurally (fewer
+  states, one authorization point, one canonical id, plain-text rendering,
+  narrower feature scope), audit every call site against the spec in one pass,
+  and pin the invariants with tests. Recurring findings are a design signal,
+  not a fix queue. Precedents: the batch-claim state machine, canonical
+  revision-document round-trip, and export compare-then-restore in
+  `docs/architecture/runtime-permission-ux-assumptions.md`.
+- Two distinct escalation OUTCOMES — pick by whether the complexity is
+  reducible on the current foundation: (a) CONSOLIDATE when the churning
+  subsystem is self-contained and the reviewer has effectively specified the
+  correct invariant (e.g. the claim state machine, the settlement contract,
+  the IPC correct-design attempt) — write the invariant once and audit all
+  sites; (b) SPLIT OUT when the churn is because the item is entangled with
+  other subsystems or is simply cycle-sized wearing a "quick win" label (e.g.
+  retention entangled with scheduler/lease/agent machinery; IPC backpressure
+  as a durable filesystem queue needing cursor/pagination) — remove it from
+  the current PR, revert its changes to main, and defer it to the proper
+  cycle with a ledger note. Set the tripwire in advance ("if round N still
+  churns X, split it") and HONOR it.
+- Scope skeptically: an upstream review/audit labelling something a "small
+  reliability fix" or "quick win" is a hypothesis, not a fact. Before batching
+  items as quick wins, sanity-check each against what it actually touches —
+  anything touching data deletion, durable queues, lease/fencing, scheduler
+  run-recording, or concurrent writers is cycle-sized regardless of the label.
+  Two of five "arch quick wins" (retention, IPC backpressure) had to be split
+  back out; that was a scoping miss to avoid repeating.
+- Distinguish a recurring CLASS (same failure shape respawning — the dangerous
+  signal that demands consolidation) from a converging TAIL (distinct real
+  findings each round, severity/count trending down — healthy, keep going).
+  Do not over-escalate a converging tail; do not under-escalate a recurring
+  class.
 
 ## Runtime Modes
 
@@ -48,7 +152,7 @@ Important constraints:
 - Durable memory lives under the configured memory root; do not load `~/gantry/agents/<folder>/memory/`.
 - Live channel turns must persist the provider SDK session ID as soon as the runner streams it. Do not wait for runner shutdown; launchd restarts can kill an active run before final completion.
 - An Anthropic SDK live turn that completes with zero SDK messages/results is not a successful empty answer; if it resumed a provider session, expire and retry without resume, otherwise surface a real turn failure instead of showing only progress done.
-- Provider terminal frames close the current content stream, not the host run; keep progress/Stop active until the spawned agent process resolves.
+- Provider terminal frames close the current content stream, not the host run; keep cancellability active until the spawned agent process resolves, but do not render Telegram Stop buttons.
 - Restored Telegram progress handles can be stale after a launchd restart; a fresh live-turn progress or todo update may replace a restored higher generation for the same chat key.
 - In macOS `sandbox_runtime`, Node file watches need `com.apple.FSEvents` Mach lookup; a denied lookup can surface as `EMFILE: too many open files, watch`, so confirm sandbox logs before treating it as a descriptor-limit problem.
 - Progress/status messages for long-lived live runs are per user-visible turn: reset elapsed timers and progress generations when continuation input is piped, and do not send follow-up progress from the polling loop.
@@ -137,12 +241,13 @@ Important constraints:
 - Teams is a first-class channel. Use `teams:` conversation IDs, Teams runtime secrets through `RuntimeSecretProvider`, and Adaptive Card `Action.Execute` approval flows.
 - Runtime bootstrap code must not call `getRuntimeStorage()` while constructing wiring objects before `runStartup()` initializes storage. Pass lazy repository accessors or instantiate storage-backed services inside request handlers after startup.
 - Runtime queue concurrency and retry policy belongs under `runtime.queue` in `settings.yaml` and should be injected into `GroupQueue`; tests should not depend on hard-coded queue timing or concurrency defaults.
-- Agents must use `send_message`, `ask_user_question`, `continuity_summary`, `file`, `request_skill_install`, `request_skill_proposal`, `request_skill_dependency_install`, `request_mcp_server`, `request_access`, `agent_profile_read`, `request_agent_profile_update`, `mcp_list_tools`, `mcp_call_tool`, and selected admin tools such as `settings_desired_state`, `request_settings_update`, `admin_permission_list`, `admin_permission_revoke`, `service_restart`, and `register_agent` instead of direct installs, config edits, or raw tool-enable guidance. Profile files (`SOUL.md`, `AGENTS.md`) are edited only through `request_agent_profile_update`, never the generic `file` tool. Durable semantic capability changes use `request_access` (`target.kind=capability`) for reviewed semantic capabilities, Browser, or provider/channel permissions; exact Gantry facade/admin tool changes use `request_access` (`target.kind=tool`) with durable tool names such as `AgentDelegation` or `mcp__gantry__request_settings_update`; and `request_access` (`target.kind=run_command`) requests a scoped `RunCommand(<literal argv pattern>)` fallback when no reviewed semantic capability fits. Live interactive fallback permission prompts use `Allow once`, `Allow 5 min`, `Allow for future`, and `Cancel`; setup, scheduler, admin, and capability flows omit `Allow 5 min`. Broad exact SDK/native tools, exact third-party MCP tools, bare persistent `Bash`, `RunCommand`, `Bash(*)`, `RunCommand(*)`, and leading-wildcard command scopes are not durable `request_access` authority. User-defined `local_cli` capabilities require pinned executable identity, preflight, protected paths, denied environment overrides, and reviewed command templates before they project to scoped command authority.
+- Agents must use `send_message`, `ask_user_question`, `continuity_summary`, `file`, `request_skill_install`, `request_skill_proposal`, `request_skill_dependency_install`, `request_mcp_server`, `request_access`, `agent_profile_read`, `request_agent_profile_update`, `mcp_list_tools`, `mcp_call_tool`, and selected admin tools such as `settings_desired_state`, `request_settings_update`, `admin_permission_list`, `admin_permission_revoke`, `service_restart`, and `register_agent` instead of direct installs, config edits, or raw tool-enable guidance. Profile files (`SOUL.md`, `AGENTS.md`) are edited only through `request_agent_profile_update`, never the generic `file` tool. Durable semantic capability changes use `request_access` (`target.kind=capability`) for reviewed semantic capabilities, Browser, or provider/channel permissions; exact Gantry facade/admin tool changes use `request_access` (`target.kind=tool`) with durable tool names such as `AgentDelegation` or `mcp__gantry__request_settings_update`; and `request_access` (`target.kind=run_command`) requests a scoped `RunCommand(<literal argv pattern>)` fallback when no reviewed semantic capability fits. Permission prompts use `Allow once`, `Allow for future` when a persistent suggestion exists, and `Cancel`. Broad exact SDK/native tools, exact third-party MCP tools, bare persistent `Bash`, `RunCommand`, `Bash(*)`, `RunCommand(*)`, and leading-wildcard command scopes are not durable `request_access` authority. User-defined `local_cli` capabilities require pinned executable identity, preflight, protected paths, denied environment overrides, and reviewed command templates before they project to scoped command authority.
+- Agent-facing guidance should positively describe the mounted Gantry tools, such as `todo_update`, `send_message`, `ask_user_question`, `render_*`, scheduler tools, or skill request tools depending on the job. Do not add self-referential negative guidance about nonexistent tools to agent prompts; it can leak into user-visible replies.
 - Tool and capability lifecycle is agent-owned. When a live agent is blocked on permission approval or capability selection, do not bypass the flow by editing `settings.yaml`, mutating Postgres, or calling owner/admin Control API endpoints to grant the tool on the agent's behalf. Diagnose logs and code, fix broken approval/persistence/runtime projection paths, and let the agent request the capability from the user through the product flow. Only undo an earlier accidental bypass when explicitly correcting that mistake.
 - Prefer semantic capability requests (`request_access` with `target.kind=capability`) for app/tool access. Capabilities must come from reviewed tool, skill, MCP server, adapter, or CLI manifests; do not add source-code hardcoded capability ids for specific products, providers, or CLIs. Use `target.kind=tool` only for exact Gantry facade/admin tools; fall back to raw scoped `RunCommand(...)` only for one-off exact commands or when no reviewed semantic capability exists.
 - Scheduler job `local_cli` requirements must include an absolute `executablePath`; `commandTemplate` and any `authPreflight` must start with that exact executable path. Runtime setup may request the generated scoped command rule for that job, but must not convert a CLI implementation binding into a hardcoded semantic capability or broad CLI rule.
-- `SandboxNetworkAccess` is an SDK-internal defense-in-depth prompt, never durable authority. Suppress it only with a short-lived run-local token created by an already-approved tool call with a matching parent tool-use id, while the same agent/conversation has active eligible-tools/SDK-API-prompt timed access. For scheduled jobs, suppress only when a parentless SDK network prompt arrives immediately after the same principal's approved Bash/RunCommand invocation and matches a host hash derived from that latest run-local token. Persist only the scoped `RunCommand(...)` rule, canonical Browser capability, exact Gantry file/web facade, exact admin MCP tool, or semantic capability instead.
-- `permissions.yolo_mode` is a root settings safety valve for the 5-minute all-tools timed grant. User entries merge with shipped defaults; denylist hits skip timed-grant bypass, write audit, and re-prompt unless `enabled: false`.
+- `SandboxNetworkAccess` is an SDK-internal defense-in-depth prompt, never durable authority. Suppress it only with a short-lived run-local token created by an already-approved tool call with a matching parent tool-use id. For scheduled jobs, suppress only when a parentless SDK network prompt arrives immediately after the same principal's approved Bash/RunCommand invocation and matches a host hash derived from that latest run-local token. Persist only the scoped `RunCommand(...)` rule, canonical Browser capability, exact Gantry file/web facade, exact admin MCP tool, or semantic capability instead.
+- `permissions.yolo_mode` is the settings-owned denylist backstop for auto-approval paths. Shipped command and path rules merge with user entries. A match must emit a `permission.yolo_denylist_hit` audit event, skip auto-approval, and return to normal explicit approval where the runner can prompt; otherwise deny explicitly. `enabled: false` disables this backstop.
 - Egress policy is runtime-owned and provider-neutral. Model provider calls use the Gantry loopback model gateway, while approved outbound tool traffic uses the Gantry loopback egress gateway through `toolNetworkEnv`; `permissions.egress.denylist` is an optional hostname-glob denylist, default egress is allow, and every CONNECT decision must be audited.
 - In `sandbox_runtime`, pass Gantry egress to sandbox-runtime as `network.parentProxy`; do not set `network.httpProxyPort` to a host Gantry port, because that bypasses sandbox-runtime's in-sandbox proxy bridge and makes sandboxed children connect to unreachable host loopback ports. Runner-local checkpointer/database access should use the proxy env injected inside the sandbox.
 - Browser grants are selected in `settings.yaml` and the public capabilities API as `browser.use`, then translated to the canonical runtime `Browser` tool rule. Runtime projects that capability into Gantry-owned gateway tools (`browser_status`, `browser_open`, `browser_inspect`, `browser_act`, and `browser_close`) with Gantry-owned schemas. Private browser backend details are internal implementation details. Do not persist or expose per-action browser tool names as durable authority.

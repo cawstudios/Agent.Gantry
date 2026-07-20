@@ -71,6 +71,17 @@ describe('ensureWorkspaceIpcLayout', () => {
 
     expect(fs.statSync(path.join(ipcDir, 'messages')).isDirectory()).toBe(true);
   });
+
+  it('skips the workspace IPC layout for inline runtime', async () => {
+    const root = makeTmpRoot(roots);
+    const ipcDir = path.join(root, 'inline-ipc');
+
+    const { ensureWorkspaceIpcLayout } =
+      await import('@core/runtime/agent-spawn-layout.js');
+    ensureWorkspaceIpcLayout(ipcDir, 'inline');
+
+    expect(fs.existsSync(ipcDir)).toBe(false);
+  });
 });
 
 describe('resolvePackageRootFromSourceDir', () => {

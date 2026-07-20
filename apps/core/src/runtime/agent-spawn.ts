@@ -1,5 +1,4 @@
 import { ChildProcess } from 'child_process';
-import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -13,19 +12,17 @@ import {
   getRuntimeSettingsForConfig,
   getEffectiveModelConfig,
   getSelectedAgentHarness,
+  getSelectedAgentRuntime,
 } from '../config/index.js';
-import { resolveAgentAccessPolicy } from '../config/profiles.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { runSpawnWithLogContext } from '../infrastructure/observability/spawn-log-context.js';
+import type { SpawnTurnTracker } from '../infrastructure/observability/spawn-turn-tracker.js';
 import { ConversationRoute } from '../domain/types.js';
-import {
-  getHostRuntimeCredentialEnv,
-  prepareHostRuntimeContext,
-} from './agent-spawn-host.js';
+import * as host from './agent-spawn-host.js';
 import {
   McpServerService,
   type MaterializedMcpCapability,
 } from '../application/mcp/mcp-server-service.js';
-import { ensureWorkspaceIpcLayout } from './agent-spawn-layout.js';
 import { resolvePackageRootFromSourceDir } from '../platform/package-root.js';
 import {
   computeBrowserIpcAuthToken,
@@ -51,6 +48,8 @@ import {
 } from './agent-spawn-types.js';
 import { selectedMemoryIpcActionsFromToolRules } from '../shared/memory-ipc-actions.js';
 import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
+import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
+import { conversationBoundAgentIdsForRoute } from '../application/core-tools/callable-agent-tools.js';
 import { resolveMcpCredentialEnvForAgent } from '../application/capability-secrets/mcp-secret-projection.js';
 import {
   attachMcpSourceNetworkHosts,
@@ -65,17 +64,19 @@ import {
   sandboxAllowedNetworkHostsFromRuntimeAccess,
   writeProtectedFilesystemEnv,
 } from './agent-spawn-runtime-policy.js';
-import { nowMs as currentTimeMs } from '../shared/time/datetime.js';
+import {
+  resolveAgentSpawnLogContext,
+  stripIncompleteRunLeaseIdentity,
+} from './agent-spawn-identity.js';
 import {
   getConfiguredModelProvidersForApp,
   getRuntimeFileArtifactStore,
+  getRuntimeStorage,
 } from '../adapters/storage/postgres/runtime-store.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
-import { resolveAgentExecutionAdapter } from '../application/agent-execution/agent-execution-adapter-registry.js';
 import { writeRunnerMcpConfigFile } from './agent-spawn-mcp-config.js';
 import { withStdioMcpEgressEnv } from './agent-spawn-mcp-egress-env.js';
-import { createRunnerHostStartupTiming } from './agent-spawn-startup-timing.js';
 import { publishRunnerHostStartupDiagnosticFromSpawn } from './agent-spawn-startup-diagnostic.js';
 import { resolveSelectedSkillEnvForSpawn } from './agent-spawn-selected-skill-env.js';
 import { configureSpawnAsyncCommandSandboxPolicy } from './async-command-sandbox-policy.js';
@@ -91,7 +92,6 @@ import {
   protectedWritePathsForOuterSandbox,
   sandboxRuntimeToolProcessEnv,
   sandboxRuntimeToolNetworkEnv,
-  prepareRunnerWorkspace,
   resolveRunnerSandboxStartup,
   uniqueStrings,
   buildRunnerSandboxSpawnInput,
@@ -99,12 +99,15 @@ import {
   buildAndLogRunnerRuntimeDetails,
   type RunnerAgentInput,
 } from './agent-spawn-helpers.js';
+import {
+  prepareAgentSpawn,
+  prepareWorkerAuthorityProjection,
+} from './agent-spawn-preparation.js';
+import { resolveSpawnExecutionAdapter } from './agent-spawn-execution-adapter.js';
+import { createRunnerTempDirectories } from './agent-spawn-temp-directories.js';
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
-export type {
-  AvailableGroup,
-  AgentInput,
-  AgentOutput,
-} from './agent-spawn-types.js';
+export type { AvailableGroup } from './agent-spawn-types.js';
+export type { AgentInput, AgentOutput } from './agent-spawn-types.js';
 export async function spawnAgent(
   group: ConversationRoute,
   input: AgentInput,
@@ -112,15 +115,35 @@ export async function spawnAgent(
   onOutput: ((output: AgentOutput) => Promise<void>) | undefined,
   options: RunAgentOptions,
 ): Promise<AgentOutput> {
-  const startTime = currentTimeMs();
-  const hostStartup = createRunnerHostStartupTiming({ nowMs: currentTimeMs });
-  const { groupDir, processName } = hostStartup.measure('workspacePrepMs', () =>
-    prepareRunnerWorkspace({
-      folder: group.folder,
-      nowMs: currentTimeMs,
-      warn: logger.warn.bind(logger),
-    }),
+  const spawnInput = stripIncompleteRunLeaseIdentity(input);
+  return runSpawnWithLogContext(
+    {
+      ...resolveAgentSpawnLogContext(group, input, options?.correlationRunId),
+      onOutput,
+    },
+    (turnTracker) =>
+      spawnAgentWithContext(group, spawnInput, onProcess, options, turnTracker),
   );
+}
+async function spawnAgentWithContext(
+  group: ConversationRoute,
+  input: AgentInput,
+  onProcess: (proc: ChildProcess, runHandle: string) => void,
+  options: RunAgentOptions,
+  turnTracker: SpawnTurnTracker<AgentOutput>,
+): Promise<AgentOutput> {
+  const preparation = await prepareAgentSpawn({
+    group,
+    agentInput: input,
+    agentRuntime: input.runtime ?? getSelectedAgentRuntime(group.folder),
+    onProcess,
+    onOutput: turnTracker.onOutput,
+    options: { ...options, correlationRunId: turnTracker.correlationId },
+    warn: logger.warn.bind(logger),
+  });
+  if (preparation.kind === 'inline') return preparation.output;
+  const { agentRuntime, startTime, hostStartup, groupDir, processName } =
+    preparation;
   const modelResolutionStarted = hostStartup.start();
   const runtimeSettings = getRuntimeSettingsForConfig();
   const modelConfig = getEffectiveModelConfig(
@@ -147,15 +170,22 @@ export async function spawnAgent(
       error: resolvedModel.message,
     };
   }
+  const agentSettings = runtimeSettings.agents?.[group.folder];
+  input = host.withControls(
+    input,
+    agentSettings,
+    group.agentConfig?.permissionMode,
+  );
   const agentEngine = resolvedModel.value.agentEngine;
   const effectiveModel = resolvedModel.value.runnerModel;
-  const effectiveModelEntry = resolvedModel.value.modelEntry;
   const preSpawnAdmissionError = hostStartup.measure(
     'preSpawnAdmissionMs',
     () =>
       validateAgentPreSpawnAdmission({
         agentInput: input,
         agentEngine,
+        agentRuntime,
+        modelEntry: resolvedModel.value.modelEntry,
         securityEnv: process.env,
         sandboxProvider: runtimeSettings.runtime.sandbox.provider,
       }),
@@ -164,15 +194,38 @@ export async function spawnAgent(
     return { status: 'error', result: null, error: preSpawnAdmissionError };
   }
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
-  const agentAccessPolicy = resolveAgentAccessPolicy(
-    runtimeSettings.agents?.[group.folder]?.accessPreset,
+  const credentials = host.getHostRuntimeCredentialEnv;
+  const personasByAgentId = Object.fromEntries(
+    Object.entries(runtimeSettings.agents ?? {}).map(([folder, agent]) => [
+      String(agentIdForFolder(folder)),
+      agent.persona,
+    ]),
   );
-  const isLockedAgent = agentAccessPolicy.preset === 'locked';
+  const { accessPreset, hideAuthorityTools, callableAgentManifest } =
+    await prepareWorkerAuthorityProjection({
+      agentInput: input,
+      accessPreset: agentSettings?.accessPreset,
+      delegates: agentSettings?.delegates ?? [],
+      getConversationBoundAgentIds: () =>
+        conversationBoundAgentIdsForRoute({
+          routes: options?.conversationRoutes ?? {},
+          chatJid: input.chatJid,
+          threadId: input.threadId,
+          callerAgentId:
+            input.agentId ?? String(agentIdForFolder(group.folder)),
+          callerProviderAccountId: group.providerAccountId,
+        }),
+      personasByAgentId,
+      workspaceFolder: group.folder,
+      options,
+      getAgentRepository: () => getRuntimeStorage().repositories.agents,
+      warn: logger.warn.bind(logger),
+    });
   const compiledSystemPrompt = await compileSpawnSystemPrompt({
     group,
     agentInput: input,
     appId: input.appId || 'default',
-    accessPreset: agentAccessPolicy.preset,
+    accessPreset,
     fileArtifactStore: () => getRuntimeFileArtifactStore(),
     measureAsync: (name, fn) => hostStartup.measureAsync(name, fn),
   });
@@ -185,102 +238,26 @@ export async function spawnAgent(
   const browserIpcEnabled = (trustedToolPolicyRules ?? []).some(
     isCanonicalBrowserCapabilityRule,
   );
-  const hideAuthorityTools =
-    isLockedAgent ||
-    input.hideAuthorityTools === true ||
-    process.env.GANTRY_NO_PERMISSION_TOOLS === '1';
+  // hideAuthorityTools comes from prepareWorkerAuthorityProjection above
+  // (same three conditions).
+  const egressSettings = runtimeSettings.permissions.egress;
   const runnerInput: RunnerAgentInput = {
     ...input,
     allowedTools: trustedToolPolicyRules,
+    callableAgentManifest,
     browserProfileName,
     hideAuthorityTools,
     compiledSystemPrompt,
     yoloMode: effectiveYoloModeSettings(runtimeSettings.permissions.yoloMode),
+    egressDenylist: egressSettings.denylist,
   };
-  const hostRuntime = prepareHostRuntimeContext(group);
-  ensureWorkspaceIpcLayout(hostRuntime.workspaceIpcDir);
-  let executionAdapter: NonNullable<RunAgentOptions['executionAdapter']>;
-  try {
-    executionAdapter = resolveAgentExecutionAdapter({
-      executionProviderId: resolvedModel.value.executionProviderId,
-      registry: options?.executionAdapters,
-      fallback: options?.executionAdapter,
-    }) as NonNullable<RunAgentOptions['executionAdapter']>;
-  } catch (err) {
-    return {
-      status: 'error',
-      result: null,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-  if (!executionAdapter) {
-    return {
-      status: 'error',
-      result: null,
-      error:
-        'No LLM execution adapter configured. Runtime bootstrap must provide an AgentExecutionAdapterRegistry.',
-    };
-  }
-  const hostCredentials = await hostStartup.measureAsync(
-    'credentialProjectionMs',
-    () =>
-      getHostRuntimeCredentialEnv(agentIdentifier, options?.credentialBroker, {
-        purpose: 'model_runtime',
-        runContext: input,
-        modelRouteId: effectiveModelEntry?.modelRoute.id,
-      }),
+  const hostRuntime = host.prepareHostRuntimeContext(group);
+  const adapterResolution = resolveSpawnExecutionAdapter(
+    resolvedModel.value.executionProviderId,
+    options,
   );
-  let preparedExecution: Awaited<ReturnType<typeof executionAdapter.prepare>>;
-  try {
-    preparedExecution = await hostStartup.measureAsync('adapterPrepareMs', () =>
-      executionAdapter.prepare({
-        group,
-        input,
-        hostRuntime,
-        groupDir,
-        effectiveModel,
-        effectiveModelEntry,
-        modelCredentialProjection: {
-          env: hostCredentials.env,
-          credentialProviders: hostCredentials.credentialProviders,
-          brokerProfile: hostCredentials.brokerProfile,
-          brokerApplied: hostCredentials.brokerApplied,
-          ...(hostCredentials.brokerAuthMode
-            ? { brokerAuthMode: hostCredentials.brokerAuthMode }
-            : {}),
-          proxy: hostCredentials.proxy,
-        },
-        runtimeStorage: {
-          postgresUrl: STORAGE_POSTGRES_URL,
-          postgresUrlEnv: STORAGE_POSTGRES_URL_ENV,
-          postgresSchema: STORAGE_POSTGRES_SCHEMA,
-        },
-        browserIpcEnabled,
-        packageRootFromRunner: (runnerPath) =>
-          resolvePackageRootFromSourceDir(path.dirname(runnerPath)),
-        options,
-      }),
-    );
-  } catch (err) {
-    await hostCredentials.revoke?.().catch((revokeErr) => {
-      logger.warn(
-        { err: revokeErr },
-        'Failed to revoke model gateway token after LLM runtime materialization failure',
-      );
-    });
-    const errorText = err instanceof Error ? err.message : String(err);
-    const generatedRuntimeError = formatGeneratedRuntimePathPermissionError({
-      runnerLabel: 'LLM runtime materialization',
-      errorText,
-    });
-    return {
-      status: 'error',
-      result: null,
-      error:
-        generatedRuntimeError ??
-        `LLM runtime materialization failed: ${errorText}`,
-    };
-  }
+  if (!adapterResolution.ok) return adapterResolution.output;
+  const { executionAdapter } = adapterResolution;
   let mcpConfigPath: string | undefined;
   let sandboxConfigPath: string | undefined;
   let runnerTempDir: string | undefined;
@@ -292,7 +269,67 @@ export async function spawnAgent(
     appId: input.appId || 'default',
     agentId: input.agentId,
   });
+  let hostCredentials: Awaited<ReturnType<typeof credentials>> | undefined;
+  let preparedExecution:
+    | Awaited<ReturnType<typeof executionAdapter.prepare>>
+    | undefined;
+  let output: AgentOutput | undefined;
   try {
+    const projectedCredentials = await hostStartup.measureAsync(
+      'credentialProjectionMs',
+      () =>
+        credentials(agentIdentifier, options?.credentialBroker, {
+          purpose: 'model_runtime',
+          runId: turnTracker.correlationId as never,
+          runContext: input,
+          modelRouteId: resolvedModel.value.modelEntry.modelRoute.id,
+        }),
+    );
+    hostCredentials = projectedCredentials;
+    try {
+      preparedExecution = await hostStartup.measureAsync(
+        'adapterPrepareMs',
+        () =>
+          executionAdapter.prepare({
+            group,
+            input: { ...input, permissionMode: input.permissionMode ?? 'ask' },
+            hostRuntime,
+            groupDir,
+            effectiveModel,
+            effectiveModelEntry: resolvedModel.value.modelEntry,
+            modelCredentialProjection: {
+              env: projectedCredentials.env,
+              credentialProviders: projectedCredentials.credentialProviders,
+              brokerProfile: projectedCredentials.brokerProfile,
+              brokerApplied: projectedCredentials.brokerApplied,
+              ...(projectedCredentials.brokerAuthMode
+                ? { brokerAuthMode: projectedCredentials.brokerAuthMode }
+                : {}),
+              proxy: projectedCredentials.proxy,
+            },
+            runtimeStorage: {
+              postgresUrl: STORAGE_POSTGRES_URL,
+              postgresUrlEnv: STORAGE_POSTGRES_URL_ENV,
+              postgresSchema: STORAGE_POSTGRES_SCHEMA,
+            },
+            browserIpcEnabled,
+            packageRootFromRunner: (runnerPath) =>
+              resolvePackageRootFromSourceDir(path.dirname(runnerPath)),
+            options,
+          }),
+      );
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      const generatedRuntimeError = formatGeneratedRuntimePathPermissionError({
+        runnerLabel: 'LLM runtime materialization',
+        errorText,
+      });
+      const failure =
+        generatedRuntimeError ??
+        `LLM runtime materialization failed: ${errorText}`;
+      output = { status: 'error', result: null, error: failure };
+      return output;
+    }
     const command = process.execPath;
     const args = preparedExecution.runnerArgs;
     const ipcInputDir = getContinuationInputDir(
@@ -375,7 +412,7 @@ export async function spawnAgent(
       },
     );
     const upstreamProxyUrl =
-      hostCredentials.proxy?.https || hostCredentials.proxy?.http;
+      projectedCredentials.proxy?.https || projectedCredentials.proxy?.http;
     const runnerInputPatch = preparedExecution.runnerInputPatch ?? {};
     runnerInput.modelCredentialEnv = runnerInputPatch.modelCredentialEnv;
     const checkpointerNetworkHost = databaseNetworkHostFromUrl(
@@ -403,7 +440,7 @@ export async function spawnAgent(
     egressGateway = await hostStartup.measureAsync('egressGatewayMs', () =>
       ensureEgressGateway({
         key: `${runnerAppId}:${input.agentId || group.folder}:${processName}`,
-        settings: getRuntimeSettingsForConfig().permissions.egress,
+        settings: egressSettings,
         principal: {
           appId: runnerAppId,
           conversationId: input.chatJid,
@@ -427,7 +464,7 @@ export async function spawnAgent(
           ? {
               upstreamProxy: {
                 url: upstreamProxyUrl,
-                provider: hostCredentials.brokerProfile,
+                provider: projectedCredentials.brokerProfile,
               },
             }
           : {}),
@@ -444,7 +481,7 @@ export async function spawnAgent(
           proxyUrl: egressGateway.proxyUrl,
           caBundlePath:
             runnerInputPatch.modelCredentialEnv?.NODE_EXTRA_CA_CERTS ??
-            hostCredentials.env.NODE_EXTRA_CA_CERTS,
+            projectedCredentials.env.NODE_EXTRA_CA_CERTS,
           noProxy: {
             NO_PROXY: process.env.NO_PROXY,
             no_proxy: process.env.no_proxy,
@@ -469,22 +506,13 @@ export async function spawnAgent(
       group.folder,
       'extra',
     );
-    if (runnerSandboxProviderId === 'sandbox_runtime') {
-      const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
-      runnerTempDir = path.join('/tmp', `gantry-srt-${suffix}`);
-      fs.mkdirSync(runnerTempDir, { recursive: false, mode: 0o700 });
-      const providerToolTempDirLeaf =
-        preparedExecution.sandboxRuntime?.toolTempDirLeaf;
-      if (providerToolTempDirLeaf) {
-        providerToolTempDir = path.join(runnerTempDir, providerToolTempDirLeaf);
-        fs.mkdirSync(providerToolTempDir, { recursive: true, mode: 0o700 });
-      }
-    }
+    ({ runnerTempDir, providerToolTempDir } = createRunnerTempDirectories({
+      sandboxProviderId: runnerSandboxProviderId,
+      toolTempDirLeaf: preparedExecution.sandboxRuntime?.toolTempDirLeaf,
+    }));
     // DeepAgents model traffic runs inside the runner process. In
-    // sandbox_runtime, OpenRouter uses raw fetch rather than an SDK client, so
-    // the runner process itself needs the Gantry egress proxy to reach the
-    // sandbox-private model-gateway alias. Child shell/tool envs still receive
-    // only the separately sanitized toolNetworkEnv projection.
+    // OpenRouter's sandbox_runtime lane needs the Gantry egress proxy because
+    // it uses raw fetch; child tools still receive only sanitized toolNetworkEnv.
     const runnerToolProcessEnv =
       preparedExecution.providerId === 'deepagents:langchain'
         ? toolNetworkEnv
@@ -509,6 +537,7 @@ export async function spawnAgent(
       ipcInputDir,
       ipcAuthToken: ipcAuth.authToken,
       chatJid: input.chatJid,
+      providerAccountId: group.providerAccountId,
       jobId: input.jobId,
       jobName: input.jobName,
       runId: input.runId,
@@ -539,8 +568,10 @@ export async function spawnAgent(
       memoryDefaultScope: input.memoryDefaultScope,
       memoryReviewerIsControlApprover: input.memoryReviewerIsControlApprover,
       hideAuthorityTools,
-      agentAccessPreset: agentAccessPolicy.preset,
+      agentAccessPreset: accessPreset,
       deploymentMode: getDeploymentMode(),
+      permissionMode: input.permissionMode ?? 'ask',
+      turnIntentSummary: input.prompt,
       permissionTimeoutMs: PERMISSION_APPROVAL_TIMEOUT_MS,
       egressProxyUrl: egressGateway.proxyUrl,
       sandboxRuntimeProxy: runnerSandboxProviderId === 'sandbox_runtime',
@@ -559,10 +590,7 @@ export async function spawnAgent(
       pickSafeHostEnv,
       pickPreparedExecutionEnv,
     });
-    if (
-      options?.runnerSandboxProvider?.enforcing === true &&
-      options.asyncTaskRepositoryAvailable === true
-    ) {
+    if (options?.asyncTaskRepositoryAvailable === true) {
       env.GANTRY_ASYNC_TASK_TOOLS_ENABLED = '1';
     } else {
       delete env.GANTRY_ASYNC_TASK_TOOLS_ENABLED;
@@ -581,8 +609,8 @@ export async function spawnAgent(
       ipcInputDir,
       sandboxProviderId: options?.runnerSandboxProvider?.id ?? 'direct',
       sandboxEnforcing: options?.runnerSandboxProvider?.enforcing === true,
-      brokerProfile: hostCredentials.brokerProfile,
-      brokerApplied: hostCredentials.brokerApplied,
+      brokerProfile: projectedCredentials.brokerProfile,
+      brokerApplied: projectedCredentials.brokerApplied,
       mcpServerNames: allMcpCapabilities.map((capability) => capability.name),
       browserProfileName,
       preparedRuntimeDetails: preparedExecution.runtimeDetails,
@@ -674,8 +702,10 @@ export async function spawnAgent(
       appId: runnerAppId,
       agentId: input.agentId,
       conversationId: input.chatJid,
+      providerAccountId: group.providerAccountId,
       threadId: input.threadId,
       runId: input.runId,
+      correlationRunId: turnTracker.correlationId,
       jobId: input.jobId,
       protectedReadPaths: protectedFilesystemDenyReadPaths,
       protectedWritePaths: protectedFilesystemDenyWritePaths,
@@ -717,18 +747,18 @@ export async function spawnAgent(
         sandboxWarmTemplate,
         egressProxyConfigured: Boolean(egressGateway?.proxyUrl),
         upstreamProxyConfigured: Boolean(upstreamProxyUrl),
-        hostCredentials,
+        hostCredentials: projectedCredentials,
         compiledSystemPrompt,
       },
     });
-    const output = await executeRunnerProcess({
+    output = await executeRunnerProcess({
       group,
       input: runnerInput,
       command,
       args,
       env,
       onProcess,
-      onOutput,
+      onOutput: turnTracker.onOutput,
       options,
       runnerLabel: 'Host agent',
       processName,
@@ -774,11 +804,22 @@ export async function spawnAgent(
     }
     cleanupRunnerMcpConfigFile(mcpConfigPath, logger.warn.bind(logger));
     cleanupRunnerMcpConfigFile(sandboxConfigPath, logger.warn.bind(logger));
-    if (egressGateway) {
-      await closeEgressGateway(egressGateway);
+    if (egressGateway) await closeEgressGateway(egressGateway);
+    await hostCredentials?.revoke?.().catch((revokeErr) => {
+      logger.warn({ err: revokeErr }, 'Model gateway token revoke failed');
+    });
+    try {
+      preparedExecution?.cleanup();
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          group: group.name,
+          executionProviderId: preparedExecution?.providerId,
+        },
+        'Failed to clean prepared execution runtime',
+      );
     }
-    await hostCredentials.revoke?.();
-    preparedExecution.cleanup();
     revokeIpcResponseSigningKey(
       ipcAuth.responseKeyId,
       group.folder,

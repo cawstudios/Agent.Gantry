@@ -46,14 +46,21 @@ import {
   sanitizePermissionText,
   sanitizeReceiptDetail,
 } from './permission-text-sanitizer.js';
+import {
+  decisionForPermissionInteraction,
+  buildPermissionBatchPromptParts,
+  formatPermissionBatchPromptText,
+  isPermissionBatchRequest,
+  permissionBatchButtonLabel,
+  withRecoveredBatchOption,
+} from './permission-batch-coalescer.js';
 
 export {
-  decisionForMode,
   firstPersistentRule,
   persistentPermissionUpdates,
   persistentRules,
-  TIMED_GRANT_DURATION_MS,
 } from '../domain/permission-decision.js';
+export { decisionForPermissionInteraction as decisionForMode };
 
 const USER_FACING_TOOL_LABELS: Record<string, string> = {
   RunCommand: 'exact command access',
@@ -82,23 +89,25 @@ export function normalizePermissionAction(
 ): PermissionApprovalDecisionMode | null {
   if (action === 'allow_once') return 'allow_once';
   if (action === 'allow_persistent_rule') return 'allow_persistent_rule';
-  if (action === 'allow_timed_grant') return 'allow_timed_grant';
   if (action === 'cancel') return 'cancel';
   return null;
 }
 
 export function permissionDecisionOptions(
   request: PermissionApprovalRequest,
+  matchKind?: 'individual' | 'batch',
 ): PermissionApprovalDecisionMode[] {
-  if (request.decisionOptions?.length) return request.decisionOptions;
-  const persistentRule = firstPersistentRule(request);
-  if (!persistentRule) logPersistentOptionDrop(request);
-  return persistentRule
-    ? ['allow_once', 'allow_timed_grant', 'allow_persistent_rule', 'cancel']
-    : ['allow_once', 'allow_timed_grant', 'cancel'];
+  const rule = firstPersistentRule(request);
+  const requested = request.decisionOptions;
+  const fallback: PermissionApprovalDecisionMode[] = rule
+    ? ['allow_once', 'allow_persistent_rule', 'cancel']
+    : ['allow_once', 'cancel'];
+  const options = requested?.length ? requested : fallback;
+  if (!requested?.length && !rule) logOptionDrop(request);
+  return withRecoveredBatchOption(options, matchKind);
 }
 
-function logPersistentOptionDrop(request: PermissionApprovalRequest): void {
+function logOptionDrop(request: PermissionApprovalRequest): void {
   const suggestions = request.suggestions || [];
   if (suggestions.length === 0) return;
   logger.debug(
@@ -134,10 +143,9 @@ export function permissionButtonLabel(
   mode: PermissionApprovalDecisionMode,
   _request: PermissionApprovalRequest,
 ): string {
+  const batchLabel = permissionBatchButtonLabel(_request, mode);
+  if (batchLabel) return batchLabel;
   if (mode === 'allow_once') return 'Allow once';
-  if (mode === 'allow_timed_grant') {
-    return 'Allow 5 min';
-  }
   if (mode === 'cancel') return 'Cancel';
   return 'Allow for future';
 }
@@ -147,6 +155,8 @@ export function formatPermissionPromptText(
   timeoutMs: number,
   options: { budget?: number } = {},
 ): string {
+  const batchText = formatPermissionBatchPromptText(request, timeoutMs);
+  if (batchText) return limitPermissionMessage(batchText);
   const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
   if (request.interaction) {
     return formatInteractionPermissionPrompt(
@@ -193,19 +203,11 @@ export function formatPermissionReceiptText(
   if (!decision.approved || decision.mode === 'cancel') {
     return limitPermissionMessage(`Canceled: ${summary}. Nothing changed.`);
   }
-  if (decision.mode === 'allow_timed_grant') {
-    const expiresAt = decision.timedGrantExpiresAtMs;
-    const until = expiresAt
-      ? new Date(expiresAt).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      : 'soon';
-    return limitPermissionMessage(
-      `Allowed for 5 min: ${summary}. This expires at ${until}.`,
-    );
-  }
   if (decision.mode === 'allow_persistent_rule') {
+    if (decision.batchDecision === 'review_each')
+      return 'Reviewing each permission request.';
+    if (request && isPermissionBatchRequest(request))
+      return 'Reviewing each permission request.';
     const agentName = request
       ? formatPermissionAgentDisplayName(request.sourceAgentFolder)
       : 'this agent';
@@ -240,6 +242,8 @@ export function buildPermissionPromptParts(
   request: PermissionApprovalRequest,
   timeoutMs: number,
 ): PermissionPromptParts {
+  const batchParts = buildPermissionBatchPromptParts(request, timeoutMs);
+  if (batchParts) return batchParts;
   const replyInMinutes = Math.max(1, Math.round(timeoutMs / 60000));
   const contextLines = formatPermissionContextLines(request);
   const fullView = buildPermissionPromptFullView(request);
@@ -385,6 +389,11 @@ function formatPermissionContextLines(
   ];
   if (requestHasThreadRoute(request)) {
     lines.push('Approval applies to the parent conversation.');
+  }
+  if (request.promotionHintCount) {
+    lines.push(
+      `You've allowed me to do this ${request.promotionHintCount} times — want me to stop asking?`,
+    );
   }
   lines.push('The agent cannot approve this itself.');
   return lines;
@@ -635,7 +644,7 @@ function permissionCommand(request: PermissionApprovalRequest): string | null {
   return typeof command === 'string' && command.trim() ? command.trim() : null;
 }
 
-function formatPermissionReceiptActionSummary(
+export function formatPermissionReceiptActionSummary(
   request: PermissionApprovalRequest | undefined,
 ): string {
   if (!request) return 'permission request';
@@ -661,7 +670,13 @@ function formatPermissionReceiptActionSummary(
       const envSummary = env ? `; env: ${sanitizeReceiptDetail(env)}` : '';
       return `Selected skill action (${generatedSkillPath}${envSummary})`;
     }
-    const safeCommand = sanitizeReceiptDetail(command);
+    // Same treatment as the prompt: host-injected env plumbing is dropped;
+    // agent-supplied env stays part of what was allowed.
+    const safeCommand = sanitizeReceiptDetail(
+      [...displayCommand.runtimeEnvAssignments, displayCommand.command].join(
+        ' ',
+      ),
+    );
     return safeCommand ? `Command (${safeCommand})` : 'Command';
   }
   const filePath = input.file_path;

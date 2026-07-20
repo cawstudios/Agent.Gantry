@@ -7,7 +7,10 @@ import type {
 import type { SchedulerSendMessage } from './delivery.js';
 import { sendJobNotification } from './delivery.js';
 import { formatRunStatusMessage } from './status-formatting.js';
-import { MEMORY_DREAM_SYSTEM_PROMPT } from './system-jobs.js';
+import {
+  isMemoryDreamingSystemJob,
+  MEMORY_DREAM_SYSTEM_PROMPT,
+} from '../shared/system-job-identity.js';
 import { SETUP_REQUIRED_PAUSE_REASON } from '../application/jobs/job-readiness-service.js';
 import { parseAutonomousToolDenial } from '../shared/autonomous-tool-denial.js';
 import {
@@ -24,17 +27,6 @@ export type JobNotificationLifecycleUpdateResult =
   | 'updated'
   | 'unsupported'
   | 'failed';
-const START_NOTIFICATION_TIMEOUT_MS = 5_000;
-
-function startNotificationTimeout(): Promise<false> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(
-      () => resolve(false),
-      START_NOTIFICATION_TIMEOUT_MS,
-    );
-    timer.unref?.();
-  });
-}
 
 function recoveryActionAffordances(input: {
   job: Job;
@@ -44,12 +36,6 @@ function recoveryActionAffordances(input: {
     {
       kind: 'scheduler_pause_job',
       label: 'Pause job',
-      jobId: input.job.id,
-      runId: input.runId,
-    },
-    {
-      kind: 'scheduler_open',
-      label: 'Open in scheduler',
       jobId: input.job.id,
       runId: input.runId,
     },
@@ -81,25 +67,6 @@ export function logMemoryDreamJobFailure(input: {
     },
     'Memory dreaming system job failed',
   );
-}
-
-export async function notifySchedulerRunStart(input: {
-  job: Job;
-  runId: string;
-  runShortId?: number | null;
-  sendMessage: SchedulerSendMessage;
-}): Promise<boolean> {
-  if (input.job.silent) return false;
-  return Promise.race([
-    sendJobNotification({
-      job: input.job,
-      text: `**▶️ Running** · ${input.job.name}`,
-      phase: 'start',
-      runId: input.runId,
-      sendMessage: input.sendMessage,
-    }),
-    startNotificationTimeout(),
-  ]);
 }
 
 export async function notifySchedulerRunRecovered(input: {
@@ -139,13 +106,6 @@ export async function notifySchedulerSetupRequired(input: {
     ].join('\n'),
     phase: 'summary',
     runId: `setup:${input.setupState.fingerprint}`,
-    actionAffordances: [
-      {
-        kind: 'scheduler_open',
-        label: 'Open in scheduler',
-        jobId: input.job.id,
-      },
-    ],
     sendMessage: input.sendMessage,
   });
 }
@@ -175,17 +135,19 @@ export async function notifySchedulerTerminalRunState(input: {
   ) {
     return false;
   }
-  const summaryMessage = formatRunStatusMessage({
-    job: input.job,
-    runId: input.runId,
-    runShortId: input.runShortId,
-    runStatus: input.runStatus,
-    summary: input.summary,
-    nextRun: input.nextRun,
-    retryCount: input.retryCount,
-    pauseReason: input.pauseReason,
-    durationMs: input.durationMs,
-  });
+  const summaryMessage =
+    compactMemoryDreamingTerminalMessage(input) ??
+    formatRunStatusMessage({
+      job: input.job,
+      runId: input.runId,
+      runShortId: input.runShortId,
+      runStatus: input.runStatus,
+      summary: input.summary,
+      nextRun: input.nextRun,
+      retryCount: input.retryCount,
+      pauseReason: input.pauseReason,
+      durationMs: input.durationMs,
+    });
   const updateResult =
     input.updateLifecycleNotification === undefined
       ? 'unsupported'
@@ -208,4 +170,66 @@ export async function notifySchedulerTerminalRunState(input: {
     actionAffordances,
     sendMessage: input.sendMessage,
   });
+}
+
+function compactMemoryDreamingTerminalMessage(input: {
+  job: Job;
+  runStatus: TerminalRunStatus;
+  summary: string;
+}): string | null {
+  if (!isMemoryDreamingSystemJob(input.job)) return null;
+  if (input.runStatus !== 'completed') return null;
+  if (memoryDreamingSummaryAlreadyRunning(input.summary)) {
+    return 'Memory job already running.';
+  }
+  const reviewCount = memoryDreamingReviewCount(input.summary);
+  if (reviewCount) {
+    return `Memory job needs review: ${reviewCount} memory change${reviewCount === 1 ? '' : 's'} waiting.`;
+  }
+  const blockedCount = memoryDreamingBlockedCount(input.summary);
+  if (blockedCount) {
+    return `Memory job needs attention: ${blockedCount} memory change${blockedCount === 1 ? '' : 's'} blocked while creating reviews.`;
+  }
+  return memoryDreamingSummaryNeedsAttention(input.summary)
+    ? null
+    : 'Memory job done.';
+}
+
+function memoryDreamingSummaryNeedsAttention(summary: string): boolean {
+  return /\b(needs attention|failed|deadline exceeded|timed out)\b/i.test(
+    summary,
+  );
+}
+
+function memoryDreamingReviewCount(summary: string): number | null {
+  const match =
+    summary.match(/\b(\d+)\s+sent to review\b/i) ||
+    summary.match(/\b(\d+)\s+(?:pending\s+)?memory reviews?\b/i);
+  return positiveIntegerMatch(match);
+}
+
+function memoryDreamingBlockedCount(summary: string): number | null {
+  const match = summary.match(/\b(\d+)\s+blocked\b/i);
+  return positiveIntegerMatch(match);
+}
+
+function positiveIntegerMatch(match: RegExpMatchArray | null): number | null {
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function memoryDreamingSummaryAlreadyRunning(summary: string): boolean {
+  if (/\balready running\b/i.test(summary)) return true;
+  try {
+    const parsed = JSON.parse(summary) as unknown;
+    return (
+      !!parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      (parsed as { deduped?: unknown }).deduped === true
+    );
+  } catch {
+    return false;
+  }
 }

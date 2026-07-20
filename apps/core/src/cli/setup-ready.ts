@@ -2,11 +2,11 @@ import * as p from '@clack/prompts';
 
 import { agentEngineLabel } from '../shared/agent-engine.js';
 import { resolveExecutionRoute } from '../shared/model-execution-route.js';
+import { resolveModelSelectionForWorkload } from '../shared/model-catalog.js';
 import {
-  resolveModelSelectionForWorkload,
-  type ModelPresetId,
-} from '../shared/model-catalog.js';
-import { requiredModelCredentialProvidersForSetupDraft } from './setup-credentials.js';
+  requiredModelCredentialProviderReasonsForSetupDraft,
+  requiredModelCredentialProvidersForSetupDraft,
+} from './setup-credentials.js';
 
 export interface SetupReadyDraft {
   workspaceKey: string;
@@ -14,7 +14,6 @@ export interface SetupReadyDraft {
   agentHarness: string;
   conversationLabel: string;
   selectedModel: string;
-  modelPreset?: ModelPresetId;
   memoryEnabled?: boolean;
   embeddingsEnabled?: boolean;
   dreamingEnabled?: boolean;
@@ -36,9 +35,10 @@ export async function runReadyStep(
       `Model: ${draft.selectedModel}`,
       `Resolved model/harness: ${draft.selectedModel} / ${resolvedHarnessLabel(draft.selectedModel)}`,
       `Required model providers: ${formatProviderIds(requiredModelProviders(draft))}`,
+      ...formatRequiredProviderReasons(draft),
       '',
       'Next: Start chatting or run gantry status.',
-      'Optional setup: memory, background service, extra providers.',
+      'Optional setup: memory, background service, extra chat channels.',
     ].join('\n'),
     'Ready',
   );
@@ -78,10 +78,22 @@ function formatProviderIds(providerIds: readonly string[]): string {
 function requiredModelProviders(draft: SetupReadyDraft): string[] {
   return requiredModelCredentialProvidersForSetupDraft({
     credentialMode: 'gantry',
-    modelPreset: draft.modelPreset,
     selectedModel: draft.selectedModel,
     memoryEnabled: draft.memoryEnabled,
     embeddingsEnabled: draft.embeddingsEnabled,
     dreamingEnabled: draft.dreamingEnabled,
   });
+}
+
+function formatRequiredProviderReasons(draft: SetupReadyDraft): string[] {
+  return requiredModelCredentialProviderReasonsForSetupDraft({
+    credentialMode: 'gantry',
+    selectedModel: draft.selectedModel,
+    memoryEnabled: draft.memoryEnabled,
+    embeddingsEnabled: draft.embeddingsEnabled,
+    dreamingEnabled: draft.dreamingEnabled,
+  }).map(
+    ({ providerId, reasons }) =>
+      `  ${providerId}: ${reasons.length ? reasons.join('; ') : 'selected defaults'}`,
+  );
 }

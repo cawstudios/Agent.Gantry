@@ -8,6 +8,11 @@ import {
 } from '@gantry/contracts';
 
 import { signIpcResponsePayload } from '../infrastructure/ipc/response-signing.js';
+import {
+  processBrainQueryRequest,
+  processBrainSearchRequest,
+  processBrainWriteRequest,
+} from './memory-ipc-brain.js';
 import { nowMs } from '../shared/time/datetime.js';
 import {
   ensurePrivateDirSync,
@@ -52,6 +57,7 @@ import {
   processMemoryReviewDecisionRequest,
   processPendingMemoryReviewRequest,
 } from './memory-review-ipc.js';
+import { incrementOperationalError } from '../shared/operational-error-counters.js';
 
 const MEMORY_IPC_REQUEST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
@@ -72,6 +78,9 @@ type TrustedMemoryRequest = Omit<MemoryIpcRequest, 'context'> & {
 const DEFAULT_ALLOWED_MEMORY_IPC_ACTIONS = new Set<MemoryIpcAction>([
   'memory_search',
   'memory_save',
+  'brain_search',
+  'brain_query',
+  'brain_write',
   'continuity_summary',
   'procedure_save',
 ]);
@@ -323,6 +332,18 @@ export async function processMemoryRequest(
           data: { memory: saved },
         };
       }
+      case 'brain_search': {
+        provider = 'postgres';
+        return processBrainSearchRequest(request);
+      }
+      case 'brain_query': {
+        provider = 'postgres';
+        return processBrainQueryRequest(request);
+      }
+      case 'brain_write': {
+        provider = 'postgres';
+        return processBrainWriteRequest(request, sourceAgentFolder);
+      }
       case 'memory_patch': {
         const input = parsePatchMemoryInput(request.payload);
         const subject = resolveTrustedMemorySubject(
@@ -571,6 +592,7 @@ export async function processMemoryRequest(
         throw new Error(`Unsupported memory action: ${request.action}`);
     }
   } catch (error) {
+    incrementOperationalError('memory', 'ipc_request');
     return {
       ok: false,
       requestId: request.requestId,

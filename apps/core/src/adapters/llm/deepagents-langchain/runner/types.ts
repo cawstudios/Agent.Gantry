@@ -1,8 +1,15 @@
 import type { AgentPersona } from '../../../../shared/agent-persona.js';
 import type { YoloModeSettings } from '../../../../shared/yolo-mode-policy.js';
+import type { PermissionMode } from '../../../../shared/permission-mode.js';
 import type { DeepAgentSkillProjection } from '../../../../application/agent-execution/agent-execution-adapter.js';
 import type { GantryAgentPromptMode } from '../../../../runner/gantry-agent-system-prompt.js';
+import type {
+  AgentControlEffort,
+  AgentControlThinking,
+} from '../../../../domain/types.js';
 import type { DeepAgentCheckpointerConfig } from './session-store.js';
+import type { DeclarativeToolRule } from '../../../../runner/tool-gate-core.js';
+import type { CallableAgentToolManifestEntry } from '../../../../application/core-tools/callable-agent-tools.js';
 
 // Subset of the host AgentInput JSON that the DeepAgents (LangChain) runner
 // consumes. The runner projects Gantry-owned authority (facade tools and
@@ -23,8 +30,10 @@ export interface DeepAgentRunnerInput {
   // Selected capability tool rules (= host toolPolicyRules). Drives the Gantry
   // facade tool selection and Gantry-owned tool gates.
   allowedTools?: string[];
+  toolRules?: DeclarativeToolRule[];
   // Fixed-image worker mode: hide authority-changing/admin request tools.
   hideAuthorityTools?: boolean;
+  callableAgentManifest?: CallableAgentToolManifestEntry[];
   isScheduledJob?: boolean;
   jobId?: string;
   runId?: string;
@@ -32,6 +41,9 @@ export interface DeepAgentRunnerInput {
   promptMode?: GantryAgentPromptMode;
   compiledSystemPrompt?: string;
   memoryContextBlock?: string;
+  effort?: AgentControlEffort;
+  configuredThinking?: AgentControlThinking;
+  maxOutputTokens?: number;
   deepAgentCheckpointer?: DeepAgentCheckpointerConfig;
   deepAgentSkills?: DeepAgentSkillProjection;
   modelCredentialEnv?: Record<string, string>;
@@ -39,4 +51,5 @@ export interface DeepAgentRunnerInput {
   // Auto-approve safety valve settings; the neutral gate's denylist backstop
   // runs even though the deepagents lane has no auto-approve surface in v1.
   yoloMode?: YoloModeSettings;
+  permissionMode: PermissionMode;
 }

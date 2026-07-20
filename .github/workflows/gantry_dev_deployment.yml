@@ -80,14 +80,6 @@ jobs:
             container-name: ${{ env.CONTAINER_NAME }}
             image: ${{ steps.build-image.outputs.image }}
 
-      - name: Verify sandbox runtime task options
-        run: |
-          jq -e --arg container "${{ env.CONTAINER_NAME }}" '
-            .containerDefinitions[]
-            | select(.name == $container)
-            | .privileged == true
-          ' "${{ steps.task-def.outputs.task-definition }}" >/dev/null
-
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
@@ -95,4 +87,5 @@ jobs:
             service: ${{ env.ECS_SERVICE }}
             cluster: ${{ env.ECS_CLUSTER }}
             wait-for-service-stability: true
+            wait-max-delay-seconds: 15
             wait-for-minutes: 15

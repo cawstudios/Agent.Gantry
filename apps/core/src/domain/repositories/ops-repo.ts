@@ -77,12 +77,14 @@ export function makeSessionScopeKey(
   threadId?: string | null,
   scope?: {
     conversationJid?: string | null;
+    providerAccountId?: string | null;
     conversationKind?: 'dm' | 'channel';
     userId?: string | null;
     jobId?: string | null;
   },
 ): string {
   const conversationJid = scope?.conversationJid?.trim();
+  const providerAccountId = scope?.providerAccountId?.trim();
   const dmUserId =
     scope?.conversationKind === 'dm' ? scope.userId?.trim() : undefined;
   const normalizedThreadId = threadId?.trim();
@@ -90,6 +92,11 @@ export function makeSessionScopeKey(
   const parts = [agentFolder];
   if (conversationJid) {
     parts.push(`conversation:${encodeSessionScopeComponent(conversationJid)}`);
+  }
+  if (providerAccountId) {
+    parts.push(
+      `provider_account:${encodeSessionScopeComponent(providerAccountId)}`,
+    );
   }
   if (dmUserId) {
     parts.push(`user:${encodeSessionScopeComponent(dmUserId)}`);
@@ -114,6 +121,7 @@ export interface RuntimeChatMetadataRepository {
     name?: string,
     channel?: string,
     isGroup?: boolean,
+    options?: { providerAccountId?: string | null },
   ): Promise<void>;
   getAllChats(): Promise<ChatInfo[]>;
 }
@@ -125,6 +133,7 @@ export interface RuntimeMessageRepository {
     admission: {
       appId: string;
       agentId?: string | null;
+      providerAccountId?: string | null;
       agentSessionId?: string | null;
       triggerDecision?: Record<string, unknown>;
       now?: string;
@@ -137,30 +146,44 @@ export interface RuntimeMessageRepository {
     conversationJid: string,
     sinceCursor: string,
     limit?: number,
-    options?: { threadId?: string | null },
+    options?: { threadId?: string | null; providerAccountId?: string | null },
+  ): Promise<NewMessage[]>;
+  getContextMessagesSince?(
+    conversationJid: string,
+    sinceCursor: string,
+    limit?: number,
+    options?: { threadId?: string | null; providerAccountId?: string | null },
   ): Promise<NewMessage[]>;
   getRecentTopLevelMessagesBefore(
     conversationJid: string,
     before: Pick<NewMessage, 'timestamp' | 'id'>,
     limit?: number,
+    options?: { providerAccountId?: string | null },
   ): Promise<NewMessage[]>;
   getFirstThreadMessages(
     conversationJid: string,
     threadId: string,
     limit?: number,
+    options?: { providerAccountId?: string | null },
   ): Promise<NewMessage[]>;
   getLatestThreadMessages(
     conversationJid: string,
     threadId: string,
     beforeOrAt: Pick<NewMessage, 'timestamp' | 'id'>,
     limit?: number,
+    options?: { providerAccountId?: string | null },
   ): Promise<NewMessage[]>;
-  getMessageThreadIds(conversationJid: string): Promise<Array<string | null>>;
+  getMessageThreadIds(
+    conversationJid: string,
+    options?: { providerAccountId?: string | null },
+  ): Promise<Array<string | null>>;
   getLastBotMessageCursor(
     conversationJid: string,
+    options?: { providerAccountId?: string | null },
   ): Promise<{ timestamp: string; id: string } | undefined>;
   getLastBotMessageTimestamp(
     conversationJid: string,
+    options?: { providerAccountId?: string | null },
   ): Promise<string | undefined>;
 }
 
@@ -283,6 +306,7 @@ export interface RuntimeAgentSessionRepository {
     agentFolder: string;
     executionProviderId: ExecutionProviderId;
     conversationJid: string;
+    providerAccountId?: string | null;
     threadId?: string | null;
     conversationKind?: 'dm' | 'channel';
     memoryUserId?: string;
@@ -290,6 +314,7 @@ export interface RuntimeAgentSessionRepository {
     query?: string;
     hydrateMemory?: boolean;
     hydrationMode?: 'first_visible' | 'full';
+    promoteReadyProviderSession?: boolean;
   }): Promise<{
     appId: string;
     agentId: string;
@@ -297,9 +322,41 @@ export interface RuntimeAgentSessionRepository {
     agentSessionResetAt?: string | null;
     providerSessionId?: string;
     externalSessionId?: string;
+    latestProviderSessionLocked?: boolean;
+    lockedProviderSessionId?: string;
+    latestProviderSessionReady?: boolean;
+    readyProviderSessionId?: string;
+    readyExternalSessionId?: string;
     providerSessionAccessFingerprint?: string;
+    compactionDeltaReplay?: {
+      status: 'pending' | 'applied' | 'degraded';
+      baseCursor?: string;
+      lockedAt?: string;
+    };
     memoryContextBlock?: string;
   }>;
+  markProviderSessionMaintenance?(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    compactionBaseCursor?: string | null;
+  }): Promise<boolean>;
+  markProviderSessionDeltaReplay?(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'applied' | 'degraded';
+    reason?: string;
+  }): Promise<void>;
+  finishProviderSessionMaintenance?(input: {
+    providerSessionId: string;
+    agentSessionId: string;
+    provider: string;
+    externalSessionId: string;
+    status: 'active' | 'expired' | 'ready';
+  }): Promise<void>;
   setSession(
     agentFolder: string,
     sessionId: string,
@@ -308,6 +365,7 @@ export interface RuntimeAgentSessionRepository {
       appId?: string;
       executionProviderId: ExecutionProviderId;
       conversationJid?: string;
+      providerAccountId?: string | null;
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       jobId?: string;
@@ -350,6 +408,7 @@ export interface RuntimeAgentSessionRepository {
     metadata?: {
       appId?: string;
       conversationJid?: string;
+      providerAccountId?: string | null;
       conversationKind?: 'dm' | 'channel';
       memoryUserId?: string;
       agentId?: string;

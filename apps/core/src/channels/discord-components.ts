@@ -66,6 +66,7 @@ export function buttonRows(
 export function questionComponents(
   request: UserQuestionRequest,
   questionIndex: number,
+  providerAlias: string,
 ): unknown[] {
   const question = request.questions[questionIndex]!;
   const buttons = question.options
@@ -73,81 +74,62 @@ export function questionComponents(
     .map((option, optionIndex) => ({
       label: option.label.slice(0, 80),
       style: 1,
-      custom_id: questionCustomId(
-        request.requestId,
-        questionIndex,
-        optionIndex,
-      ),
+      custom_id: questionCustomId(providerAlias, optionIndex),
     }));
   if (question.multiSelect) {
     buttons.push({
       label: 'Done',
       style: 3,
-      custom_id: questionDoneCustomId(request.requestId, questionIndex),
+      custom_id: questionDoneCustomId(providerAlias),
     });
   }
   return buttonRows(buttons);
 }
 
 export function permissionCustomId(
-  requestId: string,
+  providerAlias: string,
   mode: PermissionApprovalDecisionMode,
 ): string {
-  return `${PERMISSION_CUSTOM_ID_PREFIX}${encodeURIComponent(requestId)}:${mode}`;
+  return `${PERMISSION_CUSTOM_ID_PREFIX}${providerAlias}:${mode}`;
 }
 
 export function parsePermissionCustomId(
   customId: string,
-): { requestId: string; mode: PermissionApprovalDecisionMode } | null {
+): { providerAlias: string; mode: PermissionApprovalDecisionMode } | null {
   const raw = customId.slice(PERMISSION_CUSTOM_ID_PREFIX.length);
   const separator = raw.lastIndexOf(':');
   if (separator <= 0) return null;
   const mode = raw.slice(separator + 1) as PermissionApprovalDecisionMode;
-  if (
-    ![
-      'allow_once',
-      'allow_persistent_rule',
-      'allow_timed_grant',
-      'cancel',
-    ].includes(mode)
-  ) {
+  if (!['allow_once', 'allow_persistent_rule', 'cancel'].includes(mode)) {
     return null;
   }
   return {
-    requestId: decodeURIComponent(raw.slice(0, separator)),
+    providerAlias: raw.slice(0, separator),
     mode,
   };
 }
 
 export function questionCustomId(
-  requestId: string,
-  questionIndex: number,
+  providerAlias: string,
   optionIndex: number,
 ): string {
-  return `${QUESTION_CUSTOM_ID_PREFIX}${encodeURIComponent(requestId)}:${questionIndex}:${optionIndex}`;
+  return `${QUESTION_CUSTOM_ID_PREFIX}${providerAlias}:${optionIndex}`;
 }
 
-export function questionDoneCustomId(
-  requestId: string,
-  questionIndex: number,
-): string {
-  return questionCustomId(requestId, questionIndex, -1);
+export function questionDoneCustomId(providerAlias: string): string {
+  return questionCustomId(providerAlias, -1);
 }
 
 export function parseQuestionCustomId(
   customId: string,
-): { requestId: string; questionIndex: number; optionIndex: number } | null {
+): { providerAlias: string; optionIndex: number } | null {
   const raw = customId.slice(QUESTION_CUSTOM_ID_PREFIX.length);
-  const parts = raw.split(':');
-  if (parts.length < 3) return null;
-  const optionIndex = Number.parseInt(parts.pop() || '', 10);
-  const questionIndex = Number.parseInt(parts.pop() || '', 10);
-  if (!Number.isInteger(questionIndex) || !Number.isInteger(optionIndex)) {
-    return null;
-  }
+  const separator = raw.lastIndexOf(':');
+  if (separator <= 0) return null;
+  const optionIndex = Number.parseInt(raw.slice(separator + 1), 10);
+  if (!Number.isInteger(optionIndex)) return null;
   return {
-    requestId: decodeURIComponent(parts.join(':')),
-    questionIndex,
+    providerAlias: raw.slice(0, separator),
     optionIndex,
   };
 }

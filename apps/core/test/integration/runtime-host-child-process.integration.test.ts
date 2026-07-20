@@ -129,6 +129,9 @@ describe('host child-process runtime smoke', () => {
         error: vi.fn(),
       },
       redactString: (value: string) => value,
+      withLogContext: (_context: unknown, callback: () => unknown) =>
+        callback(),
+      updateLogContext: vi.fn(),
     }));
     vi.doMock('@core/runtime/agent-spawn-host.js', () => ({
       getHostRuntimeCredentialEnv: async () => ({
@@ -142,6 +145,7 @@ describe('host child-process runtime smoke', () => {
         workspaceIpcDir: groupIpcDir,
         runnerDistDir,
       }),
+      withControls: (input: unknown) => input,
     }));
     vi.doMock('@core/runtime/agent-spawn-layout.js', () => ({
       ensureWorkspaceIpcLayout: (dir: string) => {

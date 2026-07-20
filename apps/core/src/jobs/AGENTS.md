@@ -52,9 +52,10 @@
   for operators. Scheduled jobs may forward and summarize them into terminal
   run diagnostics, but notification copy must not dump raw timing payloads,
   prompts, URLs, tokens, tool args, or queue bookkeeping.
-- Memory dreaming job notifications must keep pending memory reviews visible
-  and actionable with user-facing review guidance, even when the dream run times
-  out or fails after creating review rows. Keep raw tool ids such as
+- Memory dreaming job notifications should be quiet on success: use a one-line
+  completed outcome unless there are pending reviews, newly sent review items,
+  blockers, timeouts, or failures. Keep review issues visible and actionable
+  with user-facing guidance, and keep raw tool ids such as
   `memory_review_pending` out of the primary notification action.
 - pg-boss `startAfter` accepts a `Date` or an ISO string ending in `Z`; persisted
   Postgres timestamptz strings such as `2026-05-19 04:00:00+00` must be

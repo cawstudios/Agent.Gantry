@@ -1,8 +1,9 @@
 import path from 'path';
 
+import { sendCoreMessage } from '../application/core-tools/send-message.js';
 import { DATA_DIR, IPC_POLL_INTERVAL } from '../config/index.js';
-import { isValidWorkspaceFolder } from '../platform/workspace-folder.js';
 import { logger } from '../infrastructure/logging/logger.js';
+import { DurableInteractionPersistenceError } from '../application/interactions/pending-interaction-persistence-error.js';
 // prettier-ignore
 import { processMemoryRequest, writeMemoryResponse } from '../memory/memory-ipc.js';
 // prettier-ignore
@@ -23,18 +24,22 @@ import { processBrowserRequestDirectory } from './ipc-browser-requests.js';
 import { canProcessIpcFile, clearIpcRateLimitState } from './ipc-rate-limit.js';
 // prettier-ignore
 import { validatePermissionIpcJobExecutionTarget, validateUserQuestionIpcJobExecutionTarget } from './ipc-scheduled-interaction-validation.js';
-import type { ConversationRoute as RuntimeGroupRecord } from '../domain/types.js';
-import { resolveOwnedFileArtifactMessage } from './ipc-message-files.js';
-import { FilesystemRunnerControlPort } from './filesystem-runner-control-port.js';
+import { readWorkspaceMessageAttachment } from '../platform/workspace-message-attachment.js';
 import {
-  IpcRequestWakeupRegistry,
-  type IpcRequestWakeupHint,
-} from './ipc-request-wakeup-registry.js';
+  resolveIpcFoldersFromGroups,
+  resolveIpcTargetJidForSourceGroup,
+} from './ipc-folder-resolve.js';
+import { FilesystemRunnerControlPort } from './filesystem-runner-control-port.js';
+// prettier-ignore
+import { IpcRequestWakeupRegistry, type IpcRequestWakeupHint } from './ipc-request-wakeup-registry.js';
 import { IpcWakeupScopeTracker } from './ipc-wakeup-scope.js';
 import { processRichInteractionRequestDirectory } from './ipc-rich-interaction-directory.js';
+import { resolveRunnerIpcRoute } from './ipc-route-authorization.js';
+import { incrementOperationalError } from '../shared/operational-error-counters.js';
 export type { IpcDeps } from './ipc-domain-types.js';
 export { processTaskIpc } from '../jobs/ipc-handler.js';
 export { validateIpcAuthRequest } from './ipc-auth-validation.js';
+export { resolveIpcFoldersFromGroups, resolveIpcTargetJidForSourceGroup };
 export {
   validatePermissionIpcJobExecutionTarget,
   validateUserQuestionIpcJobExecutionTarget,
@@ -46,28 +51,6 @@ let activeRunnerControlPort: FilesystemRunnerControlPort | undefined;
 let activeRequestWakeups: IpcRequestWakeupRegistry | undefined;
 const MAX_IN_FLIGHT_INTERACTION_IPC = 100;
 const inFlightInteractionIpc = new Set<string>();
-
-export function resolveIpcFoldersFromGroups(
-  groupRegistry: Record<string, RuntimeGroupRecord>,
-): string[] {
-  return Array.from(
-    new Set(
-      Object.values(groupRegistry)
-        .map((group) => group.folder)
-        .filter((folder): folder is string => isValidWorkspaceFolder(folder)),
-    ),
-  );
-}
-
-export function resolveIpcTargetJidForSourceGroup(
-  groupRegistry: Record<string, RuntimeGroupRecord>,
-  sourceAgentFolder: string,
-): string | undefined {
-  for (const [jid, group] of Object.entries(groupRegistry)) {
-    if (group.folder === sourceAgentFolder) return jid;
-  }
-  return undefined;
-}
 
 function releaseIpcRootLock(): void {
   if (!ipcRootLockPath) return;
@@ -306,37 +289,38 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 claimedPath = claimed.claimedPath;
                 const rawData = claimed.raw;
                 const data = parseIpcMessage(rawData, sourceAgentFolder);
-                const targetGroup = groupRegistry[data.chatJid];
-                if (targetGroup && targetGroup.folder === sourceAgentFolder) {
-                  const message = await resolveOwnedFileArtifactMessage({
-                    deps,
+                const route = resolveRunnerIpcRoute({
+                  routes: groupRegistry,
+                  sourceAgentFolder,
+                  targetJid: data.chatJid,
+                  threadId: data.threadId,
+                  providerAccountId: data.providerAccountId,
+                });
+                await sendCoreMessage({
+                  deps: {
+                    ...deps,
+                    readWorkspaceAttachment: readWorkspaceMessageAttachment,
+                  },
+                  context: {
                     appId: data.appId,
                     sourceAgentFolder,
+                    targetJid: route.targetJid,
+                    threadId: data.threadId,
+                    providerAccountId: route.providerAccountId,
+                  },
+                  message: {
                     text: data.text,
+                    sender: data.sender,
                     files: data.files,
-                  });
-                  if (data.threadId) {
-                    await deps.sendMessage(data.chatJid, message.text, {
-                      threadId: data.threadId,
-                      files: message.files,
-                    });
-                  } else {
-                    await deps.sendMessage(data.chatJid, message.text, {
-                      files: message.files,
-                    });
-                  }
-                  logger.info(
-                    { chatJid: data.chatJid, sourceAgentFolder },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceAgentFolder },
-                    'Unauthorized IPC message attempt blocked',
-                  );
-                }
+                  },
+                });
+                logger.info(
+                  { chatJid: route.targetJid, sourceAgentFolder },
+                  'IPC message sent',
+                );
                 runnerControlPort.removeClaimedRequest(claimedPath);
               } catch (err) {
+                incrementOperationalError('ipc', 'message_dispatch');
                 logger.error(
                   { file, sourceAgentFolder, err },
                   'Error processing IPC message',
@@ -561,23 +545,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   rawRequest,
                   sourceAgentFolder,
                 );
-                if (
-                  request.targetJid &&
-                  !folderTargetJids
-                    .get(sourceAgentFolder)
-                    ?.has(request.targetJid)
-                ) {
-                  throw new Error(
-                    'Permission IPC target does not belong to the requesting agent folder',
-                  );
-                }
+                const route = resolveRunnerIpcRoute({
+                  routes: groupRegistry,
+                  sourceAgentFolder,
+                  targetJid: request.targetJid,
+                  threadId: request.threadId,
+                  providerAccountId: request.providerAccountId,
+                });
                 await validatePermissionIpcJobExecutionTarget({
                   request,
                   sourceAgentFolder,
                   deps,
                 });
-                request.targetJid =
-                  request.targetJid || folderTargetJid.get(sourceAgentFolder);
+                request.targetJid = route.targetJid;
+                request.providerAccountId = route.providerAccountId;
                 requestId = request.requestId;
                 requestThreadId = request.threadId;
                 responseKeyId = request.responseKeyId;
@@ -618,6 +599,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger,
                 }).finally(() => inFlightInteractionIpc.delete(inFlightKey));
               } catch (err) {
+                if (err instanceof DurableInteractionPersistenceError) {
+                  logger.error(
+                    { file, sourceAgentFolder, err },
+                    'Withholding permission IPC response after durable persistence failure',
+                  );
+                  runnerControlPort.archiveFailedRequest(
+                    sourceAgentFolder,
+                    file,
+                    claimedPath,
+                  );
+                  continue;
+                }
                 if (requestId) {
                   writePermissionInteractionFailure({
                     ipcBaseDir,
@@ -664,6 +657,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           shouldProcessRequestLane,
           folderTargetJid,
           folderTargetJids,
+          groupRegistry,
           inFlightInteractionIpc,
           maxInFlightInteractionIpc: MAX_IN_FLIGHT_INTERACTION_IPC,
           runnerControlPort,
@@ -705,23 +699,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   rawRequest,
                   sourceAgentFolder,
                 );
-                if (
-                  request.targetJid &&
-                  !folderTargetJids
-                    .get(sourceAgentFolder)
-                    ?.has(request.targetJid)
-                ) {
-                  throw new Error(
-                    'User question IPC target does not belong to the requesting agent folder',
-                  );
-                }
+                const route = resolveRunnerIpcRoute({
+                  routes: groupRegistry,
+                  sourceAgentFolder,
+                  targetJid: request.targetJid,
+                  threadId: request.threadId,
+                  providerAccountId: request.providerAccountId,
+                });
                 await validateUserQuestionIpcJobExecutionTarget({
                   request,
                   sourceAgentFolder,
                   deps,
                 });
-                request.targetJid =
-                  request.targetJid || folderTargetJid.get(sourceAgentFolder);
+                request.targetJid = route.targetJid;
+                request.providerAccountId = route.providerAccountId;
                 requestId = request.requestId;
                 requestThreadId = request.threadId;
                 responseKeyId = request.responseKeyId;
@@ -756,6 +747,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   inFlightInteractionIpc.delete(inFlightKey);
                 });
               } catch (err) {
+                if (err instanceof DurableInteractionPersistenceError) {
+                  logger.error(
+                    { file, sourceAgentFolder, err },
+                    'Withholding user question IPC response after durable persistence failure',
+                  );
+                  runnerControlPort.archiveFailedRequest(
+                    sourceAgentFolder,
+                    file,
+                    claimedPath,
+                  );
+                  continue;
+                }
                 if (requestId) {
                   writeUserQuestionInteractionFailure({
                     ipcBaseDir,

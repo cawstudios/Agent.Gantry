@@ -106,6 +106,29 @@ describe('capabilityStatusText access projection', () => {
     expect(text).toContain('Scheduler monitoring:');
   });
 
+  it('shows memory review guidance when review tools are mounted', async () => {
+    setRunnerEnv({
+      GANTRY_AGENT_ACCESS_PRESET: 'full',
+      GANTRY_MCP_TOOL_NAMES_JSON: JSON.stringify([
+        'send_message',
+        'continuity_summary',
+        'memory_review_pending',
+        'memory_review_decision',
+      ]),
+      GANTRY_SELECTED_SKILLS_JSON: JSON.stringify([]),
+      GANTRY_SELECTED_MCP_SERVERS_JSON: JSON.stringify([]),
+    });
+    vi.resetModules();
+    const { capabilityStatusText } =
+      await import('@core/runner/mcp/context.js');
+
+    const text = capabilityStatusText();
+    expect(text).toContain('- available: mcp__gantry__memory_review_pending');
+    expect(text).toContain('- available: mcp__gantry__memory_review_decision');
+    expect(text).toContain('Memory review:');
+    expect(text).toContain('inspect continuity_summary');
+  });
+
   it('does not label requestable MCP capabilities as selected', async () => {
     const semanticCapability = {
       capabilityId: 'mcp.crm.lookup',
@@ -454,6 +477,18 @@ describe('deployment-mode aware install guidance', () => {
     expect(text).not.toContain('propagates to eligible workers');
   });
 
+  it('keeps credential identifiers out of installed skill context', async () => {
+    const { formatSkillProposalResponse } =
+      await import('@core/runner/mcp/tools/service-formatters.js');
+    const text = formatSkillProposalResponse(
+      { ...installedSkillContext, requiredEnvVars: ['PRIVATE_TOKEN_NAME'] },
+      'Done.',
+    );
+
+    expect(text).toContain('add the required login in Credential Center');
+    expect(text).not.toContain('PRIVATE_TOKEN_NAME');
+  });
+
   it('fleet adds the worker propagation clause', async () => {
     setRunnerEnv({ GANTRY_DEPLOYMENT_MODE: 'fleet' });
     vi.resetModules();
@@ -509,7 +544,7 @@ describe('deployment-mode aware install guidance', () => {
         ([name]) => name === 'request_skill_dependency_install',
       )?.[1],
     ).toBe(
-      'Request host-installed dependencies needed by a reviewed skill source. Approval records setup inventory; the agent never runs install commands directly.',
+      'Request host-installed dependencies needed by a reviewed skill source. Approval records setup inventory; the agent never runs install commands directly. Keep the wait visible with one render_progress line.',
     );
   });
 });

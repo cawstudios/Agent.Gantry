@@ -1,3 +1,34 @@
+function resultFailureRequiresRuntimeFailure(value: string): boolean {
+  const normalized = value.toLowerCase();
+  const looksLikeCredentialFailure =
+    normalized.includes('invalid api key') ||
+    normalized.includes('external api key') ||
+    normalized.includes('authentication failed') ||
+    normalized.includes('failed to authenticate') ||
+    normalized.includes('authentication_error') ||
+    normalized.includes('invalid bearer token') ||
+    normalized.includes('api error: 401');
+  const looksLikeBillingFailure =
+    normalized.includes('billing') ||
+    normalized.includes('out of credits') ||
+    normalized.includes('credit balance') ||
+    normalized.includes('insufficient credit') ||
+    normalized.includes('payment required');
+  return looksLikeCredentialFailure || looksLikeBillingFailure;
+}
+
+export function shouldPrefixVisibleBoundary(
+  previous: string,
+  next: string,
+): boolean {
+  return Boolean(
+    previous.trim() &&
+    next.trim() &&
+    !/\s$/.test(previous) &&
+    !/^\s/.test(next),
+  );
+}
+
 export function sdkResultFailureMessage(message: unknown): string | null {
   if (!message || typeof message !== 'object') {
     return null;
@@ -15,25 +46,8 @@ export function sdkResultFailureMessage(message: unknown): string | null {
     : [];
   const text =
     typeof resultMessage.result === 'string' ? resultMessage.result : '';
-  if (text) {
-    const normalized = text.toLowerCase();
-    const looksLikeCredentialFailure =
-      normalized.includes('invalid api key') ||
-      normalized.includes('external api key') ||
-      normalized.includes('authentication failed') ||
-      normalized.includes('failed to authenticate') ||
-      normalized.includes('authentication_error') ||
-      normalized.includes('invalid bearer token') ||
-      normalized.includes('api error: 401');
-    const looksLikeBillingFailure =
-      normalized.includes('billing') ||
-      normalized.includes('out of credits') ||
-      normalized.includes('credit balance') ||
-      normalized.includes('insufficient credit') ||
-      normalized.includes('payment required');
-    if (looksLikeCredentialFailure || looksLikeBillingFailure) {
-      return text;
-    }
+  if (text && resultFailureRequiresRuntimeFailure(text)) {
+    return text;
   }
   if (resultMessage.subtype && resultMessage.subtype !== 'success') {
     return errors.length > 0

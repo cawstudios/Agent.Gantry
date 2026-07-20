@@ -1,3 +1,5 @@
+import dns from 'node:dns/promises';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const permissionMock = vi.hoisted(() => ({
@@ -76,6 +78,9 @@ function combinedConsoleOutput(): string {
 describe('createCanUseToolCallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(dns, 'lookup').mockResolvedValue([
+      { address: '104.16.30.34', family: 4 },
+    ]);
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });
@@ -84,165 +89,8 @@ describe('createCanUseToolCallback', () => {
     vi.restoreAllMocks();
   });
 
-  it('scopes timed grants to all tools and keeps protected guards non-bypassable', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_timed_grant',
-      timedGrantExpiresAtMs: Date.now() + 60_000,
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
-    const canUseTool = makeCallback();
-    const first = await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const second = await canUseTool(
-      'Read',
-      { file_path: 'package.json' },
-      makePermissionOptions() as never,
-    );
-    const network = await canUseTool(
-      'SandboxNetworkAccess',
-      { host: 'api.linkedin.com' },
-      makePermissionOptions() as never,
-    );
-    const protectedPath = await canUseTool(
-      'Bash',
-      { command: 'cat > .mcp.json' },
-      makePermissionOptions() as never,
-    );
-
-    expect(first.behavior).toBe('allow');
-    expect(second.behavior).toBe('allow');
-    expect(network.behavior).toBe('allow');
-    expect(protectedPath).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message: expect.stringContaining('protected capability target'),
-      }),
-    );
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('re-prompts after a timed tool grant expires', async () => {
-    vi.useFakeTimers();
-    permissionMock.requestPermissionApproval
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_timed_grant',
-        timedGrantExpiresAtMs: Date.now() + 300_000,
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      })
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_once',
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      });
-
-    const canUseTool = makeCallback();
-    const first = await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    vi.setSystemTime(Date.now() + 301_000);
-    const second = await canUseTool(
-      'Bash',
-      { command: 'npm run build' },
-      makePermissionOptions() as never,
-    );
-
-    expect(first.behavior).toBe('allow');
-    expect(second.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
-  });
-
-  it('re-prompts denylisted Bash commands during an active timed grant and audits the hit', async () => {
-    permissionMock.requestPermissionApproval
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_timed_grant',
-        timedGrantExpiresAtMs: Date.now() + 60_000,
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      })
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_once',
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      });
-
-    const canUseTool = makeCallback();
-    const first = await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const second = await canUseTool(
-      'Bash',
-      { command: 'rm -rf /' },
-      makePermissionOptions() as never,
-    );
-
-    expect(first.behavior).toBe('allow');
-    expect(second.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(2);
-    expect(permissionMock.requestPermissionApproval).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        decisionReason: expect.stringContaining(
-          'YOLO-mode denylist rule matched "rm -rf /"',
-        ),
-      }),
-    );
-    const output = combinedConsoleOutput();
-    expect(output).toContain('permission.yolo_denylist_hit');
-    expect(output).toContain('"matchedPattern":"rm -rf /"');
-    expect(output).toContain('"principal":"agent:test"');
-    expect(output).toContain('"conversationId":"tg:test"');
-  });
-
-  it('auto-approves non-denylisted Bash commands during an active timed grant', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_timed_grant',
-      timedGrantExpiresAtMs: Date.now() + 60_000,
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
-    const canUseTool = makeCallback();
-    const first = await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const second = await canUseTool(
-      'Bash',
-      { command: 'ls' },
-      makePermissionOptions() as never,
-    );
-
-    expect(first.behavior).toBe('allow');
-    expect(second.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('routes timed-grant prompts to the active thread while scoping grants to the conversation', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_timed_grant',
-      timedGrantExpiresAtMs: Date.now() + 60_000,
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
+  it('allows direct-mode SDK network access to a public host through the egress gateway', async () => {
+    const host = 'registry.npmjs.org';
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
@@ -250,10 +98,9 @@ describe('createCanUseToolCallback', () => {
         appId: 'default',
         agentId: 'agent:test',
         runId: 'run-1',
-        jobId: undefined,
         chatJid: 'tg:test',
-        threadId: 'topic-7',
         allowedTools: [],
+        egressDenylist: ['blocked.example'],
         yoloMode: {
           enabled: true,
           denylist: [],
@@ -261,99 +108,120 @@ describe('createCanUseToolCallback', () => {
         },
       } as never,
     });
-    await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    await canUseTool(
-      'Read',
-      { file_path: 'package.json' },
-      makePermissionOptions() as never,
+
+    const network = await canUseTool(
+      'SandboxNetworkAccess',
+      { host },
+      makePermissionOptions({
+        toolUseID: 'toolu_network_1',
+        agentID: 'agent:test',
+      }) as never,
     );
 
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ threadId: 'topic-7' }),
-    );
-    const output = combinedConsoleOutput();
-    expect(output).toContain('conversationJid=tg:test');
-    expect(output).not.toContain('threadId=topic-7');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
+    expect(network).toEqual({
+      behavior: 'allow',
+      updatedInput: { host },
+    });
+    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(dns.lookup).toHaveBeenCalledWith(host, {
+      all: true,
+      verbatim: true,
+    });
   });
 
-  it('re-prompts denylisted file paths during an active timed grant', async () => {
-    permissionMock.requestPermissionApproval
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_timed_grant',
-        timedGrantExpiresAtMs: Date.now() + 60_000,
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      })
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_once',
-        updatedPermissions: undefined,
-        decidedBy: 'user',
+  it('denies direct-mode SDK network access to localhost by name', async () => {
+    const network = await makeCallback()(
+      'SandboxNetworkAccess',
+      { host: 'LOCALHOST.' },
+      makePermissionOptions({ toolUseID: 'toolu_network_localhost' }) as never,
+    );
+
+    expect(network).toEqual({
+      behavior: 'deny',
+      message: 'Host localhost is a loopback hostname.',
+      interrupt: false,
+    });
+    expect(dns.lookup).not.toHaveBeenCalled();
+  });
+
+  it.each(['127.0.0.1', '10.20.30.40', '169.254.169.254'])(
+    'denies direct-mode SDK network access when DNS resolves to %s',
+    async (address) => {
+      vi.mocked(dns.lookup).mockResolvedValueOnce([{ address, family: 4 }]);
+
+      const network = await makeCallback()(
+        'SandboxNetworkAccess',
+        { host: 'private-target.example' },
+        makePermissionOptions({
+          toolUseID: 'toolu_network_resolved_private',
+        }) as never,
+      );
+
+      expect(network).toEqual({
+        behavior: 'deny',
+        message: `Host private-target.example resolved to non-public address ${address}.`,
+        interrupt: false,
       });
+    },
+  );
 
-    const canUseTool = makeCallback();
-    await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const write = await canUseTool(
-      'Write',
-      { file_path: '/etc', content: 'x' },
-      makePermissionOptions({ displayName: 'Write' }) as never,
+  it('strips an authority port before resolving and denies a private destination', async () => {
+    vi.mocked(dns.lookup).mockResolvedValueOnce([
+      { address: '10.20.30.40', family: 4 },
+    ]);
+
+    const network = await makeCallback()(
+      'SandboxNetworkAccess',
+      { host: 'private-target.example:8443' },
+      makePermissionOptions({ toolUseID: 'toolu_network_authority' }) as never,
     );
 
-    expect(write.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(2);
-    expect(permissionMock.requestPermissionApproval).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        decisionReason: expect.stringContaining(
-          'YOLO-mode denylist rule matched "/etc/*"',
-        ),
-      }),
-    );
+    expect(network).toEqual({
+      behavior: 'deny',
+      message:
+        'Host private-target.example resolved to non-public address 10.20.30.40.',
+      interrupt: false,
+    });
+    expect(dns.lookup).toHaveBeenCalledWith('private-target.example', {
+      all: true,
+      verbatim: true,
+    });
   });
 
-  it('auto-approves non-denylisted file paths during an active timed grant', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_timed_grant',
-      timedGrantExpiresAtMs: Date.now() + 60_000,
-      updatedPermissions: undefined,
-      decidedBy: 'user',
+  it('denies direct-mode SDK network access when DNS resolution fails', async () => {
+    vi.mocked(dns.lookup).mockRejectedValueOnce(new Error('lookup failed'));
+
+    const network = await makeCallback()(
+      'SandboxNetworkAccess',
+      { host: 'unresolvable.example' },
+      makePermissionOptions({ toolUseID: 'toolu_network_unresolved' }) as never,
+    );
+
+    expect(network).toEqual({
+      behavior: 'deny',
+      message:
+        'SDK sandbox network access could not safely resolve unresolvable.example.',
+      interrupt: false,
     });
-
-    const canUseTool = makeCallback();
-    await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const write = await canUseTool(
-      'Write',
-      { file_path: '~/x', content: 'x' },
-      makePermissionOptions({ displayName: 'Write' }) as never,
-    );
-
-    expect(write.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
-  it('does not apply the YOLO denylist when disabled', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_timed_grant',
-      timedGrantExpiresAtMs: Date.now() + 60_000,
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
+  it('denies direct-mode SDK network access when the target cannot be resolved safely', async () => {
+    const network = await makeCallback()(
+      'SandboxNetworkAccess',
+      { host: 'https://invalid.example/path' },
+      makePermissionOptions({ toolUseID: 'toolu_network_invalid' }) as never,
+    );
 
+    expect(network).toEqual({
+      behavior: 'deny',
+      message:
+        'SDK sandbox network access could not safely resolve https://invalid.example/path.',
+      interrupt: false,
+    });
+    expect(dns.lookup).not.toHaveBeenCalled();
+  });
+
+  it('denies direct-mode SDK network access to a non-public address', async () => {
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
@@ -361,230 +229,38 @@ describe('createCanUseToolCallback', () => {
         appId: 'default',
         agentId: 'agent:test',
         runId: 'run-1',
-        jobId: undefined,
         chatJid: 'tg:test',
-        threadId: undefined,
         allowedTools: [],
-        yoloMode: {
-          enabled: false,
-          denylist: [],
-          denylistPaths: [],
-        },
+        egressDenylist: [],
+        yoloMode: { enabled: true, denylist: [], denylistPaths: [] },
       } as never,
     });
-    await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const deniedByDefault = await canUseTool(
-      'Bash',
-      { command: 'rm -rf /' },
-      makePermissionOptions() as never,
-    );
 
-    expect(deniedByDefault.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('scopes timed grants to the Gantry agent even when SDK agent ids differ', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_timed_grant',
-      timedGrantExpiresAtMs: Date.now() + 60_000,
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
-    const canUseTool = makeCallback();
-    const first = await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions({ agentID: 'subagent-a' }) as never,
-    );
-    const second = await canUseTool(
-      'Read',
-      { file_path: 'package.json' },
-      makePermissionOptions({ agentID: 'subagent-b' }) as never,
-    );
-
-    expect(first.behavior).toBe('allow');
-    expect(second.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('ignores overlong timed grant expiries from permission responses', async () => {
-    permissionMock.requestPermissionApproval
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_timed_grant',
-        timedGrantExpiresAtMs: Date.now() + 3_600_000,
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      })
-      .mockResolvedValueOnce({
-        approved: true,
-        mode: 'allow_once',
-        updatedPermissions: undefined,
-        decidedBy: 'user',
-      });
-
-    const canUseTool = makeCallback();
-    const first = await canUseTool(
-      'Bash',
-      { command: 'npm test' },
-      makePermissionOptions() as never,
-    );
-    const second = await canUseTool(
-      'Read',
-      { file_path: 'package.json' },
-      makePermissionOptions() as never,
-    );
-
-    expect(first.behavior).toBe('allow');
-    expect(second.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(2);
-  });
-
-  it('denies parentless SandboxNetworkAccess after an allow-once approved Bash tool call', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_once',
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
-    const canUseTool = makeCallback();
-    const bash = await canUseTool(
-      'Bash',
-      { command: 'npm install' },
-      makePermissionOptions({
-        toolUseID: 'toolu_bash_1',
-        agentID: 'subagent-a',
-      }) as never,
-    );
     const network = await canUseTool(
       'SandboxNetworkAccess',
-      { host: 'registry.npmjs.org' },
-      makePermissionOptions({
-        toolUseID: 'toolu_network_1',
-        agentID: 'subagent-a',
-      }) as never,
+      { host: '10.0.0.7' },
+      makePermissionOptions({ toolUseID: 'toolu_network_private' }) as never,
     );
 
-    expect(bash.behavior).toBe('allow');
-    expect(network).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message: expect.stringContaining('without a parent tool-use id'),
-      }),
-    );
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('suppresses SandboxNetworkAccess only when it carries the approved parent tool-use id', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_once',
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
-    const canUseTool = makeCallback();
-    const bash = await canUseTool(
-      'Bash',
-      { command: 'npm install' },
-      makePermissionOptions({
-        toolUseID: 'toolu_bash_1',
-        agentID: 'subagent-a',
-      }) as never,
-    );
-    const network = await canUseTool(
-      'SandboxNetworkAccess',
-      { host: 'registry.npmjs.org', parentToolUseID: 'toolu_bash_1' },
-      makePermissionOptions({
-        toolUseID: 'toolu_network_1',
-        parentToolUseID: 'toolu_bash_1',
-        agentID: 'subagent-a',
-      }) as never,
-    );
-
-    expect(bash.behavior).toBe('allow');
     expect(network).toEqual({
-      behavior: 'allow',
-      updatedInput: {
-        host: 'registry.npmjs.org',
-        parentToolUseID: 'toolu_bash_1',
-      },
+      behavior: 'deny',
+      message: 'Host 10.0.0.7 resolved to non-public address 10.0.0.7.',
+      interrupt: false,
     });
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
+    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });
 
-  it('does not suppress parentless SandboxNetworkAccess across SDK agent principals', async () => {
-    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
-      approved: true,
-      mode: 'allow_once',
-      updatedPermissions: undefined,
-      decidedBy: 'user',
-    });
-
-    const canUseTool = makeCallback();
-    const bash = await canUseTool(
-      'Bash',
-      { command: 'npm install' },
-      makePermissionOptions({
-        toolUseID: 'toolu_bash_1',
-        agentID: 'subagent-a',
-      }) as never,
-    );
-    const network = await canUseTool(
-      'SandboxNetworkAccess',
-      { host: 'registry.npmjs.org' },
-      makePermissionOptions({
-        toolUseID: 'toolu_network_1',
-        agentID: 'subagent-b',
-      }) as never,
-    );
-
-    expect(bash.behavior).toBe('allow');
-    expect(network).toEqual(
-      expect.objectContaining({
-        behavior: 'deny',
-        message: expect.stringContaining('without a parent tool-use id'),
-      }),
-    );
-    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('suppresses parentless scheduled SandboxNetworkAccess for reviewed local CLI command bindings', async () => {
+  it('denies direct-mode SDK network access to a denylisted WebFetch host', async () => {
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
-        isScheduledJob: true,
+        isScheduledJob: false,
         appId: 'default',
         agentId: 'agent:test',
         runId: 'run-1',
-        jobId: 'job-1',
         chatJid: 'tg:test',
-        threadId: undefined,
-        runtimeAccess: [
-          {
-            selectedCapabilityId: 'acme.records.get',
-            sourceType: 'local_cli',
-            auditLabel: 'Fixture Records get',
-            commandRules: ['RunCommand(/opt/homebrew/bin/acme records get *)'],
-            credentialDirs: [],
-            networkBindings: [
-              {
-                commandRules: [
-                  'RunCommand(/opt/homebrew/bin/acme records get *)',
-                ],
-                hosts: ['oauth2.googleapis.com'],
-              },
-            ],
-          },
-        ],
-        allowedTools: ['RunCommand(/opt/homebrew/bin/acme records get *)'],
+        allowedTools: [],
+        egressDenylist: ['blocked.example'],
         yoloMode: {
           enabled: true,
           denylist: [],
@@ -592,30 +268,21 @@ describe('createCanUseToolCallback', () => {
         },
       } as never,
     });
-    const bash = await canUseTool(
-      'Bash',
-      {
-        command:
-          '/opt/homebrew/bin/acme records get fixture_sheet_001 "Fixture Leads!A1:Z1" --json --account operator@example.test',
-      },
-      makePermissionOptions({
-        toolUseID: 'toolu_bash_1',
-        agentID: 'agent:test',
-      }) as never,
-    );
+
     const network = await canUseTool(
       'SandboxNetworkAccess',
-      { host: 'oauth2.googleapis.com' },
+      { host: 'blocked.example', parentToolUseID: 'toolu_webfetch_1' },
       makePermissionOptions({
         toolUseID: 'toolu_network_1',
-        agentID: 'agent:test',
+        parentToolUseID: 'toolu_webfetch_1',
       }) as never,
     );
 
-    expect(bash.behavior).toBe('allow');
     expect(network).toEqual({
-      behavior: 'allow',
-      updatedInput: { host: 'oauth2.googleapis.com' },
+      behavior: 'deny',
+      message:
+        'Host blocked.example matched permissions.egress.denylist pattern blocked.example.',
+      interrupt: false,
     });
     expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });
@@ -659,6 +326,99 @@ describe('createCanUseToolCallback', () => {
 
     expect(permissionMock.requestPermissionApproval).toHaveBeenCalledWith(
       expect.objectContaining({ [WORKSPACE_FOLDER_OPTION_KEY]: '/repo' }),
+    );
+  });
+
+  it('prompts when a yolo denylist command matches an existing allow rule', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: false,
+      reason: 'operator denied',
+      decidedBy: 'user',
+    });
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: false,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: undefined,
+        chatJid: 'tg:test',
+        threadId: undefined,
+        allowedTools: ['RunCommand(npm test *)'],
+        yoloMode: {
+          enabled: true,
+          denylist: ['npm test --danger *'],
+          denylistPaths: [],
+        },
+      } as never,
+    });
+
+    const result = await canUseTool(
+      'Bash',
+      { command: 'npm test --danger now' },
+      makePermissionOptions() as never,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('operator denied'),
+      }),
+    );
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionReason: expect.stringContaining('YOLO-mode denylist'),
+        // No "Allow for future": a persisted rule would never be honored
+        // while the denylist keeps blocking rule-based auto-allows.
+        suggestions: undefined,
+      }),
+    );
+    expect(combinedConsoleOutput()).toContain(
+      '"eventType":"permission.yolo_denylist_hit"',
+    );
+    expect(combinedConsoleOutput()).toContain(
+      '"matchedPattern":"npm test --danger *"',
+    );
+  });
+
+  it('auto-allows a non-denylisted command matching the same allow rule', async () => {
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: false,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: undefined,
+        chatJid: 'tg:test',
+        threadId: undefined,
+        allowedTools: ['RunCommand(npm test *)'],
+        yoloMode: {
+          enabled: true,
+          denylist: ['npm test --danger *'],
+          denylistPaths: [],
+        },
+      } as never,
+    });
+
+    const result = await canUseTool(
+      'Bash',
+      { command: 'npm test --safe now' },
+      makePermissionOptions() as never,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        behavior: 'allow',
+        updatedInput: expect.objectContaining({
+          command: expect.stringContaining('npm test --safe now'),
+        }),
+      }),
+    );
+    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(combinedConsoleOutput()).not.toContain(
+      'permission.yolo_denylist_hit',
     );
   });
 
@@ -783,7 +543,7 @@ describe('createCanUseToolCallback', () => {
     expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });
 
-  it('omits timed access from autonomous job prompts with persistent suggestions', async () => {
+  it('offers persistent access in autonomous job prompts with suggestions', async () => {
     permissionMock.requestPermissionApproval.mockResolvedValueOnce({
       approved: true,
       mode: 'allow_once',
@@ -998,6 +758,46 @@ describe('createCanUseToolCallback', () => {
         displayName: 'AgentDelegation',
       }),
     );
+  });
+
+  it('hard-denies native Task subagent aliases without approval fallback', async () => {
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: false,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: undefined,
+        chatJid: 'tg:test',
+        threadId: undefined,
+        allowedTools: ['AgentDelegation'],
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+      } as never,
+      capabilities: {
+        allowedTools: ['AgentDelegation'],
+        alwaysAllowedTools: [],
+        permissionMode: 'default',
+      } as never,
+    });
+
+    const decision = await canUseTool(
+      'Task',
+      { prompt: 'summarize this run' },
+      makePermissionOptions({ displayName: 'Task' }) as never,
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('Use the Agent tool'),
+      }),
+    );
+    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });
 
   it('still allows pre-provisioned tools for a locked agent', async () => {

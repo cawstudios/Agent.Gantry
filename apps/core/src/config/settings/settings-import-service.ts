@@ -10,8 +10,10 @@ import type {
 import { applyRuntimeSettingsDesiredState } from './restart-sync.js';
 import {
   activateRuntimeModelAliases,
+  parseRuntimeSettings,
   withRuntimeModelAliases,
 } from './runtime-settings.js';
+import { renderRuntimeSettingsYaml } from './runtime-settings-renderer.js';
 import { normalizeConfiguredCapabilitiesInSettings } from './configured-capability-normalization.js';
 import { parseRuntimeSettingsObject } from './runtime-settings-parser.js';
 import { validateLoadedRuntimeSettings } from './runtime-settings-validation.js';
@@ -21,9 +23,10 @@ import {
   type SettingsRevisionWakeup,
 } from './settings-revision-notify.js';
 import type {
-  ProviderConnectionId,
+  ProviderAccountId,
   ProviderId,
 } from '../../domain/provider/provider.js';
+import { migrateLegacyAgentBindings } from './settings-revision-legacy-bindings.js';
 
 /**
  * Reader version of the settings-revision contract this build understands. A
@@ -31,7 +34,7 @@ import type {
  * applied) by an older worker until it is upgraded (ADR-3 skew safety contract).
  * Bump this whenever a settings-schema change would break older readers.
  */
-export const CURRENT_SETTINGS_READER_VERSION = 4;
+export const CURRENT_SETTINGS_READER_VERSION = 14;
 
 export interface SettingsImportValidationResult {
   ok: boolean;
@@ -54,6 +57,20 @@ export interface SettingsRevisionMirror {
   createdBy: string;
   note?: string | null;
   logWarn?: (context: Record<string, unknown>, message: string) => void;
+}
+
+export type WorkstationSettingsImportOutcome =
+  | { status: 'revision_created'; revision: number }
+  | { status: 'applied_no_revision' }
+  | { status: 'no_op' };
+
+export class SettingsStaleMutationError extends Error {
+  constructor() {
+    super(
+      'Settings mutation is based on stale settings; reload latest desired state and retry.',
+    );
+    this.name = 'SettingsStaleMutationError';
+  }
 }
 
 export class SettingsRevisionConflictError extends Error {
@@ -122,7 +139,7 @@ export async function importWorkstationSettings(
     expectedRevision?: number | null;
   },
   settings: RuntimeSettings,
-): Promise<{ revision?: number }> {
+): Promise<WorkstationSettingsImportOutcome> {
   if (
     deps.revisionMirrorRequired &&
     (!deps.previousSettings || !deps.revisionMirror)
@@ -146,6 +163,13 @@ export async function importWorkstationSettings(
         appId,
       })
     ).settings;
+    const previousRevisionSettings = (
+      await normalizeConfiguredCapabilitiesInSettings({
+        settings: deps.previousSettings!,
+        repositories: deps.repositories,
+        appId,
+      })
+    ).settings;
     const latest =
       await deps.revisionMirror.settingsRevisions.getLatestSettingsRevision(
         appId,
@@ -163,19 +187,16 @@ export async function importWorkstationSettings(
     }
     if (
       latest &&
-      !settingsDocumentMatchesPreviousSettings(
+      !revisionDocumentMatchesSettings(
         latest.settingsDocument,
-        deps.previousSettings!,
+        previousRevisionSettings,
       )
     ) {
-      throw new Error(
-        'Settings mutation is based on stale settings; reload latest desired state and retry.',
-      );
+      throw new SettingsStaleMutationError();
     }
     if (
       latest &&
-      stableJson(latest.settingsDocument) ===
-        stableJson(settingsToRevisionDocument(revisionSettings))
+      revisionDocumentMatchesSettings(latest.settingsDocument, revisionSettings)
     ) {
       await applyRuntimeSettingsDesiredState({
         runtimeHome: deps.runtimeHome,
@@ -187,7 +208,7 @@ export async function importWorkstationSettings(
         reloadRuntimeState: deps.reloadRuntimeState,
       });
       activateRuntimeModelAliases(revisionSettings);
-      return {};
+      return { status: 'no_op' };
     }
     await validateProjectionPreconditions({
       settings: revisionSettings,
@@ -229,7 +250,7 @@ export async function importWorkstationSettings(
       reloadRuntimeState: deps.reloadRuntimeState,
     });
     activateRuntimeModelAliases(appliedSettings);
-    return { revision: outcome.revision };
+    return { status: 'revision_created', revision: outcome.revision };
   }
   const appliedSettings = await applyRuntimeSettingsDesiredState({
     runtimeHome: deps.runtimeHome,
@@ -241,7 +262,7 @@ export async function importWorkstationSettings(
     reloadRuntimeState: deps.reloadRuntimeState,
   });
   activateRuntimeModelAliases(appliedSettings);
-  if (!deps.revisionMirror) return {};
+  if (!deps.revisionMirror) return { status: 'applied_no_revision' };
   try {
     const latest =
       await deps.revisionMirror.settingsRevisions.getLatestSettingsRevision(
@@ -249,10 +270,9 @@ export async function importWorkstationSettings(
       );
     if (
       latest &&
-      stableJson(latest.settingsDocument) ===
-        stableJson(settingsToRevisionDocument(appliedSettings))
+      revisionDocumentMatchesSettings(latest.settingsDocument, appliedSettings)
     ) {
-      return {};
+      return { status: 'applied_no_revision' };
     }
     const outcome = await importFleetSettingsRevision(
       {
@@ -279,7 +299,7 @@ export async function importWorkstationSettings(
         { errors: outcome.errors },
         'settings revision mirror failed validation after workstation settings applied',
       );
-      return {};
+      return { status: 'applied_no_revision' };
     }
     if (outcome.status === 'conflict') {
       const error = new Error(
@@ -293,15 +313,15 @@ export async function importWorkstationSettings(
         },
         'settings revision mirror conflicted after workstation settings applied',
       );
-      return {};
+      return { status: 'applied_no_revision' };
     }
-    return { revision: outcome.revision };
+    return { status: 'revision_created', revision: outcome.revision };
   } catch (err) {
     deps.revisionMirror.logWarn?.(
       { err },
       'settings revision mirror failed after workstation settings applied',
     );
-    return {};
+    return { status: 'applied_no_revision' };
   }
 }
 
@@ -379,28 +399,93 @@ export async function importFleetSettingsRevision(
 export function settingsToRevisionDocument(
   settings: RuntimeSettings,
 ): Record<string, unknown> {
+  // Canonicalize via a render→parse round-trip: the parser materializes
+  // defaults (persona, requires_trigger, kind aliases, default model) that
+  // in-memory objects omit, so documents built from memory and documents
+  // built from parsed files would otherwise never compare equal — feeding
+  // endless settings.yaml:auto-import echo revisions and stale-base errors.
+  return buildRevisionDocument(
+    parseRuntimeSettings(renderRuntimeSettingsYaml(settings)),
+  );
+}
+
+function buildRevisionDocument(
+  settings: RuntimeSettings,
+): Record<string, unknown> {
   return stripUndefinedDeep({
     desired_state: snakeRecord(settings.desiredState),
     providers: mapRecord(settings.providers, snakeRecord),
-    provider_connections: mapRecord(settings.providerConnections, snakeRecord),
+    provider_accounts: mapRecord(settings.providerAccounts, (account) => ({
+      agent: account.agentId,
+      provider: account.provider,
+      label: account.label,
+      status: account.status === 'disabled' ? account.status : undefined,
+      runtime_secret_refs: account.runtimeSecretRefs,
+      external_identity_ref: account.externalIdentityRef,
+      config:
+        Object.keys(account.config ?? {}).length > 0
+          ? account.config
+          : undefined,
+    })),
     conversations: mapRecord(settings.conversations, (conversation) => ({
-      provider_connection: conversation.providerConnection,
+      provider_account:
+        conversation.providerAccount ?? conversation.providerConnection,
       external_id: conversation.externalId,
       kind: conversation.kind,
       display_name: conversation.displayName,
+      brain_harvest: conversation.brainHarvest ? true : undefined,
       sender_policy: conversation.senderPolicy,
       control_approvers: conversation.controlApprovers,
+      installed_agents: Object.fromEntries(
+        Object.entries(conversation.installedAgents ?? {}).map(
+          ([installId, install]) => [
+            installId,
+            {
+              provider_account: install.providerAccountId,
+              agent:
+                installId === install.agentId ? undefined : install.agentId,
+              thread_id: install.threadId,
+              status: install.status,
+              added_at: install.addedAt,
+              memory_scope: install.memoryScope,
+              trigger: install.trigger,
+              requires_trigger: install.requiresTrigger,
+              model: install.model,
+              permission_mode: install.permissionMode,
+            },
+          ],
+        ),
+      ),
     })),
-    bindings: mapRecord(settings.bindings, snakeRecord),
     agents: mapRecord(settings.agents, (agent) => ({
       name: agent.name,
       persona: agent.persona,
-      relationship_mode: agent.relationshipMode,
+      delegates: agent.delegates.length > 0 ? agent.delegates : undefined,
+      relationship_mode:
+        agent.relationshipMode && agent.relationshipMode !== 'personal'
+          ? agent.relationshipMode
+          : undefined,
+      runtime: agent.runtime === 'inline' ? 'inline' : undefined,
+      max_turns: agent.maxTurns,
+      max_run_tokens: agent.maxRunTokens,
+      effort: agent.effort,
+      thinking:
+        agent.thinking?.budgetTokens === undefined
+          ? agent.thinking?.mode
+          : {
+              mode: agent.thinking.mode,
+              budget_tokens: agent.thinking.budgetTokens,
+            },
+      max_output_tokens: agent.maxOutputTokens,
       model: agent.model,
       agent_harness: agent.agentHarness,
+      permission_mode: agent.permissionMode,
       one_time_job_default_model: agent.oneTimeJobDefaultModel,
       recurring_job_default_model: agent.recurringJobDefaultModel,
-      bindings: mapRecord(agent.bindings, snakeRecord),
+      tool_rules:
+        agent.toolRules && agent.toolRules.length > 0
+          ? agent.toolRules
+          : undefined,
       access: {
         preset: agent.accessPreset,
         sources: {
@@ -447,6 +532,7 @@ export function settingsToRevisionDocument(
       },
     },
     permissions: snakeRecord(settings.permissions),
+    observability: snakeRecord(settings.observability),
     model_aliases: mapRecord(settings.modelAliases, snakeRecord),
     limits: mapRecord(settings.limits.providers, snakeRecord),
     model_families: settings.modelFamilies,
@@ -457,21 +543,7 @@ export function settingsToRevisionDocument(
 export function settingsFromRevisionDocument(
   document: Record<string, unknown>,
 ): RuntimeSettings {
-  return parseRuntimeSettingsObject(document);
-}
-
-function settingsDocumentMatchesPreviousSettings(
-  latestDocument: Record<string, unknown>,
-  previousSettings: RuntimeSettings,
-): boolean {
-  const previousDocument = settingsToRevisionDocument(previousSettings);
-  if (stableJson(latestDocument) === stableJson(previousDocument)) {
-    return true;
-  }
-  const canonicalLatestDocument = settingsToRevisionDocument(
-    settingsFromRevisionDocument(latestDocument),
-  );
-  return stableJson(canonicalLatestDocument) === stableJson(previousDocument);
+  return parseRuntimeSettingsObject(migrateLegacyAgentBindings(document));
 }
 
 export async function settingsMatchesLatestRevision(input: {
@@ -483,10 +555,32 @@ export async function settingsMatchesLatestRevision(input: {
     input.appId,
   );
   if (!latest) return false;
-  return (
-    stableJson(latest.settingsDocument) ===
-    stableJson(settingsToRevisionDocument(input.settings))
+  return revisionDocumentMatchesSettings(
+    latest.settingsDocument,
+    input.settings,
   );
+}
+
+function revisionDocumentMatchesSettings(
+  document: Record<string, unknown>,
+  settings: RuntimeSettings,
+): boolean {
+  return (
+    stableJson(canonicalizeRevisionDocument(document)) ===
+    stableJson(
+      canonicalizeRevisionDocument(settingsToRevisionDocument(settings)),
+    )
+  );
+}
+
+function canonicalizeRevisionDocument(
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  try {
+    return settingsToRevisionDocument(settingsFromRevisionDocument(document));
+  } catch {
+    return document;
+  }
 }
 
 export function stableJson(value: unknown): string {
@@ -506,23 +600,23 @@ async function validateProjectionPreconditions(input: {
   repositories: SettingsDesiredStateRepositories;
   appId: AppId;
 }): Promise<void> {
-  const providerConnections = input.repositories.providerConnections;
-  if (!providerConnections) return;
-  for (const [connectionId, connection] of Object.entries(
-    input.settings.providerConnections,
+  const providerAccounts = input.repositories.providerAccounts;
+  if (!providerAccounts) return;
+  for (const [accountId, account] of Object.entries(
+    input.settings.providerAccounts,
   )) {
-    const existing = await providerConnections.getProviderConnection(
-      connectionId as ProviderConnectionId,
+    const existing = await providerAccounts.getProviderAccount(
+      accountId as ProviderAccountId,
     );
     if (!existing) continue;
     if (existing.appId !== input.appId) {
       throw new Error(
-        `provider_connections.${connectionId} already belongs to another app`,
+        `provider_accounts.${accountId} already belongs to another app`,
       );
     }
-    if (existing.providerId !== (connection.provider as ProviderId)) {
+    if (existing.providerId !== (account.provider as ProviderId)) {
       throw new Error(
-        `provider_connections.${connectionId}.provider cannot change from ${existing.providerId} to ${connection.provider}; use a new provider connection id.`,
+        `provider_accounts.${accountId}.provider cannot change from ${existing.providerId} to ${account.provider}; use a new provider account id.`,
       );
     }
   }

@@ -1,5 +1,4 @@
 import type { JsonSchema } from './openapi-route-helpers.js';
-import { listModelPresets } from '../../shared/model-catalog.js';
 import { listModelRouteProviders } from '../../shared/model-provider-registry.js';
 import { modelCredentialSchemas } from './openapi-model-credential-schemas.js';
 import {
@@ -57,6 +56,61 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       status: { type: 'string', enum: ['active', 'disabled'] },
       agentHarness: agentHarnessProp,
     },
+  },
+  ReplaceAgentDelegatesRequest: {
+    type: 'object',
+    required: ['delegates'],
+    additionalProperties: false,
+    properties: {
+      delegates: {
+        type: 'array',
+        maxItems: 100,
+        items: { type: 'string', minLength: 1, maxLength: 160 },
+      },
+      expectedRevision: { type: 'integer', minimum: 0 },
+    },
+  },
+  AgentDelegateResolved: {
+    type: 'object',
+    required: ['ref', 'agentId', 'toolName', 'displayName', 'persona'],
+    additionalProperties: false,
+    properties: {
+      ref: { type: 'string' },
+      agentId: { type: 'string' },
+      toolName: { type: 'string' },
+      displayName: { type: 'string' },
+      persona: {
+        type: 'string',
+        enum: [
+          'developer',
+          'generalist',
+          'sales',
+          'marketing',
+          'operations',
+          'research',
+        ],
+      },
+    },
+  },
+  AgentDelegatesResponse: {
+    type: 'object',
+    required: ['agentId', 'revision', 'delegates', 'resolved'],
+    additionalProperties: false,
+    properties: {
+      agentId: { type: 'string' },
+      revision: { type: 'integer', minimum: 0 },
+      delegates: stringArray,
+      resolved: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/AgentDelegateResolved' },
+      },
+    },
+  },
+  SettingsRevisionResponse: {
+    type: 'object',
+    required: ['revision'],
+    additionalProperties: false,
+    properties: { revision: { type: 'integer', minimum: 0 } },
   },
   AgentAdminSummaryResponse: {
     type: 'object',
@@ -264,9 +318,13 @@ export const openApiSchemas: Record<string, JsonSchema> = {
   },
   HealthResponse: {
     type: 'object',
-    required: ['status', 'transport', 'features'],
+    required: ['status', 'processRole', 'transport', 'features'],
     properties: {
       status: { type: 'string', example: 'ok' },
+      processRole: {
+        type: 'string',
+        enum: ['all', 'control', 'live-worker', 'job-worker'],
+      },
       transport: metadata,
       features: metadata,
     },
@@ -482,18 +540,15 @@ export const openApiSchemas: Record<string, JsonSchema> = {
   },
   ModelDefaultsResponse: {
     type: 'object',
-    required: ['preset', 'chat', 'jobs', 'memory', 'defaults'],
+    required: ['provider', 'chat', 'jobs', 'memory', 'defaults'],
     properties: {
-      preset: {
+      provider: {
         oneOf: [
           {
             type: 'object',
             required: ['id', 'label'],
             properties: {
-              id: {
-                type: 'string',
-                enum: listModelPresets().map((preset) => preset.id),
-              },
+              id: { type: 'string' },
               label: { type: 'string' },
             },
           },
@@ -513,7 +568,7 @@ export const openApiSchemas: Record<string, JsonSchema> = {
         type: 'object',
         required: ['mode', 'extractor', 'dreaming', 'consolidation'],
         properties: {
-          mode: { type: 'string', enum: ['preset-managed'] },
+          mode: { type: 'string', enum: ['provider-managed'] },
           extractor: { $ref: '#/components/schemas/ModelDefaultSlot' },
           dreaming: { $ref: '#/components/schemas/ModelDefaultSlot' },
           consolidation: { $ref: '#/components/schemas/ModelDefaultSlot' },
@@ -550,10 +605,6 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      preset: {
-        type: 'string',
-        enum: listModelPresets().map((preset) => preset.id),
-      },
       chat: { type: ['string', 'null'] },
       jobs: {
         oneOf: [{ type: 'string' }, { type: 'null' }],
@@ -563,10 +614,10 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       recurring: { type: ['string', 'null'] },
       memory: {
         oneOf: [
-          { type: 'string', enum: ['reset', 'preset-managed'] },
+          { type: 'string', enum: ['reset', 'provider-managed'] },
           { type: 'null' },
         ],
-        description: 'Use null, "reset", or "preset-managed".',
+        description: 'Use null, "reset", or "provider-managed".',
       },
     },
   },
@@ -580,7 +631,10 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       appId: { type: 'string', description: 'Optional API key app assertion.' },
       conversationId: { type: 'string' },
       title: { type: 'string' },
-      responseMode: { type: 'string', enum: ['sse', 'webhook'] },
+      responseMode: {
+        type: 'string',
+        enum: ['sse', 'webhook', 'both', 'none'],
+      },
       webhookId: { type: 'string' },
     },
   },
@@ -594,21 +648,6 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       chatJid: { type: 'string' },
     },
   },
-  SessionDetails: metadata,
-  SessionMessage: {
-    type: 'object',
-    required: ['messageId', 'sessionId', 'senderId', 'message', 'createdAt'],
-    properties: {
-      messageId: { type: 'string' },
-      sessionId: { type: 'string' },
-      senderId: { type: 'string' },
-      senderName: { type: 'string' },
-      message: { type: 'string' },
-      threadId: { type: 'string' },
-      createdAt: isoDateTime,
-    },
-  },
-  SessionMessageListResponse: arrayEnvelope('messages', 'SessionMessage'),
   SendSessionMessageRequest: {
     type: 'object',
     required: ['message'],
@@ -618,8 +657,43 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       senderName: { type: 'string', default: 'SDK' },
       threadId: { type: 'string' },
       correlationId: { type: 'string' },
-      responseMode: { type: 'string', enum: ['sse', 'webhook'] },
+      responseMode: {
+        type: 'string',
+        enum: ['sse', 'webhook', 'both', 'none'],
+      },
       webhookId: { type: 'string' },
+      response_schema: {
+        type: 'object',
+        description:
+          'JSON Schema object requesting strict structured output for this inline turn.',
+      },
+      effort: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      thinking: {
+        oneOf: [
+          { type: 'string', enum: ['off', 'on'] },
+          {
+            type: 'object',
+            required: ['mode'],
+            additionalProperties: false,
+            properties: {
+              mode: { type: 'string', enum: ['off'] },
+            },
+          },
+          {
+            type: 'object',
+            required: ['mode'],
+            additionalProperties: false,
+            properties: {
+              mode: { type: 'string', enum: ['on'] },
+              budget_tokens: { type: 'integer', minimum: 1 },
+            },
+          },
+        ],
+      },
+      max_output_tokens: { type: 'integer', minimum: 1 },
     },
   },
   SendSessionMessageResponse: {
@@ -642,15 +716,6 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     },
   },
   RuntimeEventListResponse: arrayEnvelope('events', 'RuntimeEvent'),
-  WaitEventResponse: {
-    allOf: [
-      { $ref: '#/components/schemas/RuntimeEvent' },
-      {
-        type: 'object',
-        properties: { afterEventId: { type: 'integer' } },
-      },
-    ],
-  },
   Run: {
     type: 'object',
     required: ['run_id', 'job_id', 'status'],

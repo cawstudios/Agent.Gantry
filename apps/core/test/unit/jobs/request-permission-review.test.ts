@@ -10,9 +10,7 @@ import {
   requestPermissionDescription,
   requestPermissionQueuedMessage,
   requestPermissionReviewSuggestions,
-  requestPermissionTransientLiveRules,
   requestPermissionSetupDecisionOptions,
-  semanticCapabilityDefinitionsForToolInput,
 } from '@core/jobs/request-permission-review.js';
 import type { SemanticCapabilityDefinition } from '@core/shared/semantic-capabilities.js';
 
@@ -119,35 +117,7 @@ describe('request permission review helpers', () => {
     ).toBeUndefined();
   });
 
-  it('adds temporary exact third-party MCP tool approvals to current-run live rules', () => {
-    expect(
-      requestPermissionTransientLiveRules({
-        permissionKind: 'tool',
-        capabilityRequestSource: 'request_access',
-        toolName: 'mcp__caw-ats__ats_position_counts',
-        temporaryOnly: true,
-      }),
-    ).toEqual(['mcp__caw-ats__ats_position_counts']);
-
-    expect(
-      requestPermissionReviewSuggestions({
-        permissionKind: 'tool',
-        capabilityRequestSource: 'request_access',
-        toolName: 'mcp__caw-ats__ats_position_counts',
-        temporaryOnly: true,
-      }),
-    ).toBeUndefined();
-
-    expect(
-      requestPermissionTransientLiveRules({
-        permissionKind: 'tool',
-        toolName: 'mcp__caw-ats__ats_position_counts',
-        temporaryOnly: true,
-      }),
-    ).toEqual([]);
-  });
-
-  it('omits timed grants from setup request permission choices', () => {
+  it('returns setup request permission choices by tool kind', () => {
     expect(
       requestPermissionSetupDecisionOptions({
         permissionKind: 'tool',
@@ -182,16 +152,7 @@ describe('request permission review helpers', () => {
     ]);
   });
 
-  it('does not trust agent-authored semantic capability definitions', () => {
-    expect(
-      semanticCapabilityDefinitionsForToolInput({
-        permissionKind: 'tool',
-        capabilityRequestSource: 'request_access',
-        capabilityId: 'acme.records.get',
-        semanticCapabilityDefinition: acmeAdapterCapability,
-      }),
-    ).toBeUndefined();
-
+  it('ignores agent-authored semantic capability definitions', () => {
     expect(
       requestPermissionReviewSuggestions({
         permissionKind: 'tool',
@@ -638,71 +599,6 @@ describe('request permission review helpers', () => {
     ).toEqual(['mcp__gantry__service_restart']);
   });
 
-  it('binds exact scheduler Gantry MCP tools as durable catalog grants', async () => {
-    const ipcDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'gantry-scheduler-live-tool-rules-'),
-    );
-    const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
-    const repository = {
-      getTool: vi.fn(async () => ({
-        id: 'tool:mcp__gantry__scheduler_run_now',
-        appId: 'app:test',
-        name: 'mcp__gantry__scheduler_run_now',
-        status: 'active',
-        selectable: true,
-      })),
-      listTools: vi.fn(async () => []),
-      saveTool: vi.fn(async () => undefined),
-      saveAgentToolBinding: vi.fn(async () => undefined),
-      disableAgentToolBinding: vi.fn(async () => null),
-    };
-
-    const persisted = await persistRequestPermissionRules({
-      appId: 'app:test' as never,
-      agentId: 'agent:test' as never,
-      deps: {
-        getToolRepository: () => repository as never,
-        mirrorAgentToolRulesToSettings,
-      },
-      sourceAgentFolder: 'main_agent',
-      ipcDir,
-      runHandle: 'agent-run-1',
-      updates: [
-        {
-          type: 'addRules',
-          behavior: 'allow',
-          rules: [{ toolName: 'mcp__gantry__scheduler_run_now' }],
-        },
-      ],
-    });
-
-    expect(persisted).toEqual(['mcp__gantry__scheduler_run_now']);
-    expect(repository.getTool).toHaveBeenCalledWith(
-      'tool:mcp__gantry__scheduler_run_now',
-    );
-    expect(repository.saveTool).not.toHaveBeenCalled();
-    expect(repository.saveAgentToolBinding).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'agent:test',
-        toolId: 'tool:mcp__gantry__scheduler_run_now',
-        status: 'active',
-      }),
-    );
-    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledWith(
-      'main_agent',
-      ['mcp__gantry__scheduler_run_now'],
-      { appId: 'app:test' },
-    );
-    expect(
-      JSON.parse(
-        fs.readFileSync(
-          path.join(ipcDir, 'live-tool-rules', 'agent-run-1.json'),
-          'utf-8',
-        ),
-      ),
-    ).toEqual(['mcp__gantry__scheduler_run_now']);
-  });
-
   it('binds persistent Browser approvals to the catalog Browser tool and mirrors settings', async () => {
     const mirrorAgentToolRulesToSettings = vi.fn(async () => undefined);
     const repository = {
@@ -819,38 +715,6 @@ describe('request permission review helpers', () => {
         behavior: 'allow',
         destination: 'session',
         rules: [{ toolName: 'Browser' }],
-      },
-    ]);
-  });
-
-  it('suggests persistent grants for exact scheduler Gantry MCP tools', () => {
-    expect(
-      requestPermissionReviewSuggestions({
-        permissionKind: 'tool',
-        toolName: 'mcp__gantry__scheduler_run_now',
-        temporaryOnly: false,
-      }),
-    ).toEqual([
-      {
-        type: 'addRules',
-        behavior: 'allow',
-        destination: 'session',
-        rules: [{ toolName: 'mcp__gantry__scheduler_run_now' }],
-      },
-    ]);
-
-    expect(
-      requestPermissionReviewSuggestions({
-        permissionKind: 'tool',
-        toolName: 'mcp__gantry__scheduler_list_jobs',
-        temporaryOnly: false,
-      }),
-    ).toEqual([
-      {
-        type: 'addRules',
-        behavior: 'allow',
-        destination: 'session',
-        rules: [{ toolName: 'mcp__gantry__scheduler_list_jobs' }],
       },
     ]);
   });

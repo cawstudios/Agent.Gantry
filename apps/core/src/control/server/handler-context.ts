@@ -11,16 +11,25 @@ import type { ControlPlaneStorageSettings } from '../../application/control-plan
 import type { AppId } from '../../domain/app/app.js';
 import type {
   ModelCatalogEntry,
-  ModelPresetId,
   ModelWorkload,
 } from '../../shared/model-catalog.js';
 import type { AgentHarness } from '../../shared/agent-engine.js';
+import type { AgentRuntime } from '../../shared/agent-runtime.js';
 import type { EgressSettings } from '../../shared/egress-policy.js';
 import { authenticate, type ApiKeyRecord, type Scope } from './auth.js';
 import { sendError } from './http.js';
 import type { RateLimiter } from './rate-limit.js';
 
-type InternalRuntimeSettings = ControlPlaneStorageSettings;
+type ProjectionSettingsOverrides = {
+  providerAccount?: {
+    id: string;
+    runtimeSecretRefs: Record<string, string>;
+  };
+};
+
+type InternalRuntimeSettings = ControlPlaneStorageSettings & {
+  modelFamilies?: Record<string, string[]>;
+};
 
 export type ControlServerState = {
   activeStreams: number;
@@ -56,7 +65,7 @@ export type ControlModelDefaultsPatchResult =
   | { ok: true }
   | { ok: false; message: string };
 
-export type ControlModelPresetPreflightResult = {
+export type ControlModelProviderPreflightResult = {
   ok: boolean;
   status: 'pass' | 'fail' | 'skipped';
   message: string;
@@ -102,11 +111,15 @@ export type ControlRouteContext = {
     body: Record<string, unknown>,
     appId?: AppId,
     createdBy?: string,
+    options?: {
+      getConfiguredModelProviderIds?: () => Promise<ReadonlySet<string>>;
+    },
   ) => Promise<ControlModelDefaultsPatchResult>;
-  preflightModelPreset: (
-    preset: ModelPresetId,
+  preflightModelProvider: (
+    providerId: string,
     appId?: AppId,
-  ) => Promise<ControlModelPresetPreflightResult>;
+    chatAlias?: string,
+  ) => Promise<ControlModelProviderPreflightResult>;
   getActiveModelCredentialProviderIds: (appId: AppId) => Promise<string[]>;
   countPendingAccessRequests: (appId: AppId) => Promise<number>;
   listControlPlaneJobs: (appId: AppId) => Promise<
@@ -119,16 +132,24 @@ export type ControlRouteContext = {
   sendConversationIngressProjection?: (input: {
     conversationJid: string;
     threadId: string | null;
+    providerAccountId: string;
     text: string;
   }) => Promise<void>;
   addMessageReaction?: (
     jid: string,
     messageRef: string,
     emoji: string,
+    options?: { providerAccountId?: string },
   ) => Promise<void>;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
-  syncSettingsFromProjection: (appId: AppId) => Promise<void>;
+  syncSettingsFromProjection: (
+    appId: AppId,
+    overrides?: ProjectionSettingsOverrides,
+  ) => Promise<void>;
   getSelectedAgentHarness: (agentFolder?: string) => AgentHarness;
+  getConfiguredAgentRuntime?: (
+    agentFolder?: string,
+  ) => AgentRuntime | undefined;
 };
 
 export function authorizeControlRequest(

@@ -287,7 +287,7 @@ function invalidWorkspaceConfigBlocker(
         : '';
     if (!ctxWorkspaceKey || !ctxConversationJid) {
       return brokerUnreachableBlocker(
-        'Job execution context is invalid. It is missing a workspace key or conversation binding.',
+        'Job execution context is invalid. It is missing a workspace key or conversation install.',
       );
     }
   }
@@ -744,7 +744,8 @@ function mcpCredentialBlocker(
     requirementType: 'mcp_server',
     requirementId: serverName,
     message: formatMissingGantrySecretsMessage(secretNames),
-    nextAction: `Set ${secretNames.map((name) => `gantry credentials access set ${name}`).join(' and ')}, then resume or recheck the job.`,
+    nextAction:
+      'Add the required credentials in Credential Center, then resume or recheck the job.',
   };
 }
 

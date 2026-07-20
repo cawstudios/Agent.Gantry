@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerBrainTools } from './tools/brain.js';
 import { registerBrowserTools } from './tools/browser.js';
 import { registerFileTools } from './tools/file.js';
 import { registerMemoryTools } from './tools/memory.js';
@@ -14,13 +15,20 @@ import {
   parseEnabledGantryMcpToolNames,
 } from '../gantry-mcp-tool-surface.js';
 import {
+  callableAgentToolName,
+  parseCallableAgentManifest,
+} from '../../shared/callable-agent-manifest.js';
+import {
   ADMIN_MCP_TOOL_NAMES,
   isAdminMcpToolName,
 } from '../../shared/admin-mcp-tools.js';
 import { formatOperatorError } from '../../shared/operator-error.js';
 
+export { parseCallableAgentManifest } from '../../shared/callable-agent-manifest.js';
+
 type McpToolRegistrar = {
   tool: (name: string, ...args: unknown[]) => unknown;
+  registerTool: (name: string, ...args: unknown[]) => unknown;
 };
 
 function filteredToolRegistrar(
@@ -34,6 +42,13 @@ function filteredToolRegistrar(
       if (!enabledTools.has(name)) return undefined;
       const hasHandler = args.some((arg) => typeof arg === 'function');
       const registration = target.tool(name, ...args);
+      if (hasHandler) registeredHandlers.add(name);
+      return registration;
+    },
+    registerTool: (name, ...args) => {
+      if (!enabledTools.has(name)) return undefined;
+      const hasHandler = args.some((arg) => typeof arg === 'function');
+      const registration = target.registerTool(name, ...args);
       if (hasHandler) registeredHandlers.add(name);
       return registration;
     },
@@ -73,6 +88,22 @@ export function createGantryMcpServer(): McpServer {
     process.env.GANTRY_AGENT_ACCESS_PRESET === 'locked',
     process.env.GANTRY_ASYNC_TASK_TOOLS_ENABLED,
   );
+  const callableAgentManifest = parseCallableAgentManifest(
+    process.env.GANTRY_CALLABLE_AGENT_MANIFEST_JSON,
+    {
+      parentTaskId: process.env.GANTRY_PARENT_TASK_ID,
+      lockedPreset: process.env.GANTRY_AGENT_ACCESS_PRESET === 'locked',
+      hideAuthorityTools: process.env.GANTRY_NO_PERMISSION_TOOLS === '1',
+      asyncTaskToolsEnabled:
+        process.env.GANTRY_ASYNC_TASK_TOOLS_ENABLED === '1',
+      agentDelegationConfigured: configuredAgentDelegationEnabled(
+        process.env.GANTRY_CONFIGURED_ALLOWED_TOOLS_JSON,
+      ),
+    },
+  );
+  for (const entry of callableAgentManifest) {
+    enabledTools.add(callableAgentToolName(entry));
+  }
   const registeredHandlers = new Set<string>();
   const filteredServer = filteredToolRegistrar(
     server,
@@ -82,8 +113,9 @@ export function createGantryMcpServer(): McpServer {
 
   registerMessagingTools(filteredServer);
   registerSchedulerTools(filteredServer);
-  registerTaskLifecycleTools(filteredServer);
+  registerTaskLifecycleTools(filteredServer, callableAgentManifest);
   registerMemoryTools(filteredServer);
+  registerBrainTools(filteredServer);
   registerBrowserTools(filteredServer);
   registerFileTools(filteredServer);
   registerProfileTools(filteredServer);
@@ -92,6 +124,16 @@ export function createGantryMcpServer(): McpServer {
   assertRegisteredMcpToolHandlers({ enabledTools, registeredHandlers });
 
   return server;
+}
+
+function configuredAgentDelegationEnabled(raw: string | undefined): boolean {
+  if (!raw?.trim()) return false;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) && parsed.includes('AgentDelegation');
+  } catch {
+    return false;
+  }
 }
 
 export function effectiveEnabledMcpToolNames(

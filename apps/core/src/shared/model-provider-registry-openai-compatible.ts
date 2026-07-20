@@ -28,11 +28,11 @@ import type { ModelWorkload } from './model-catalog.js';
 //     cerebras    -> https://api.cerebras.ai/v1/chat/completions
 //     perplexity  -> https://api.perplexity.ai/chat/completions (bare path)
 //     google gen  -> https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
-//     bedrock     -> Bedrock Runtime regional /v1 chat-completions endpoint
+//     bedrock     -> Bedrock Mantle regional /v1 chat-completions endpoint
 //   assertProviderPathAllowed strips the per-provider prefix, leaving
 //   `/chat/completions`, which is allowlisted for the DeepAgents engine.
 //
-// CACHE: all but Perplexity cache automatically on the request prefix; the
+// CACHE: supported providers cache automatically on the request prefix; the
 // cached-read usage field differs by provider, so each declares its own
 // usageFields.readTokens so host-side normalizeModelUsage accounts correctly.
 // (The runner-side stream-normalizer reads the same variants directly.)
@@ -73,11 +73,13 @@ function deepAgentsExecutionRoute(
 // `openai-automatic-prompt` cacheMode (resolveModelCacheProvider -> 'openai').
 function automaticPrefixCache(
   readTokensField: string,
+  options: { promptCacheKey?: boolean } = {},
 ): ModelProviderCacheSupport {
   return {
     prompt: {
       mode: 'openai_automatic_prefix',
       automatic: true,
+      ...(options.promptCacheKey ? { promptCacheKey: true } : {}),
       requestControl: 'provider_automatic_prefix',
       ttlOptions: [],
       minimumTokenThresholds: [],
@@ -384,7 +386,7 @@ function resolveBedrockUpstream(input: {
     'AWS region',
   );
   return {
-    origin: `https://bedrock-runtime.${region}.amazonaws.com`,
+    origin: `https://bedrock-mantle.${region}.api.aws`,
     pathPrefix: BEDROCK_CHAT_PATH_PREFIX,
   };
 }
@@ -443,7 +445,9 @@ export const OPENAI_COMPATIBLE_PROVIDER_DEFINITIONS = [
     pathSegment: 'xai',
     upstreamOrigin: 'https://api.x.ai',
     upstreamPathPrefix: '/v1',
-    cacheSupport: automaticPrefixCache('prompt_tokens_details.cached_tokens'),
+    cacheSupport: automaticPrefixCache('prompt_tokens_details.cached_tokens', {
+      promptCacheKey: true,
+    }),
     memory: true,
   }),
   openAiCompatibleProvider({
@@ -462,7 +466,9 @@ export const OPENAI_COMPATIBLE_PROVIDER_DEFINITIONS = [
     pathSegment: 'fireworks',
     upstreamOrigin: 'https://api.fireworks.ai',
     upstreamPathPrefix: '/inference/v1',
-    cacheSupport: automaticPrefixCache('prompt_tokens_details.cached_tokens'),
+    cacheSupport: automaticPrefixCache('prompt_tokens_details.cached_tokens', {
+      promptCacheKey: true,
+    }),
     memory: true,
   }),
   openAiCompatibleProvider({
@@ -502,11 +508,11 @@ export const OPENAI_COMPATIBLE_PROVIDER_DEFINITIONS = [
     modelRoute: true,
     embeddingProvider: false,
     responseFamily: OA_FAMILY,
-    supportedWorkloads: CHAT_AND_JOB_WORKLOADS,
+    supportedWorkloads: [...CHAT_AND_JOB_WORKLOADS, ...MEMORY_WORKLOADS],
     credentialModes: BEDROCK_CREDENTIAL_MODES,
     gateway: {
       pathSegment: 'bedrock',
-      upstreamOrigin: 'https://bedrock-runtime.us-east-1.amazonaws.com',
+      upstreamOrigin: 'https://bedrock-mantle.us-east-1.api.aws',
       upstreamPathPrefix: BEDROCK_CHAT_PATH_PREFIX,
       upstreamResolver: resolveBedrockUpstream,
       sdkProjection: openAiCompatibleSdkProjection('bedrock'),
@@ -525,7 +531,7 @@ export const OPENAI_COMPATIBLE_PROVIDER_DEFINITIONS = [
     modelRoute: true,
     embeddingProvider: false,
     responseFamily: OA_FAMILY,
-    supportedWorkloads: CHAT_AND_JOB_WORKLOADS,
+    supportedWorkloads: [...CHAT_AND_JOB_WORKLOADS, ...MEMORY_WORKLOADS],
     credentialModes: VERTEX_CREDENTIAL_MODES,
     gateway: {
       pathSegment: 'vertex',

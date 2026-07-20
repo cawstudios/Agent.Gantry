@@ -6,6 +6,7 @@ import {
   DEFAULT_MEMORY_BACKFILL_MAX_ITEMS_PER_RUN,
   DEFAULT_MEMORY_BACKFILL_MODE,
   DEFAULT_MEMORY_BACKFILL_PROVIDER_BATCH_MIN_ITEMS,
+  DEFAULT_MEMORY_DREAMING_ALERTS,
   DEFAULT_MEMORY_DREAMING_CRON,
   DEFAULT_MEMORY_EMBED_BATCH_SIZE,
   DEFAULT_MEMORY_EXTRACTOR_MAX_FACTS,
@@ -13,7 +14,7 @@ import {
   DEFAULT_MEMORY_MAINTENANCE_MAX_PENDING,
   DEFAULT_OPENAI_DAILY_EMBED_LIMIT,
   getDefaultMemoryBackfillSettings,
-  getPresetManagedMemoryDefaults,
+  getProviderManagedMemoryDefaults,
 } from './runtime-settings-defaults.js';
 import {
   parseBooleanValue,
@@ -28,6 +29,7 @@ import type {
   RuntimeMemoryLlmModels,
   RuntimeMemorySettings,
 } from './runtime-settings-types.js';
+import { listEmbeddingModelProviders } from '../../shared/model-provider-registry.js';
 
 const BACKFILL_MODES: ReadonlySet<MemoryBackfillMode> = new Set([
   'auto',
@@ -144,6 +146,15 @@ function parseEmbeddingProvider(
       `${pathPrefix} must be a lowercase provider id such as disabled or openai`,
     );
   }
+  const supported = new Set([
+    'disabled',
+    ...listEmbeddingModelProviders().map((provider) => provider.id),
+  ]);
+  if (!supported.has(value)) {
+    throw new Error(
+      `${pathPrefix} must be one of ${[...supported].sort().join(', ')}.`,
+    );
+  }
   return value;
 }
 
@@ -151,7 +162,7 @@ function parseMemoryLlmModels(
   raw: unknown,
   pathPrefix: string,
 ): RuntimeMemoryLlmModels {
-  const defaults = getPresetManagedMemoryDefaults();
+  const defaults = getProviderManagedMemoryDefaults();
   if (raw === undefined) return defaults;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error(`${pathPrefix} must be a mapping`);
@@ -200,6 +211,7 @@ export function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
       dreaming: {
         enabled: false,
         cron: DEFAULT_MEMORY_DREAMING_CRON,
+        alerts: DEFAULT_MEMORY_DREAMING_ALERTS,
         embeddings: {
           enabled: false,
           provider: 'disabled',
@@ -207,7 +219,7 @@ export function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
         },
       },
       llm: {
-        models: getPresetManagedMemoryDefaults(),
+        models: getProviderManagedMemoryDefaults(),
         extractorMaxFacts: DEFAULT_MEMORY_EXTRACTOR_MAX_FACTS,
         extractorMinConfidence: DEFAULT_MEMORY_EXTRACTOR_MIN_CONFIDENCE,
       },
@@ -301,11 +313,11 @@ export function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
       );
     }
   }
-  const dreamingKeys = new Set(['enabled', 'cron', 'embeddings']);
+  const dreamingKeys = new Set(['enabled', 'cron', 'alerts', 'embeddings']);
   for (const key of Object.keys(dreamingMap)) {
     if (!dreamingKeys.has(key)) {
       throw new Error(
-        `memory.dreaming.${key} is not supported. Use memory.dreaming.enabled, cron, or embeddings.`,
+        `memory.dreaming.${key} is not supported. Use memory.dreaming.enabled, cron, alerts, or embeddings.`,
       );
     }
   }
@@ -392,6 +404,11 @@ export function parseMemorySettings(raw: unknown): RuntimeMemorySettings {
         dreamingMap.cron,
         'memory.dreaming.cron',
         DEFAULT_MEMORY_DREAMING_CRON,
+      ),
+      alerts: parseBooleanValue(
+        dreamingMap.alerts,
+        'memory.dreaming.alerts',
+        DEFAULT_MEMORY_DREAMING_ALERTS,
       ),
       embeddings: {
         enabled: dreamingEmbeddingsEnabled,

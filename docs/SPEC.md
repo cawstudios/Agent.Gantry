@@ -335,7 +335,7 @@ setRegisteredGroup('telegram:dev-team', {
 });
 ```
 
-Folder names follow the convention `{channel}_{group-name}` (e.g., `slack_engineering`, `telegram_dev-team`). Trigger behavior is stored on each conversation binding as `requiresTrigger`.
+Folder names follow the convention `{channel}_{group-name}` (e.g., `slack_engineering`, `telegram_dev-team`). Conversation install metadata owns the conversation-to-agent setup state.
 
 Additional mounts appear under `/workspace/extra/` in the runtime workspace.
 
@@ -352,13 +352,16 @@ Job model precedence is:
 3. `agent.default_model`
 4. system default `opus`
 
-Memory model aliases live under `memory.llm.models` and are preset-managed.
-Provider presets set chat and memory defaults together: `anthropic` uses chat
-`opus`, job defaults inherit chat, and memory uses
+Memory LLM aliases live under `memory.llm.models` and are preset-managed.
+Provider presets set chat and memory LLM defaults together: `anthropic` uses
+chat `opus`, job defaults inherit chat, and memory LLM tasks use
 `haiku`/`sonnet`/`sonnet`; `openrouter` uses chat `kimi`, job defaults inherit
-chat, and memory uses `kimi` for extraction, dreaming, and consolidation. The
-OpenRouter catalog also includes selectable `glm-5.2` without changing preset
-defaults.
+chat, and memory LLM tasks use `kimi` for extraction, dreaming, and
+consolidation. Memory embeddings are separate from these LLM defaults; today
+they support only `openai` or `disabled`. The OpenRouter catalog also includes
+selectable `glm-5.2` without changing preset defaults, and the Anthropic
+catalog also includes selectable `fable` (Fable 5, runner model
+`claude-fable-5`) for chat and job workloads without changing preset defaults.
 
 Use `/model` in a group session to switch the live model (`/model`, `/model <alias>`, `/model default`). Use `/models` to list supported aliases and `/status` to inspect the current model, context window usage percentage, cache hit percentage, token usage, cache read/write tokens, cache state, top context contributors when available, and cost when the provider reports it.
 
@@ -594,7 +597,7 @@ continuation state.
 | `model_access.gateway.bind_host`      | `127.0.0.1`              | Loopback bind host for Gantry Model Gateway                     |
 | `memory.enabled`                      | `true`                   | Enables durable memory                                          |
 | `memory.embeddings.enabled`           | `false`                  | Optional embedding toggle                                       |
-| `memory.embeddings.provider`          | `disabled`               | Embedding provider (`disabled` or `openai`)                     |
+| `memory.embeddings.provider`          | `disabled`               | Embedding provider (`disabled` or `openai`; OpenAI only today)  |
 | `memory.embeddings.model`             | `text-embedding-3-small` | Embedding model                                                 |
 | `memory.embeddings.batch_size`        | `16`                     | Texts per embedding API call                                    |
 | `memory.embeddings.daily_limit`       | `500`                    | Daily embedding API call limit                                  |
@@ -602,6 +605,7 @@ continuation state.
 | `memory.llm.extractor_min_confidence` | `0.6`                    | Min confidence for extracted candidates                         |
 | `memory.dreaming.enabled`             | `false`                  | Enables scheduled dreaming maintenance                          |
 | `memory.dreaming.cron`                | `15 3 * * *`             | Dreaming maintenance schedule                                   |
+| `memory.dreaming.alerts`              | `false`                  | Send alerts for per-conversation memory dreaming jobs only      |
 | `memory.maintenance.max_pending`      | `5000`                   | Max pending memory maintenance items per pass                   |
 
 ---
@@ -681,6 +685,10 @@ Sessions enable conversation continuity from Gantry-owned Postgres state.
 12. Runtime advances cursor and stores Gantry-owned run/session events in Postgres
 ```
 
+Agents configured with `agents.<id>.runtime: inline` in `settings.yaml` run
+the turn inside the host process instead of spawning the child runner in step
+8; the default `worker` runtime uses the child-runner flow above.
+
 ### Runtime Event Observability
 
 Gantry stores runtime events as read-only evidence for SDK clients, webhooks,
@@ -688,17 +696,30 @@ status views, and audits. Public run event history projects these records from
 `GET /v1/runs/:runId/events`; startup diagnostics use public run event
 `type: 'diagnostic'` and retain the source runtime event type in metadata.
 
-Current observable runtime event families include:
+Current observable runtime event families include (the canonical list is
+`apps/core/src/domain/events/runtime-event-types.ts`):
 
-- `task.started`, `task.progress`, and `task.updated` for provider-neutral task
-  lifecycle observations. Lifecycle payload text is bounded before persistence
-  and excludes raw prompts, output paths, provider handles, credentials, and
-  stack traces.
+- `session.*`, `conversation.*`, `job.*`, and `run.*` lifecycle and delivery
+  records (for example `run.started`, `run.completed`, `job.run.failed`, and
+  `session.compaction.*`).
+- `task.started`, `task.progress`, `task.updated`, and `task.notification` for
+  provider-neutral task lifecycle observations. Lifecycle payload text is
+  bounded before persistence and excludes raw prompts, output paths, provider
+  handles, credentials, and stack traces.
+- `permission.*` decision evidence: `permission.requested`,
+  `permission.allowed`, `permission.denied`, `permission.cancelled`,
+  `permission.persisted`, `permission.resumed`, `permission.final_outcome`,
+  `permission.yolo_denylist_hit`, and `permission.classifier_decision` for
+  auto-permission classifier verdicts.
 - `mcp.tool_activity` for MCP proxy attempt, denial, success, and failure
   evidence. Arguments and errors are summarized/redacted, and raw MCP tool
   result values are not persisted in the activity event.
 - `run.startup_diagnostic` for count/timing startup diagnostics from host or
   runner setup.
+- `credential.*`, `profile.file.*`, `egress.connect`, `sandbox.blocked`,
+  `model.usage` (aggregated by `GET /v1/usage`), `interaction.pending`,
+  `proactive.surfacing.outcome`, and `webhook.test` for credential lifecycle,
+  profile access, egress, sandbox, usage accounting, and webhook evidence.
 
 Runtime events are observable-only. They must not decide permissions, selected
 capabilities, MCP activation, model routing, channel delivery, or worker

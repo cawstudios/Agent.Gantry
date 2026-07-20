@@ -18,16 +18,22 @@ import {
 import { settingsFilePath } from './settings/runtime-home.js';
 import { DEFAULT_AGENT_NAME } from './settings/runtime-settings-defaults.js';
 import type { RuntimeDeploymentMode } from '../shared/runtime-deployment-mode.js';
-import type { RuntimeSettings } from './settings/runtime-settings-types.js';
+import type {
+  AgentRuntime,
+  RuntimeSettings,
+} from './settings/runtime-settings-types.js';
+import { resolveConfiguredAgentRuntime } from './settings/runtime-settings-agent-runtime.js';
 import { isValidTimezone } from '../shared/timezone.js';
 import { resolvePermissionApprovalTimeoutMs } from '../shared/permission-timeout.js';
 import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
+import { resolveEffectivePermissionMode } from '../shared/permission-mode.js';
 import {
   buildTriggerPattern,
   defaultTriggerForAgentName,
 } from '../shared/trigger-pattern.js';
 export * from './memory.js';
 export { SettingsDesiredStateService } from './settings/desired-state-service.js';
+export { createGroupJoinOnboardingCoordinator } from './settings/group-join-onboarding.js';
 export { configureDesiredSettingsStorageProvider } from './settings/runtime-settings.js';
 export {
   applyRuntimeSettingsDesiredState,
@@ -41,6 +47,7 @@ export {
 export {
   resolveRuntimeBootstrapStorageConfigFromEnv,
   resolveRuntimeStorageConfig,
+  resolveRuntimeStorageConfigFromSettings,
 } from './settings/storage.js';
 export type { RuntimeSettings } from './settings/runtime-settings-types.js';
 export type ControlEnvKey =
@@ -56,6 +63,11 @@ export type ControlEnvKey =
   | 'SECRET_ENCRYPTION_KEY'
   | 'SECRET_ENCRYPTION_KEYRING_JSON';
 export function getControlEnvValue(key: ControlEnvKey): string {
+  return envValueDynamic(key);
+}
+// Registered runtime secrets (source-classification.ts) read from process env
+// first, then GANTRY_HOME/.env — managed services pass a minimal process env.
+export function readRuntimeSecretEnv(key: string): string {
   return envValueDynamic(key);
 }
 const GANTRY_HOME_RAW =
@@ -123,10 +135,13 @@ function getPublicConfiguredAgents(settings: RuntimeSettings) {
         folder: agent.folder,
         persona: agent.persona,
         relationshipMode: agent.relationshipMode,
+        runtime: resolveConfiguredAgentRuntime(agent),
         model: agent.model,
         agentHarness: agent.agentHarness,
+        permissionMode: agent.permissionMode,
         oneTimeJobDefaultModel: agent.oneTimeJobDefaultModel,
         recurringJobDefaultModel: agent.recurringJobDefaultModel,
+        delegates: agent.delegates,
         bindings: agent.bindings,
         sources: agent.sources,
         capabilities: agent.capabilities,
@@ -135,6 +150,19 @@ function getPublicConfiguredAgents(settings: RuntimeSettings) {
         },
       },
     ]),
+  );
+}
+
+function getPublicConfiguredConversations(settings: RuntimeSettings) {
+  return Object.fromEntries(
+    Object.entries(settings.conversations).map(([conversationId, entry]) => {
+      const { providerConnection: _providerConnection, ...conversation } =
+        entry;
+      return [
+        conversationId,
+        { ...conversation, brainHarvest: conversation.brainHarvest ?? false },
+      ];
+    }),
   );
 }
 
@@ -151,8 +179,9 @@ export function getPublicRuntimeSettings() {
     },
     agents: getPublicConfiguredAgents(settings),
     providers: settings.providers,
-    providerConnections: settings.providerConnections,
-    conversations: settings.conversations,
+    providerAccounts: settings.providerAccounts,
+    conversations: getPublicConfiguredConversations(settings),
+    conversationInstalls: settings.conversationInstalls,
     bindings: settings.bindings,
     modelAliases: settings.modelAliases,
     memory: {
@@ -179,6 +208,7 @@ export function getPublicRuntimeSettings() {
     permissions: {
       yoloMode: effectiveYoloModeSettings(settings.permissions.yoloMode),
       egress: settings.permissions.egress,
+      autoMode: settings.permissions.autoMode,
     },
   };
 }
@@ -381,12 +411,16 @@ export function patchRuntimeModelDefaults(
   body: Record<string, unknown>,
   appId?: AppId,
   createdBy?: string,
+  options?: {
+    getConfiguredModelProviderIds?: () => Promise<ReadonlySet<string>>;
+  },
 ) {
   return updateRuntimeModelDefaults({
     runtimeHome: GANTRY_HOME,
     body,
     appId,
     createdBy,
+    getConfiguredModelProviderIds: options?.getConfiguredModelProviderIds,
   });
 }
 export function getEffectiveModelConfig(
@@ -417,6 +451,28 @@ export function getSelectedAgentHarness(agentFolder?: string): AgentHarness {
     settings.agent.agentHarness ??
     AUTO_AGENT_HARNESS
   );
+}
+
+export function getSelectedAgentRuntime(agentFolder?: string): AgentRuntime {
+  return getConfiguredAgentRuntime(agentFolder) ?? 'worker';
+}
+
+export function getSelectedAgentPermissionMode(agentFolder?: string) {
+  const agent = agentFolder
+    ? getRuntimeSettingsForConfig().agents[agentFolder]
+    : undefined;
+  return resolveEffectivePermissionMode(undefined, agent?.permissionMode);
+}
+
+export function getConfiguredAgentRuntime(
+  agentFolder?: string,
+): AgentRuntime | undefined {
+  const settings = getRuntimeSettingsForConfig();
+  const configuredAgent = agentFolder
+    ? settings.agents[agentFolder]
+    : undefined;
+  if (!configuredAgent) return undefined;
+  return resolveConfiguredAgentRuntime(configuredAgent);
 }
 
 export const MESSAGE_FETCH_PAGE_SIZE = Math.max(

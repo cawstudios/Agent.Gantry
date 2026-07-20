@@ -25,11 +25,14 @@ export const RuntimeSettingsConfiguredAgentBindingSchema = z
   .object({
     jid: z.string().trim().min(1),
     provider: z.string().trim().min(1).optional(),
+    providerAccountId: z.string().trim().min(1).optional(),
     name: z.string().trim().min(1).optional(),
+    threadId: z.string().trim().min(1).optional(),
     trigger: z.string().trim().min(1),
     addedAt: z.string().trim().min(1),
     requiresTrigger: z.boolean(),
     model: z.string().optional(),
+    permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
   })
   .strict();
 
@@ -63,16 +66,83 @@ export const RuntimeSettingsConfiguredAgentAccessSchema = z
   })
   .strict();
 
+const RuntimeSettingsConfiguredToolRuleWhenSchema = z
+  .object({
+    arg: z
+      .string()
+      .trim()
+      .min(1)
+      .regex(/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/, 'Must be a dot path'),
+    matches: z
+      .string()
+      .trim()
+      .min(1)
+      .refine((value) => {
+        try {
+          new RegExp(value);
+          return true;
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+          return false;
+        }
+      }, 'Must be a valid regular expression'),
+  })
+  .strict();
+
+export const RuntimeSettingsConfiguredToolRuleSchema = z.discriminatedUnion(
+  'action',
+  [
+    z
+      .object({
+        tool: z.string().trim().min(1),
+        when: RuntimeSettingsConfiguredToolRuleWhenSchema.optional(),
+        action: z.literal('block'),
+        reason: z.string().trim().min(1),
+      })
+      .strict(),
+    z
+      .object({
+        tool: z.string().trim().min(1),
+        action: z.literal('require_prior'),
+        prior: z.string().trim().min(1),
+        reason: z.string().trim().min(1),
+      })
+      .strict(),
+  ],
+);
+export type RuntimeSettingsConfiguredToolRule = z.infer<
+  typeof RuntimeSettingsConfiguredToolRuleSchema
+>;
+
 export const RuntimeSettingsConfiguredAgentSchema = z
   .object({
     name: z.string().trim().min(1),
     folder: z.string().trim().min(1),
+    delegates: z.array(z.string().trim().min(1)),
     persona: AgentPersonaSchema.optional(),
     relationshipMode: AgentRelationshipModeSchema.optional(),
     model: z.string().optional(),
     agentHarness: AgentHarnessSchema.optional(),
+    permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
+    runtime: z.enum(['worker', 'inline']).optional(),
+    maxTurns: z.number().int().positive().optional(),
+    maxRunTokens: z.number().int().positive().optional(),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+    thinking: z
+      .discriminatedUnion('mode', [
+        z.object({ mode: z.literal('off') }).strict(),
+        z
+          .object({
+            mode: z.literal('on'),
+            budgetTokens: z.number().int().positive().optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
     oneTimeJobDefaultModel: z.string().optional(),
     recurringJobDefaultModel: z.string().optional(),
+    toolRules: z.array(RuntimeSettingsConfiguredToolRuleSchema).optional(),
     bindings: z.record(z.string(), RuntimeSettingsConfiguredAgentBindingSchema),
     sources: RuntimeSettingsConfiguredAgentSourcesSchema,
     capabilities: z.array(RuntimeSettingsConfiguredAgentCapabilitySchema),
@@ -83,21 +153,24 @@ export const RuntimeSettingsConfiguredAgentSchema = z
 export const RuntimeSettingsProviderSchema = z
   .object({
     enabled: z.boolean(),
-    defaultConnection: z.string().optional(),
   })
   .strict();
 
-export const RuntimeSettingsProviderConnectionSchema = z
+export const RuntimeSettingsProviderAccountSchema = z
   .object({
+    agentId: z.string().trim().min(1),
     provider: z.string().trim().min(1),
     label: z.string(),
+    status: z.enum(['active', 'disabled']).optional(),
     runtimeSecretRefs: z.record(z.string(), z.string()),
+    externalIdentityRef: z.record(z.string(), z.string()).optional(),
+    config: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
 export const RuntimeSettingsConversationSchema = z
   .object({
-    providerConnection: z.string().trim().min(1),
+    providerAccount: z.string().trim().min(1),
     externalId: z.string().trim().min(1),
     kind: z.enum([
       'dm',
@@ -109,6 +182,7 @@ export const RuntimeSettingsConversationSchema = z
       'web',
     ]),
     displayName: z.string(),
+    brainHarvest: z.boolean(),
     senderPolicy: z
       .object({
         allow: z.union([z.literal('*'), z.array(z.string().trim().min(1))]),
@@ -116,18 +190,39 @@ export const RuntimeSettingsConversationSchema = z
       })
       .strict(),
     controlApprovers: z.array(z.string().trim().min(1)),
+    installedAgents: z.record(
+      z.string(),
+      z
+        .object({
+          agentId: z.string().trim().min(1),
+          providerAccountId: z.string().trim().min(1),
+          threadId: z.string().trim().min(1).optional(),
+          status: z.enum(['active', 'disabled']),
+          addedAt: z.string().trim().min(1),
+          memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
+          trigger: z.string().optional(),
+          requiresTrigger: z.boolean().optional(),
+          model: z.string().optional(),
+          permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
+        })
+        .strict(),
+    ),
   })
   .strict();
 
 export const RuntimeSettingsBindingSchema = z
   .object({
     agent: z.string().trim().min(1),
+    providerAccountId: z.string().trim().min(1).optional(),
+    installKey: z.string().trim().min(1).optional(),
     conversation: z.string().trim().min(1),
+    threadId: z.string().trim().min(1).optional(),
     trigger: z.string().trim().min(1),
     addedAt: z.string().trim().min(1),
     requiresTrigger: z.boolean(),
-    memoryScope: z.enum(['conversation', 'user', 'agent']),
+    memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
     model: z.string().optional(),
+    permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
   })
   .strict();
 
@@ -149,12 +244,31 @@ export const RuntimeSettingsPublicSchema = z
       .strict(),
     agents: z.record(z.string(), RuntimeSettingsConfiguredAgentSchema),
     providers: z.record(z.string(), RuntimeSettingsProviderSchema),
-    providerConnections: z.record(
+    providerAccounts: z.record(
       z.string(),
-      RuntimeSettingsProviderConnectionSchema,
+      RuntimeSettingsProviderAccountSchema,
     ),
     conversations: z.record(z.string(), RuntimeSettingsConversationSchema),
     bindings: z.record(z.string(), RuntimeSettingsBindingSchema),
+    conversationInstalls: z.record(
+      z.string(),
+      z
+        .object({
+          agentId: z.string().trim().min(1),
+          providerAccountId: z.string().trim().min(1),
+          conversationId: z.string().trim().min(1),
+          threadId: z.string().trim().min(1).optional(),
+          status: z.enum(['active', 'disabled']),
+          addedAt: z.string().trim().min(1),
+          memoryScope: z.enum(['conversation', 'user', 'agent', 'app']),
+          trigger: z.string().optional(),
+          requiresTrigger: z.boolean().optional(),
+          model: z.string().optional(),
+          permissionMode: z.enum(['ask', 'auto', 'auto_strict']).optional(),
+        })
+        .strict(),
+    ),
+    modelAliases: z.record(z.string(), z.unknown()).optional(),
     memory: z
       .object({
         enabled: z.boolean(),
@@ -230,6 +344,11 @@ export const RuntimeSettingsPublicSchema = z
         egress: z
           .object({
             denylist: z.array(EgressDenylistPatternSchema),
+          })
+          .strict(),
+        autoMode: z
+          .object({
+            model: z.string().trim().min(1).optional(),
           })
           .strict(),
       })

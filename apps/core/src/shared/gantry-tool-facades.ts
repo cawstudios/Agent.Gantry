@@ -16,6 +16,28 @@ export type GantryFacadeExactToolName =
 const GANTRY_FACADE_EXACT_TOOL_NAME_SET = new Set<string>(
   GANTRY_FACADE_EXACT_TOOL_NAMES,
 );
+const GANTRY_DELEGATION_TOOL_NAME_SET = new Set([
+  'delegate_task',
+  'task_message',
+]);
+
+export function canonicalGantryToolRuleName(
+  toolName: string,
+  context?: { callableAgentToolNames?: ReadonlySet<string> },
+): string {
+  const gantryNamespaced = toolName.startsWith('mcp__gantry__');
+  const canonicalToolName = gantryNamespaced
+    ? toolName.slice('mcp__gantry__'.length)
+    : toolName;
+  const manifestCallable =
+    context?.callableAgentToolNames?.has(toolName) === true ||
+    context?.callableAgentToolNames?.has(canonicalToolName) === true;
+  return GANTRY_DELEGATION_TOOL_NAME_SET.has(canonicalToolName) ||
+    (canonicalToolName.startsWith('delegate_to_') &&
+      (gantryNamespaced || manifestCallable))
+    ? 'AgentDelegation'
+    : canonicalToolName;
+}
 
 const PROVIDER_NATIVE_TOOL_REPLACEMENTS = new Map<string, string>([
   ['WebFetch', 'WebRead'],
@@ -28,11 +50,6 @@ const PROVIDER_NATIVE_TOOL_REPLACEMENTS = new Map<string, string>([
   ['Bash', 'RunCommand(<argv pattern>)'],
   ['Agent', 'AgentDelegation'],
   ['AskUserQuestion', 'mcp__gantry__ask_user_question'],
-  ['Task', 'AgentDelegation'],
-  ['TaskCreate', 'AgentDelegation'],
-  ['TaskGet', 'AgentDelegation'],
-  ['TaskList', 'AgentDelegation'],
-  ['TaskUpdate', 'AgentDelegation'],
   ['TodoWrite', 'mcp__gantry__todo_update'],
 ]);
 

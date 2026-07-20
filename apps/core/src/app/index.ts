@@ -3,6 +3,7 @@ import {
   logger,
 } from '../infrastructure/logging/logger.js';
 import { createChannelWiring } from './bootstrap/channel-wiring.js';
+import { createRuntimeBrainChannelHarvestTap } from '../brain/brain-runtime.js';
 import { getDefaultRuntimeApp } from './bootstrap/runtime-app.js';
 import {
   startRuntimeServices,
@@ -28,6 +29,7 @@ import { stopOutboundDeliveryRecoveryLoop } from '../jobs/outbound-delivery-reco
 import { publishBrowserJobActivityEvent } from '../jobs/browser-activity-events.js';
 import {
   GANTRY_HOME,
+  createGroupJoinOnboardingCoordinator,
   getDeploymentMode,
   getRuntimeQueueConfig,
   loadRuntimeSettings,
@@ -92,6 +94,12 @@ export async function startGantryRuntime(
     },
   });
   const channelWiring = createChannelWiring(app, {
+    brainHarvestTap: createRuntimeBrainChannelHarvestTap(),
+    groupJoinOnboarding: createGroupJoinOnboardingCoordinator({
+      runtimeHome: GANTRY_HOME,
+      repository: () => getRuntimeStorage().repositories.groupJoinOnboarding,
+      reloadRuntimeState: () => app.loadState(),
+    }),
     publishRuntimeEvent: async (event) => {
       await getRuntimeEventExchange().publish(event);
     },
@@ -119,12 +127,13 @@ export async function startGantryRuntime(
     isControlApproverAllowed: channelWiring.isControlApproverAllowed,
   });
 
-  let { runtimeSettings } = await runStartup(app, {
-    settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
-    validateSettingsImportPreflight: options.skipPreflight
-      ? () => ({ ok: true })
-      : validateRuntimePreflight,
-  });
+  let { runtimeSettings, closeTracing, initTracingFromSettings } =
+    await runStartup(app, {
+      settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
+      validateSettingsImportPreflight: options.skipPreflight
+        ? () => ({ ok: true })
+        : validateRuntimePreflight,
+    });
   const storage = getRuntimeStorage();
   channelWiring.setRuntimeSecrets(
     createRepositoryRuntimeSecretProvider({
@@ -157,6 +166,12 @@ export async function startGantryRuntime(
     if (!validation.ok && validation.failure) {
       throw new Error(formatRuntimePreflightFailure(validation.failure));
     }
+  }
+  // Settings are final on every path here (workstation revision authority, or
+  // fleet after prepareFleetSettings). A fleet worker with no revision yet
+  // skips init: tracing must never configure from a stale local mirror.
+  if (fleetSettingsLoaded) {
+    initTracingFromSettings(runtimeSettings);
   }
   // P2 guard: a fleet worker with no settings revision must not claim
   // scheduled jobs under bundled default settings (/readyz red only protects
@@ -222,6 +237,7 @@ export async function startGantryRuntime(
     },
     closeLiveTurnAuthority: shutdownLiveTurnAuthority,
     closeSettingsWatcher: settingsWatcher.close,
+    closeTracing,
     closeLiveRecoveryCoordinatorLease: async () => {
       await liveRecoveryCoordinatorLeaseManager.stop();
     },
@@ -271,9 +287,11 @@ export async function startGantryRuntime(
       {
         mcpHostnameLookup,
         opsRepository: storage.ops,
+        getAgentRepository: () => storage.repositories.agents,
         getToolRepository: () => storage.repositories.tools,
         getSkillRepository: () => storage.repositories.skills,
         getAsyncTaskRepository: () => storage.repositories.asyncTasks,
+        getFileArtifactStore: () => storage.fileArtifacts,
         getMcpServerRepository: () => storage.repositories.mcpServers,
         getCapabilitySecretRepository: () =>
           storage.repositories.capabilitySecrets,
@@ -281,6 +299,8 @@ export async function startGantryRuntime(
           (await loadApprovedCommandModule()).runApprovedSandboxCommand(input),
         getSkillArtifactStore: getRuntimeSkillArtifactStore,
         getPermissionRepository: () => storage.repositories.permissions,
+        getPermissionPromotionRepository: () =>
+          storage.repositories.permissionPromotions,
         settingsRepositories: storage.repositories,
         getOutboundDeliveryRepository: () =>
           storage.repositories.outboundDeliveries,
@@ -295,6 +315,8 @@ export async function startGantryRuntime(
         publishRuntimeEvent: async (event) => {
           await getRuntimeEventExchange().publish(event);
         },
+        subscribeRuntimeEvents: (filter) =>
+          getRuntimeEventExchange().subscribe(filter),
         callBrowserTool: async (input) =>
           (await loadBrowserToolModule()).callBrowserTool(input),
         publishBrowserJobActivity: async (input) => {
@@ -342,6 +364,17 @@ export async function startGantryRuntime(
         capabilityReconciliation: roleCaps.workerRegistration,
         settingsLoaded: fleetSettingsLoaded,
         onSettingsReady: async () => {
+          // Tracing was skipped at boot (no revision yet); initialize from
+          // the first authoritative revision BEFORE the scheduler guard —
+          // control/live-worker roles never hold a scheduler start.
+          try {
+            initTracingFromSettings(loadRuntimeSettings(GANTRY_HOME));
+          } catch (err) {
+            logger.warn(
+              { err },
+              'Failed to initialize tracing on first settings revision',
+            );
+          }
           const start = heldSchedulerStart;
           heldSchedulerStart = undefined;
           if (!start) return;
@@ -386,12 +419,15 @@ export async function startGantryRuntime(
           durability: 'required',
           throwOnMissing: true,
           messageOptions: input.threadId
-            ? { threadId: input.threadId }
-            : undefined,
+            ? {
+                threadId: input.threadId,
+                providerAccountId: input.providerAccountId,
+              }
+            : { providerAccountId: input.providerAccountId },
         });
       },
-      addMessageReaction: (jid, messageRef, emoji) =>
-        channelWiring.addReaction(jid, messageRef, emoji),
+      addMessageReaction: (jid, messageRef, emoji, options) =>
+        channelWiring.addReaction(jid, messageRef, emoji, options),
     });
   } catch (err) {
     await liveRecoveryCoordinatorLeaseManager.stop();

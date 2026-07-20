@@ -37,6 +37,7 @@ export interface JobExecutionContextInput {
 export interface JobNotificationRouteInput {
   conversationJid: string;
   threadId: string | null;
+  providerAccountId?: string | null;
   label: string;
 }
 
@@ -199,6 +200,7 @@ export interface ConversationBinding {
 export interface SchedulerJobAccess {
   sourceAgentFolder: string;
   originConversationJid: string;
+  originProviderAccountId?: string | null;
   conversationBindings: Record<string, ConversationBinding>;
   sourceConversationJids?: string[];
   authThreadId?: string;

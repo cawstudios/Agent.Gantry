@@ -1,23 +1,41 @@
 import fs from 'node:fs';
 
 import { MultiServerMCPClient } from '@langchain/mcp-adapters';
-import type { StructuredToolInterface } from '@langchain/core/tools';
+import { tool, type StructuredToolInterface } from '@langchain/core/tools';
 
 import { buildGantryMcpProjection } from './gantry-mcp-env.js';
 import {
+  canonicalThirdPartyMcpToolName,
   wrapThirdPartyMcpToolsWithGate,
   type ThirdPartyMcpGateConfig,
 } from './third-party-mcp-gate.js';
 import {
   createGantryShellTool,
   GANTRY_SHELL_TOOL_NAME,
+  SHELL_POLICY_TOOL_NAME,
 } from './gantry-shell-tool.js';
 import {
   createGantryFacadeTools,
   DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES,
+  gantryFacadePolicyToolRequest,
+  type DeepAgentsFacadeToolName,
 } from './gantry-facade-tools.js';
 import { isHostPrivateBrowserMcpServerName } from '../../../../shared/agent-tool-references.js';
-import { isRunCommandToolRule } from '../../../../shared/gantry-tool-facades.js';
+import {
+  canonicalGantryToolRuleName,
+  isRunCommandToolRule,
+} from '../../../../shared/gantry-tool-facades.js';
+import {
+  evaluateDeclarativeToolRules,
+  type DeclarativeToolRule,
+  type DeclarativeToolRuleDenial,
+  type RunScopedToolSuccessLedger,
+} from '../../../../runner/tool-gate-core.js';
+import {
+  CALLABLE_AGENT_SYNC_WAIT_MAX_MS,
+  callableAgentToolName,
+  type CallableAgentToolManifestEntry,
+} from '../../../../application/core-tools/callable-agent-tools.js';
 
 // Connects the DeepAgents runner to Gantry-owned MCP authority and converts it
 // to LangChain tools. DeepAgents has no autonomous MCP — we fully control the
@@ -39,6 +57,8 @@ import { isRunCommandToolRule } from '../../../../shared/gantry-tool-facades.js'
 // cannot connect rather than silently dropping authority.
 
 const GANTRY_SERVER_NAME = 'gantry';
+const CALLABLE_AGENT_MCP_TOOL_TIMEOUT_MS =
+  CALLABLE_AGENT_SYNC_WAIT_MAX_MS + 20_000;
 
 export interface ExternalServerConfig {
   type?: 'stdio' | 'http' | 'sse';
@@ -57,8 +77,15 @@ export interface ConnectedMcpTools {
 
 export interface ConnectGantryMcpInput {
   configuredAllowedTools: readonly string[];
+  toolRules?: readonly DeclarativeToolRule[];
+  toolSuccessLedger?: RunScopedToolSuccessLedger;
+  onToolRuleDenial?: (
+    toolName: string,
+    denial: DeclarativeToolRuleDenial,
+  ) => void;
   toolNetworkEnv?: Record<string, string>;
   hideAuthorityTools: boolean;
+  callableAgentManifest?: readonly CallableAgentToolManifestEntry[];
   gate: Omit<ThirdPartyMcpGateConfig, 'configuredAllowedTools'>;
   // Run-cancellation signal threaded into the gated shell tool so a command in
   // flight is killed when the live-turn close sentinel aborts the run.
@@ -83,6 +110,7 @@ export async function connectGantryAndThirdPartyMcpTools(
     hideAuthorityTools: input.hideAuthorityTools,
     memoryBlock: input.gate.memoryBlock,
     processEnv: process.env,
+    callableAgentManifest: input.callableAgentManifest,
   });
 
   const externalServers = readExternalMcpServers();
@@ -120,9 +148,16 @@ export async function connectGantryAndThirdPartyMcpTools(
   }
 
   const selectedGantrySet = new Set(projection.selectedToolNames);
-  const gantryTools = (serverTools[GANTRY_SERVER_NAME] ?? []).filter((tool) =>
-    selectedGantrySet.has(tool.name),
+  const callableAgentToolNames = new Set(
+    (input.callableAgentManifest ?? []).map(callableAgentToolName),
   );
+  const gantryTools = (serverTools[GANTRY_SERVER_NAME] ?? [])
+    .filter((tool) => selectedGantrySet.has(tool.name))
+    .map((tool) =>
+      callableAgentToolNames.has(tool.name)
+        ? withCallableAgentTimeout(tool)
+        : tool,
+    );
   const delegateTaskTool = gantryTools.find(
     (tool) => tool.name === 'delegate_task',
   );
@@ -146,29 +181,138 @@ export async function connectGantryAndThirdPartyMcpTools(
     ...DEEPAGENTS_GANTRY_FACADE_TOOL_NAMES,
   ]);
 
-  const thirdPartyTools: StructuredToolInterface[] = [];
+  const thirdPartyToolEntries: DeclarativeToolEntry[] = [];
   for (const [name, tools] of Object.entries(serverTools)) {
     if (name === GANTRY_SERVER_NAME) continue;
-    thirdPartyTools.push(
-      ...dropCollidingThirdPartyTools(name, tools, reservedToolNames),
+    const gated = wrapThirdPartyMcpToolsWithGate(
+      dropCollidingThirdPartyTools(name, tools, reservedToolNames),
+      name,
+      {
+        ...input.gate,
+        configuredAllowedTools: input.configuredAllowedTools,
+      },
+    );
+    thirdPartyToolEntries.push(
+      ...gated.map((tool) => ({
+        tool,
+        canonicalName: () => canonicalThirdPartyMcpToolName(name, tool.name),
+      })),
     );
   }
-  const gatedThirdPartyTools = wrapThirdPartyMcpToolsWithGate(thirdPartyTools, {
-    ...input.gate,
-    configuredAllowedTools: input.configuredAllowedTools,
-  });
 
   const shellTools = projectGantryShellTool(input);
 
+  const toolEntries: DeclarativeToolEntry[] = [
+    ...gantryTools.map((tool) => ({
+      tool,
+      canonicalName: () =>
+        canonicalGantryToolRuleName(tool.name, {
+          callableAgentToolNames,
+        }),
+    })),
+    ...facadeTools.map((tool) => ({
+      tool,
+      canonicalName: (toolInput: unknown) =>
+        gantryFacadePolicyToolRequest(
+          tool.name as DeepAgentsFacadeToolName,
+          toolInput,
+        ).toolName,
+    })),
+    ...thirdPartyToolEntries,
+    ...shellTools.map((tool) => ({
+      tool,
+      canonicalName: () => SHELL_POLICY_TOOL_NAME,
+    })),
+  ];
   return {
-    tools: [
-      ...gantryTools,
-      ...facadeTools,
-      ...gatedThirdPartyTools,
-      ...shellTools,
-    ],
+    tools: wrapWithDeclarativeToolRules(
+      toolEntries,
+      input.toolRules,
+      input.toolSuccessLedger,
+      input.onToolRuleDenial,
+    ),
     close: () => client.close(),
   };
+}
+
+function withCallableAgentTimeout(
+  underlying: StructuredToolInterface,
+): StructuredToolInterface {
+  const invoke = underlying.invoke.bind(underlying);
+  underlying.invoke = ((toolInput: unknown, config?: Record<string, unknown>) =>
+    invoke(
+      toolInput as never,
+      {
+        ...config,
+        timeout: CALLABLE_AGENT_MCP_TOOL_TIMEOUT_MS,
+      } as never,
+    )) as StructuredToolInterface['invoke'];
+  return underlying;
+}
+
+interface DeclarativeToolEntry {
+  tool: StructuredToolInterface;
+  canonicalName: (input: unknown) => string;
+}
+
+function wrapWithDeclarativeToolRules(
+  entries: DeclarativeToolEntry[],
+  rules?: readonly DeclarativeToolRule[],
+  successLedger?: RunScopedToolSuccessLedger,
+  onDenial?: ConnectGantryMcpInput['onToolRuleDenial'],
+): StructuredToolInterface[] {
+  if (!rules?.length) return entries.map(({ tool }) => tool);
+  return entries.map(
+    ({ tool: underlying, canonicalName }) =>
+      tool(
+        async (input, config) => {
+          const toolName = canonicalName(input);
+          const denial = evaluateDeclarativeToolRules({
+            toolName,
+            toolInput: input,
+            rules,
+            successLedger,
+          });
+          if (denial) {
+            onDenial?.(toolName, denial);
+            return {
+              content: [{ type: 'text', text: denial.error.message }],
+              isError: true,
+              error: denial.error,
+            };
+          }
+          const innerConfig = { ...config };
+          delete innerConfig.toolCall;
+          const result = await underlying.invoke(input as never, innerConfig);
+          if (!toolResultIsError(result)) {
+            successLedger?.recordSuccess(toolName);
+          }
+          return result;
+        },
+        {
+          name: underlying.name,
+          description: underlying.description,
+          schema: underlying.schema as never,
+        },
+      ) as unknown as StructuredToolInterface,
+  );
+}
+
+function toolResultIsError(result: unknown): boolean {
+  if (Array.isArray(result)) return result.some(toolResultIsError);
+  if (!result || typeof result !== 'object') return false;
+  const value = result as {
+    isError?: unknown;
+    status?: unknown;
+    error?: unknown;
+    content?: unknown;
+  };
+  return (
+    value.isError === true ||
+    value.status === 'error' ||
+    Boolean(value.error) ||
+    toolResultIsError(value.content)
+  );
 }
 
 // A third-party server must not be able to shadow a Gantry authority tool

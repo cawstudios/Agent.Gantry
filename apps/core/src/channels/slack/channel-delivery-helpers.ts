@@ -3,6 +3,7 @@ import { logger } from '../../infrastructure/logging/logger.js';
 import {
   MessageDeliveryResult,
   MessageSendOptions,
+  OnChatMetadata,
   ProgressUpdateOptions,
 } from '../../domain/types.js';
 import { PartialMessageDeliveryError } from '../../domain/messages/partial-delivery.js';
@@ -14,7 +15,6 @@ import {
 import {
   ActiveProgressState,
   ActiveStreamState,
-  PendingPermissionPrompt,
   PendingUserQuestionState,
 } from './channel-state.js';
 import {
@@ -32,6 +32,7 @@ import {
   clampSlackRetryDelayMs,
   slackRateLimitRetryDelayMs,
 } from './channel-retry-delay.js';
+import { uploadSlackAttachments } from './file-delivery.js';
 type SlackPostMessagePayload = {
   channel: string;
   text: string;
@@ -41,6 +42,13 @@ type SlackPostMessagePayload = {
 type SlackDeliveryLogger = {
   warn(metadata: Record<string, unknown>, message: string): void;
 };
+function slackActionBlocks(text: string, options: MessageSendOptions) {
+  return options.actionAffordances
+    ? slackMessageActionBlocks(text, options.actionAffordances, {
+        providerAccountId: options.providerAccountId,
+      })
+    : undefined;
+}
 export type SlackSnippetFallbackInput = {
   channelId: string;
   text: string;
@@ -156,7 +164,7 @@ export async function sendSlackMessage(input: {
     const part = parts[partIndex];
     const actionBlocks =
       partIndex === parts.length - 1
-        ? slackMessageActionBlocks(part, input.options.actionAffordances)
+        ? slackActionBlocks(part, input.options)
         : undefined;
     try {
       const posted = await postSlackMessageWithRetry(
@@ -230,6 +238,18 @@ export async function sendSlackMessage(input: {
     }
   }
 
+  await uploadSlackAttachments({
+    app: input.app,
+    jid: input.jid,
+    channelId: input.channelId,
+    threadTs,
+    files: input.options.files,
+    warnings,
+    externalMessageIds,
+    log: input.log,
+    postSlackMessageWithRetry,
+  });
+
   return {
     ...(externalMessageIds[0]
       ? { externalMessageId: externalMessageIds[0] }
@@ -247,6 +267,7 @@ export async function sendSlackFallbackStreamParts(input: {
   state: ActiveStreamState;
   fallbackParts: string[];
   log: SlackDeliveryLogger;
+  shouldContinue: () => boolean;
 }): Promise<void> {
   if (!input.app) throw new Error('Slack app not initialized');
   const threadTs = slackThreadTsFromThreadId(input.state.threadId);
@@ -273,6 +294,7 @@ export async function sendSlackFallbackStreamParts(input: {
   ) {
     const part = input.fallbackParts[partIndex];
     if (!part) continue;
+    if (!input.shouldContinue()) return;
     try {
       const existingTs = input.state.fallbackMessageTs[partIndex];
       if (existingTs) {
@@ -500,9 +522,7 @@ export async function sendSlackProgressUpdate(input: {
     input.persistProgress());
 
   if (!existing) {
-    const blocks = input.options.actionAffordances
-      ? slackMessageActionBlocks(trimmed, input.options.actionAffordances)
-      : undefined;
+    const blocks = slackActionBlocks(trimmed, input.options);
     const sent = (await input.app.client.chat.postMessage({
       channel: input.channelId,
       text: trimmed,
@@ -575,9 +595,7 @@ export async function sendSlackProgressUpdate(input: {
   }
 
   if (existing.messageTs) {
-    const blocks = input.options.actionAffordances
-      ? slackMessageActionBlocks(trimmed, input.options.actionAffordances)
-      : undefined;
+    const blocks = slackActionBlocks(trimmed, input.options);
     await input.app.client.chat.update({
       channel: existing.channelId,
       ts: existing.messageTs,
@@ -586,9 +604,7 @@ export async function sendSlackProgressUpdate(input: {
     });
   } else {
     const existingThreadTs = slackThreadTsFromThreadId(existing.threadId);
-    const blocks = input.options.actionAffordances
-      ? slackMessageActionBlocks(trimmed, input.options.actionAffordances)
-      : undefined;
+    const blocks = slackActionBlocks(trimmed, input.options);
     const sent = (await input.app.client.chat.postMessage({
       channel: existing.channelId,
       text: trimmed,
@@ -671,20 +687,9 @@ export function persistSlackProgress(
   );
 }
 
-export function resolveSlackDisconnectPrompts(input: {
-  pendingPermissionPrompts: Map<string, PendingPermissionPrompt>;
+export function resolveSlackDisconnectQuestions(input: {
   pendingUserQuestions: Map<string, PendingUserQuestionState>;
 }): void {
-  for (const [requestId, pending] of input.pendingPermissionPrompts.entries()) {
-    clearTimeout(pending.timer);
-    pending.resolve({
-      approved: false,
-      decidedBy: 'system',
-      reason: 'Slack channel disconnected',
-    });
-    input.pendingPermissionPrompts.delete(requestId);
-  }
-
   for (const [key, pending] of input.pendingUserQuestions.entries()) {
     if (pending.timer) clearTimeout(pending.timer);
     pending.resolve({
@@ -701,12 +706,10 @@ export async function disconnectSlackDelivery(input: {
   streamGenerationByJid: Map<string, number>;
   sealedStreamGenerationByJid: Map<string, number>;
   activeProgress: Map<string, ActiveProgressState>;
-  pendingPermissionPrompts: Map<string, PendingPermissionPrompt>;
   pendingUserQuestions: Map<string, PendingUserQuestionState>;
   stopNativeStream: (channelId: string, streamTs: string) => Promise<boolean>;
 }): Promise<App | null> {
-  resolveSlackDisconnectPrompts({
-    pendingPermissionPrompts: input.pendingPermissionPrompts,
+  resolveSlackDisconnectQuestions({
     pendingUserQuestions: input.pendingUserQuestions,
   });
 
@@ -729,13 +732,8 @@ export async function syncSlackGroups(input: {
   force: boolean;
   channelNameCache: Map<string, string>;
   resolveChannelName: (channelId: string) => Promise<string>;
-  onChatMetadata: (
-    jid: string,
-    observedAt: string,
-    displayName: string,
-    channel: string,
-    isGroup: boolean,
-  ) => Promise<void>;
+  onChatMetadata: OnChatMetadata;
+  providerAccountId?: string;
 }): Promise<void> {
   if (!input.app) return;
   const now = nowIso();
@@ -765,6 +763,7 @@ export async function syncSlackGroups(input: {
         name,
         'slack',
         !channel.is_im,
+        { providerAccountId: input.providerAccountId },
       );
     }
 

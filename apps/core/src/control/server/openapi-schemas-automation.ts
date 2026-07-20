@@ -1,8 +1,21 @@
+import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
 import type { JsonSchema } from './openapi-route-helpers.js';
 
 const isoDateTime = { type: 'string', format: 'date-time' };
 const metadata = { type: 'object', additionalProperties: true };
 const stringArray = { type: 'array', items: { type: 'string' } };
+const webhookEventTypes = {
+  type: ['array', 'null'],
+  minItems: 1,
+  uniqueItems: true,
+  items: { type: 'string', enum: Object.values(RUNTIME_EVENT_TYPES) },
+};
+const webhookSubscriptionProperties = {
+  eventTypes: webhookEventTypes,
+  agentId: { type: ['string', 'null'] },
+  sessionId: { type: ['string', 'null'] },
+  jobId: { type: ['string', 'null'] },
+};
 const capabilityRequirementImplementation = {
   type: 'object',
   required: ['kind'],
@@ -68,6 +81,31 @@ const arrayEnvelope = (name: string, itemRef: string): JsonSchema =>
   });
 
 export const automationOpenApiSchemas: Record<string, JsonSchema> = {
+  UsageAggregate: {
+    type: 'object',
+    required: ['requestCount', 'inputTokens', 'outputTokens'],
+    additionalProperties: false,
+    properties: {
+      requestCount: { type: 'integer', minimum: 0 },
+      inputTokens: { type: 'integer', minimum: 0 },
+      outputTokens: { type: 'integer', minimum: 0 },
+      agentId: { type: 'string' },
+      apiKeyId: { type: 'string' },
+      model: { type: 'string' },
+      day: { type: 'string', format: 'date' },
+    },
+  },
+  UsageQueryResponse: {
+    type: 'object',
+    required: ['usage'],
+    additionalProperties: false,
+    properties: {
+      usage: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/UsageAggregate' },
+      },
+    },
+  },
   Job: {
     type: 'object',
     required: ['id', 'name', 'status', 'kind'],
@@ -168,26 +206,51 @@ export const automationOpenApiSchemas: Record<string, JsonSchema> = {
   TriggerWaitResponse: metadata,
   Webhook: {
     type: 'object',
-    required: ['webhookId', 'appId', 'name', 'url', 'enabled'],
+    required: [
+      'webhookId',
+      'appId',
+      'name',
+      'url',
+      'enabled',
+      'eventTypes',
+      'agentId',
+      'sessionId',
+      'jobId',
+    ],
+    additionalProperties: false,
     properties: {
       webhookId: { type: 'string' },
       appId: { type: 'string' },
       name: { type: 'string' },
       url: { type: 'string', format: 'uri' },
       enabled: { type: 'boolean' },
+      ...webhookSubscriptionProperties,
       createdAt: isoDateTime,
       updatedAt: isoDateTime,
     },
   },
   WebhookListResponse: arrayEnvelope('webhooks', 'Webhook'),
-  WebhookRequest: {
+  WebhookCreateRequest: {
     type: 'object',
     required: ['name', 'url'],
+    additionalProperties: false,
     properties: {
       name: { type: 'string' },
       url: { type: 'string', format: 'uri' },
       secret: { type: 'string' },
       enabled: { type: 'boolean' },
+      ...webhookSubscriptionProperties,
+    },
+  },
+  WebhookUpdateRequest: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string' },
+      url: { type: 'string', format: 'uri' },
+      secret: { type: 'string' },
+      enabled: { type: 'boolean' },
+      ...webhookSubscriptionProperties,
     },
   },
   WebhookTestResponse: {
@@ -235,6 +298,7 @@ export const automationOpenApiSchemas: Record<string, JsonSchema> = {
       kind: { type: 'string', enum: ['conversation_message'] },
       conversationId: { type: 'string' },
       threadId: { type: 'string' },
+      agentId: { type: 'string' },
       message: { type: 'string' },
       senderId: { type: 'string' },
       senderName: { type: 'string' },

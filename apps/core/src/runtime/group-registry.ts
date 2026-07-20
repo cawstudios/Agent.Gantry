@@ -4,6 +4,7 @@ import path from 'path';
 import { ASSISTANT_NAME as DEFAULT_ASSISTANT_NAME } from '../config/index.js';
 import { logger } from '../infrastructure/logging/logger.js';
 import { ConversationRoute, ThinkingOverride } from '../domain/types.js';
+import type { PermissionMode } from '../shared/permission-mode.js';
 import {
   resolveModelAlias,
   resolveModelSelectionForWorkload,
@@ -17,6 +18,7 @@ import { AvailableGroup } from './agent-spawn.js';
 import { PromptProfileService } from '../application/agents/prompt-profile-service.js';
 import { resolveAgentLockStatus } from '../config/profiles.js';
 import type { FileArtifactStore } from '../domain/ports/file-artifact-store.js';
+import { parseAgentThreadQueueKey } from '../shared/thread-queue-key.js';
 
 interface ChatRow {
   jid: string;
@@ -29,6 +31,11 @@ interface RegisterGroupOptions {
   assistantName?: string;
   persist: (jid: string, group: ConversationRoute) => void | Promise<void>;
   ensureCredentialBinding: (jid: string, group: ConversationRoute) => void;
+  getFileArtifactStore?: () => FileArtifactStore | undefined;
+}
+
+interface EnsureRouteProfileDefaultsOptions {
+  assistantName?: string;
   getFileArtifactStore?: () => FileArtifactStore | undefined;
 }
 
@@ -59,6 +66,31 @@ function commitGroupOverride(
   commit();
 }
 
+export async function ensureRouteProfileDefaults(
+  routes: Iterable<ConversationRoute>,
+  options: EnsureRouteProfileDefaultsOptions = {},
+): Promise<number> {
+  const seenFolders = new Set<string>();
+  const profileService = new PromptProfileService({
+    fileArtifactStore: () => options.getFileArtifactStore?.(),
+    mirrorProfileFile: writeProfileFileMirror,
+    mirrorFileExists: profileFileMirrorExists,
+  });
+  for (const route of routes) {
+    const folder = route.folder;
+    if (seenFolders.has(folder)) continue;
+    seenFolders.add(folder);
+    await profileService.ensureAgentDefaults({
+      agentFolder: folder,
+      agentName: options.assistantName ?? route.name,
+      relationshipMode: route.agentConfig?.relationshipMode,
+      accessPreset:
+        resolveAgentLockStatus(folder) === 'locked' ? 'locked' : 'full',
+    });
+  }
+  return seenFolders.size;
+}
+
 export async function registerGroup(
   conversationRoutes: Record<string, ConversationRoute>,
   jid: string,
@@ -79,19 +111,9 @@ export async function registerGroup(
   }
 
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-  await new PromptProfileService({
-    fileArtifactStore: () => options.getFileArtifactStore?.(),
-    mirrorProfileFile: writeProfileFileMirror,
-    mirrorFileExists: profileFileMirrorExists,
-  }).ensureAgentDefaults({
-    agentFolder: group.folder,
-    agentName: assistantName,
-    relationshipMode: group.agentConfig?.relationshipMode,
-    // Locked agents get a default AGENTS.md without capability-request
-    // machinery; content seeding is not an authority boundary, so an
-    // indeterminate lock status keeps today's full default.
-    accessPreset:
-      resolveAgentLockStatus(group.folder) === 'locked' ? 'locked' : 'full',
+  await ensureRouteProfileDefaults([group], {
+    assistantName,
+    getFileArtifactStore: options.getFileArtifactStore,
   });
 
   conversationRoutes[jid] = group;
@@ -191,11 +213,50 @@ export function setGroupThinkingOverride(
   );
 }
 
+export function setGroupPermissionModeOverride(
+  conversationRoutes: Record<string, ConversationRoute>,
+  chatJid: string,
+  permissionMode: PermissionMode | undefined,
+  persist: (jid: string, group: ConversationRoute) => void | Promise<void>,
+): Promise<void> | void {
+  const existingGroup = conversationRoutes[chatJid];
+  if (
+    !existingGroup ||
+    existingGroup.agentConfig?.permissionMode === permissionMode
+  )
+    return;
+
+  const nextAgentConfig = { ...(existingGroup.agentConfig || {}) };
+  if (permissionMode) nextAgentConfig.permissionMode = permissionMode;
+  else delete nextAgentConfig.permissionMode;
+
+  const updatedGroup: ConversationRoute = {
+    ...existingGroup,
+    agentConfig:
+      Object.keys(nextAgentConfig).length > 0 ? nextAgentConfig : undefined,
+  };
+  return commitGroupOverride(
+    conversationRoutes,
+    chatJid,
+    updatedGroup,
+    persist(chatJid, updatedGroup),
+    {
+      group: updatedGroup.name,
+      permissionModeOverride: permissionMode ?? null,
+    },
+    'Updated group permission mode override',
+  );
+}
+
 export function listAvailableGroups(
   chats: ChatRow[],
   conversationRoutes: Record<string, ConversationRoute>,
 ): AvailableGroup[] {
-  const registeredJids = new Set(Object.keys(conversationRoutes));
+  const registeredJids = new Set(
+    Object.keys(conversationRoutes).map(
+      (jid) => parseAgentThreadQueueKey(jid).chatJid,
+    ),
+  );
   return chats
     .filter((c) => c.jid !== '__group_sync__' && Boolean(c.is_group))
     .map((c) => ({

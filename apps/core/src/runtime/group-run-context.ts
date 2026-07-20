@@ -35,13 +35,6 @@ export async function resolveTurnToolPolicy(
   });
 }
 
-export async function resolveTurnSelectedSkillIds(
-  deps: Pick<GroupProcessingDeps, 'getSkillRepository'>,
-  turnContext?: { appId: string; agentId: string } | null,
-): Promise<string[] | undefined> {
-  return (await resolveTurnSelectedSkillContext(deps, turnContext)).ids;
-}
-
 export async function resolveTurnSelectedSkillContext(
   deps: Pick<GroupProcessingDeps, 'getSkillRepository'>,
   turnContext?: { appId: string; agentId: string } | null,

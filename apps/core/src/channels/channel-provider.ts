@@ -22,6 +22,7 @@ import type { RuntimeSettings } from '../config/settings/runtime-settings.js';
 import type { RuntimeLeasePort } from '../domain/ports/runtime-lease.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
 import type { AgentTodoSink } from '../domain/ports/task-lifecycle.js';
+import type { GroupJoinOnboardingCoordinator } from '../domain/ports/group-join-onboarding.js';
 import type {
   ConversationContextHydrationRequest,
   ConversationContextHydrationResult,
@@ -40,6 +41,10 @@ export const CHANNEL_STREAM_UPDATE_INTERVAL_MS = {
 } as const;
 
 export interface ChannelOpts {
+  appId?: string;
+  providerAccountId?: string;
+  inboundProviderAccountIds?: string[];
+  agentId?: string;
   onMessage: OnInboundMessage;
   ensureMessageRoute?: (
     chatJid: string,
@@ -51,9 +56,13 @@ export interface ChannelOpts {
   runtimeSettings?: () => RuntimeSettings;
   runtimeLease?: RuntimeLeasePort;
   runtimeSecrets?: RuntimeSecretProvider;
+  groupJoinOnboarding?: GroupJoinOnboardingCoordinator;
   isControlApproverAllowed?: (input: {
     providerId: string;
+    providerAccountId?: string;
+    agentId?: string;
     conversationJid: string;
+    threadId?: string;
     userId: string;
     sourceAgentFolder: string;
     decisionPolicy?: PermissionApprovalRequest['decisionPolicy'];

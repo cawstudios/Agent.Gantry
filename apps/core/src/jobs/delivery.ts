@@ -1,4 +1,5 @@
 import { logger } from '../infrastructure/logging/logger.js';
+import { incrementOperationalError } from '../shared/operational-error-counters.js';
 import type { Job, MessageSendOptions } from '../domain/types.js';
 import {
   getPartialMessageDeliveryMetadata,
@@ -49,6 +50,7 @@ export interface DurableJobNotificationEnqueueInput {
   route: {
     conversationJid: string;
     threadId: string | null;
+    providerAccountId?: string;
     label: string;
   };
   profileId: string;
@@ -177,10 +179,12 @@ export async function sendJobNotification(input: {
             routeLabel: route.label,
             routeConversationJid: route.conversationJid,
             routeThreadId: route.threadId,
+            routeProviderAccountId: route.providerAccountId ?? null,
           },
         });
         if (enqueueResult !== false) delivered = true;
       } catch (err) {
+        incrementOperationalError('delivery', 'notification_enqueue');
         logger.warn(
           {
             err,
@@ -201,9 +205,12 @@ export async function sendJobNotification(input: {
   if (!sendMessage) return false;
   for (const route of routes) {
     const options =
-      route.threadId || input.actionAffordances
+      route.threadId || route.providerAccountId || input.actionAffordances
         ? {
             ...(route.threadId ? { threadId: route.threadId } : {}),
+            ...(route.providerAccountId
+              ? { providerAccountId: route.providerAccountId }
+              : {}),
             ...(input.actionAffordances
               ? { actionAffordances: input.actionAffordances }
               : {}),
@@ -218,8 +225,13 @@ export async function sendJobNotification(input: {
         ),
         { scope: 'job-notification', target: route.conversationJid },
       );
-      if (isDeliverySent(settlement)) delivered = true;
+      if (isDeliverySent(settlement)) {
+        delivered = true;
+      } else {
+        incrementOperationalError('delivery', 'notification_send');
+      }
     } catch (err) {
+      incrementOperationalError('delivery', 'notification_send');
       logger.warn(
         { jobId: input.job.id, jid: route.conversationJid, err },
         'Failed to send scheduler status message',

@@ -7,13 +7,13 @@ need AI agents to run safely inside product and operations workflows.
 
 - Run agents behind controlled channel, tool, memory, scheduling, and audit boundaries.
 - Let deployments choose channels and model providers without rewriting core runtime behavior.
-- Keep customization explicit through prompts, model aliases, capabilities, and conversation bindings.
+- Keep customization explicit through prompts, model aliases, capabilities, and conversation installs.
 - Make risky actions visible and reviewable through permission, sandbox, and audit flows.
 
 ## Current Scope
 
 - CLI and package-based runtime setup.
-- Slack, Telegram, Teams, and web or SDK-facing runtime concepts.
+- Slack, Telegram, Teams, Discord, and web or SDK-facing runtime concepts.
 - Postgres-backed settings, credential references, memory, jobs, events, and audit state.
 - Provider-neutral model routing through catalog aliases and gateway-owned credentials.
 

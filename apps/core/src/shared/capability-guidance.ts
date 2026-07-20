@@ -39,7 +39,9 @@ export function renderDefaultCapabilityRules(options?: {
     'Capability rules:',
     '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation.',
     '- For multi-step work, use todo_update for progress instead of repeated generic progress messages.',
+    '- Use render_* rich UI tools for structured status, facts, lists, tables, forms, media, or progress.',
     '- Use ask_user_question for structured choices.',
+    '- Use the mounted Gantry tools that fit the task; if a requested workflow cannot be done with them, say what is unavailable and continue with the best available path.',
     `- ${SOURCE_INVENTORY_AUTHORITY_GUIDANCE}`,
     '- Use request_access target.kind=capability for durable reviewed access.',
     '- Use request_access target.kind=run_command only as a scoped temporary exact-command fallback when no reviewed capability fits.',
@@ -55,7 +57,7 @@ export function renderDefaultCapabilityRules(options?: {
     );
   }
   lines.push(
-    '- Agents with selected admin capabilities may use service_restart after approved changes and register_agent for conversation binding.',
+    '- Agents with selected admin capabilities may use service_restart after approved changes and register_agent for conversation installs.',
     '- Never run dependency installs or edit local skill files, MCP config, settings, or generated runtime config directly.',
   );
   return lines.join('\n');

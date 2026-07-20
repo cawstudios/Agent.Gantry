@@ -33,6 +33,8 @@ describe('capability guidance', () => {
     expect(rules).toContain(
       'use todo_update for progress instead of repeated generic progress messages',
     );
+    expect(rules).toContain('render_* rich UI tools');
+    expect(rules).toContain('Use the mounted Gantry tools that fit the task');
   });
 
   it('includes settings admin tools only when requested', () => {

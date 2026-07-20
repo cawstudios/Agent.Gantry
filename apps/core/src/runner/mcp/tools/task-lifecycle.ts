@@ -11,13 +11,30 @@ import {
   TASKS_DIR,
   agentId,
   appId,
+  providerAccountId,
   threadId,
 } from '../context.js';
+import {
+  CALLABLE_AGENT_RESPONSE_TIMEOUT_MS,
+  CALLABLE_AGENT_SYNC_WAIT_TIMEOUT_MS,
+  callableAgentToolDescription,
+  callableAgentToolName,
+  createCallableAgentToolSchema,
+  type CallableAgentToolManifestEntry,
+} from '../../../shared/callable-agent-manifest.js';
 import { formatTaskFailureLines } from '../formatting.js';
 import { waitForTaskResponse, writeIpcFile } from '../ipc.js';
 import { makeIpcId } from '../ipc-ids.js';
 
 const TASK_TOOL_TIMEOUT_MS = 20_000;
+const DELEGATION_IPC_RESPONSE_TIMEOUT_MS = CALLABLE_AGENT_RESPONSE_TIMEOUT_MS;
+type DynamicToolRegistrar = {
+  registerTool(
+    name: string,
+    config: { description: string; inputSchema: unknown },
+    handler: (...args: any[]) => any,
+  ): unknown;
+};
 
 const todoItemSchema = z.object({
   id: z.string().min(1).max(80),
@@ -31,6 +48,7 @@ async function submitTaskLifecycleRequest(input: {
   payload: Record<string, unknown>;
   timeoutMessage: string;
   fallbackError: string;
+  responseTimeoutMs?: number;
 }) {
   const taskId = makeIpcId(input.type.replaceAll('_', '-'));
   writeIpcFile(TASKS_DIR, {
@@ -38,6 +56,7 @@ async function submitTaskLifecycleRequest(input: {
     taskId,
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     runHandle: process.env.GANTRY_AGENT_RUN_HANDLE || undefined,
     ...(jobId ? { jobId } : {}),
     ...(jobRunId ? { runId: jobRunId } : {}),
@@ -57,7 +76,10 @@ async function submitTaskLifecycleRequest(input: {
     authThreadId: threadId,
     timestamp: nowIso(),
   });
-  const response = await waitForTaskResponse(taskId, TASK_TOOL_TIMEOUT_MS);
+  const response = await waitForTaskResponse(
+    taskId,
+    input.responseTimeoutMs ?? TASK_TOOL_TIMEOUT_MS,
+  );
   if (!response) {
     return {
       content: [{ type: 'text' as const, text: input.timeoutMessage }],
@@ -96,7 +118,10 @@ function formatSuccessfulTaskResponse(response: {
   return `${message}\n${JSON.stringify(response.data, null, 2)}`;
 }
 
-export function registerTaskLifecycleTools(server: McpServer): void {
+export function registerTaskLifecycleTools(
+  server: McpServer,
+  callableAgentManifest: readonly CallableAgentToolManifestEntry[] = [],
+): void {
   server.tool(
     'async_run_command',
     'Start an approved shell command as a durable background task. Use only for long-running commands that should continue while you inspect status with task_get or task_list. The host enforces selected RunCommand(...) capability rules before it creates the task.',
@@ -162,6 +187,7 @@ export function registerTaskLifecycleTools(server: McpServer): void {
       objective: z.string().min(1).max(10_000),
       context: z.string().max(20_000).optional(),
       expectedOutput: z.string().max(2_000).optional(),
+      targetAgentId: z.string().min(1).max(160).optional(),
       timeoutMs: z
         .number()
         .int()
@@ -175,8 +201,37 @@ export function registerTaskLifecycleTools(server: McpServer): void {
         payload: args,
         timeoutMessage: 'Delegated task start timed out.',
         fallbackError: 'Delegated task start failed.',
+        responseTimeoutMs: DELEGATION_IPC_RESPONSE_TIMEOUT_MS,
       }),
   );
+
+  const callableAgentSchema = createCallableAgentToolSchema(z);
+  const dynamicServer = server as unknown as DynamicToolRegistrar;
+  for (const entry of callableAgentManifest) {
+    dynamicServer.registerTool(
+      callableAgentToolName(entry),
+      {
+        description: callableAgentToolDescription(entry),
+        inputSchema: callableAgentSchema,
+      },
+      async (args: Record<string, unknown>) =>
+        submitTaskLifecycleRequest({
+          type: 'delegate_task',
+          payload: {
+            ...args,
+            syncWaitTimeoutMs:
+              typeof args.syncWaitTimeoutMs === 'number'
+                ? args.syncWaitTimeoutMs
+                : CALLABLE_AGENT_SYNC_WAIT_TIMEOUT_MS,
+            targetAgentId: entry.targetAgentId,
+            callableAgentToolName: callableAgentToolName(entry),
+          },
+          timeoutMessage: 'Delegated task start timed out.',
+          fallbackError: 'Delegated task start failed.',
+          responseTimeoutMs: DELEGATION_IPC_RESPONSE_TIMEOUT_MS,
+        }),
+    );
+  }
 
   server.tool(
     'task_message',

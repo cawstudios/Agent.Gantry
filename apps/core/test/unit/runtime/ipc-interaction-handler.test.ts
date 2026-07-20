@@ -8,7 +8,18 @@ import {
   verifyIpcResponsePayload,
 } from '@core/infrastructure/ipc/response-signing.js';
 import { createIpcAuthEnvelope } from '@core/runtime/ipc-auth.js';
+import { agentIdForFolder } from '@core/domain/agent/agent-folder-id.js';
 import { semanticCapabilityInputSchema } from '@core/shared/semantic-capabilities.js';
+import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
+import type {
+  PendingInteraction,
+  PendingInteractionRepository,
+} from '@core/domain/ports/worker-coordination.js';
+import type {
+  QuestionRecoveryEnvelope,
+  UserQuestionRequest,
+} from '@core/domain/types.js';
+import { getOperationalErrorCount } from '@core/shared/operational-error-counters.js';
 
 import {
   processPermissionIpcRequest,
@@ -20,7 +31,12 @@ import {
   processPermissionInteractionIpc,
   processUserQuestionInteractionIpc,
 } from '@core/runtime/ipc-interaction-processing.js';
-import { configurePendingInteractionDurability } from '@core/application/interactions/pending-interaction-durability.js';
+import { resolvePermissionIpcDecision } from '@core/runtime/ipc-permission-classifier-decision.js';
+import {
+  claimPermissionInteractionCallback,
+  configurePendingInteractionDurability,
+  DurableInteractionPersistenceError,
+} from '@core/application/interactions/pending-interaction-durability.js';
 
 function fileMode(filePath: string): number {
   return fs.statSync(filePath).mode & 0o777;
@@ -31,6 +47,65 @@ function createEmptyJobRepository() {
     listJobs: vi.fn(async () => []),
     getJobById: vi.fn(async () => null),
     updateJob: vi.fn(async () => null),
+  };
+}
+
+const GITHUB_REPOS_READ_CAPABILITY_ID = 'github.repos.read';
+const GITHUB_REPOS_LIST_TOOL_NAME = 'mcp__github__repos_list';
+
+function createReviewedGithubReadToolRepository(appId: string) {
+  return {
+    listAgentToolBindings: async () => [
+      {
+        status: 'active',
+        toolId: `tool:capability:${GITHUB_REPOS_READ_CAPABILITY_ID}`,
+      },
+    ],
+    getTool: async () => ({
+      appId,
+      name: `capability:${GITHUB_REPOS_READ_CAPABILITY_ID}`,
+      inputSchema: semanticCapabilityInputSchema({
+        capabilityId: GITHUB_REPOS_READ_CAPABILITY_ID,
+        displayName: 'GitHub repositories read',
+        category: 'GitHub',
+        risk: 'read',
+        can: 'List GitHub repositories.',
+        cannot: 'Mutate GitHub repositories.',
+        credentialSource: 'none',
+        implementationBindings: [
+          { kind: 'mcp_tool', mcpTool: GITHUB_REPOS_LIST_TOOL_NAME },
+        ],
+      }),
+    }),
+  };
+}
+
+function durableQuestionInteraction(input: {
+  request: UserQuestionRequest;
+  envelope: QuestionRecoveryEnvelope;
+  status?: 'pending' | 'resolved';
+  resolvedAnswers?: Record<string, string | string[]>;
+}): PendingInteraction {
+  const status = input.status ?? 'pending';
+  return {
+    id: `interaction-${input.request.requestId}`,
+    appId: input.request.appId || 'default',
+    runId: input.request.runId ?? null,
+    kind: 'question',
+    status,
+    payload: {
+      sourceAgentFolder: input.request.sourceAgentFolder,
+      requestId: input.request.requestId,
+      questionRecoveryEnvelope: input.envelope,
+    },
+    callbackRoute: null,
+    idempotencyKey: `${input.request.appId || 'default'}:question:${input.request.sourceAgentFolder}:${input.request.requestId}`,
+    approverRef: status === 'resolved' ? 'owner' : null,
+    resolution:
+      status === 'resolved' ? { answers: input.resolvedAnswers ?? {} } : null,
+    createdAt: '2026-07-17T00:00:00.000Z',
+    expiresAt: '2026-07-18T00:00:00.000Z',
+    resolvedAt: status === 'resolved' ? '2026-07-17T00:01:00.000Z' : null,
   };
 }
 
@@ -45,6 +120,7 @@ describe('ipc-interaction-handler', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
     configurePendingInteractionDurability(null);
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('delegates permission decisions through the domain handler', async () => {
@@ -259,6 +335,7 @@ describe('ipc-interaction-handler', () => {
       ['mcp__gantry__service_restart'],
       { appId: 'app:test' },
     );
+    expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledOnce();
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:team',
       expect.stringContaining('Allowed for future:'),
@@ -488,6 +565,16 @@ describe('ipc-interaction-handler', () => {
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-allow-once.json');
     fs.writeFileSync(claimedPath, '{}');
+    const incrementAndGet = vi.fn(async () => ({
+      appId: 'app:test',
+      agentFolder: 'main_agent',
+      suggestionKey: 'main_agent|RunCommand(npm test)',
+      allowCount: 1,
+      lastOfferedAt: null,
+      deniedAt: null,
+      createdAt: '2026-07-12T00:00:00.000Z',
+      updatedAt: '2026-07-12T00:00:00.000Z',
+    }));
 
     await processPermissionInteractionIpc({
       request: {
@@ -500,6 +587,7 @@ describe('ipc-interaction-handler', () => {
         runHandle: 'agent-run-once',
         targetJid: 'tg:team',
         toolName: 'Bash',
+        toolInput: { command: 'npm test' },
       },
       sourceAgentFolder: 'main_agent',
       deps: {
@@ -516,6 +604,12 @@ describe('ipc-interaction-handler', () => {
             },
           ],
         })),
+        getPermissionPromotionRepository: () => ({
+          incrementAndGet,
+          get: vi.fn(async () => null),
+          markOffered: vi.fn(async () => false),
+          markDenied: vi.fn(async () => undefined),
+        }),
       },
       ipcBaseDir: tempDir,
       file: 'claimed-allow-once.json',
@@ -541,6 +635,7 @@ describe('ipc-interaction-handler', () => {
       decisionClassification: 'user_temporary',
     });
     expect(response.updatedPermissions).toBeUndefined();
+    await vi.waitFor(() => expect(incrementAndGet).toHaveBeenCalledOnce());
     expect(
       fs.existsSync(
         path.join(
@@ -553,10 +648,689 @@ describe('ipc-interaction-handler', () => {
     ).toBe(false);
   });
 
+  it('auto-allows an eligible IPC request without requester gating', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-auto-allow.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'The read-only tool matches the turn intent.',
+      latencyMs: 6,
+    }));
+    const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-auto-allow',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce-auto',
+        responseKeyId: envelope.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:auto',
+        senderId: 'approver-1',
+        toolName: GITHUB_REPOS_LIST_TOOL_NAME,
+        toolInput: { owner: 'cawstudios' },
+        decisionReason: 'No allow rule matched.',
+        turnIntentSummary: 'Inspect the current worktree.',
+        description: 'Create a spreadsheet.',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:auto': {
+            folder: 'main_agent',
+            agentConfig: {},
+            conversationKind: 'dm',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {
+            main_agent: {
+              permissionMode: 'auto',
+              capabilities: [
+                { id: GITHUB_REPOS_READ_CAPABILITY_ID, version: '1' },
+              ],
+            },
+          },
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+        getToolRepository: () =>
+          createReviewedGithubReadToolRepository('app:test'),
+      } as never,
+      ipcBaseDir: tempDir,
+      file: 'claimed-auto-allow.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canonicalToolName: GITHUB_REPOS_LIST_TOOL_NAME,
+        turnIntentSummary: 'Inspect the current worktree.',
+        approvedCapabilityIds: [GITHUB_REPOS_READ_CAPABILITY_ID],
+        posture: 'allow_leaning',
+      }),
+    );
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(
+            tempDir,
+            'main_agent',
+            'permission-responses',
+            'perm-auto-allow.json',
+          ),
+          'utf-8',
+        ),
+      ),
+    ).toMatchObject({
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'auto_classifier',
+      decisionClassification: 'user_temporary',
+    });
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.classifier_decision',
+        payload: expect.objectContaining({
+          decision: 'allow',
+          intentSource: 'runner_summary',
+        }),
+      }),
+    );
+    const classifierEvent = publishRuntimeEvent.mock.calls.find(
+      ([event]) => event.eventType === 'permission.classifier_decision',
+    )?.[0];
+    expect(classifierEvent?.payload).not.toHaveProperty('suggestionKey');
+  });
+
+  it('honors a conversation override on the live agent-qualified route key', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'The tool matches the turn intent.',
+      latencyMs: 5,
+    }));
+    const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    const targetJid = 'tg:-1003798366047';
+    const sourceAgentFolder = 'main_agent';
+    const routeKey = makeAgentThreadQueueKey(
+      targetJid,
+      agentIdForFolder(sourceAgentFolder),
+    );
+
+    const decision = await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-live-route-override',
+        sourceAgentFolder,
+        runId: 'run:runner-supplied',
+        targetJid,
+        senderId: 'approver-1',
+        toolName: GITHUB_REPOS_LIST_TOOL_NAME,
+        toolInput: { owner: 'cawstudios' },
+        turnIntentSummary: 'Inspect the worktree.',
+        description: 'Create a spreadsheet.',
+      },
+      sourceAgentFolder,
+      deps: {
+        conversationRoutes: () => ({
+          [routeKey]: {
+            name: 'Gantry',
+            folder: sourceAgentFolder,
+            trigger: '@Gantry',
+            added_at: '2026-07-12T00:00:00.000Z',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'dm',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {
+            main_agent: {
+              capabilities: [
+                { id: GITHUB_REPOS_READ_CAPABILITY_ID, version: '1' },
+              ],
+            },
+          },
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+        getToolRepository: () =>
+          createReviewedGithubReadToolRepository('default'),
+      } as never,
+    });
+
+    expect(classifierConsult).toHaveBeenCalledOnce();
+    expect(classifierConsult.mock.calls[0]?.[0].toolInput).toEqual({
+      owner: 'cawstudios',
+    });
+    expect(classifierConsult.mock.calls[0]?.[0].turnIntentSummary).toBe(
+      'Inspect the worktree.',
+    );
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Non-authoritative event metadata from the request itself.
+        runId: 'run:runner-supplied',
+        payload: expect.objectContaining({ intentSource: 'runner_summary' }),
+      }),
+    );
+    expect(publishRuntimeEvent.mock.calls[0]?.[0].payload).not.toHaveProperty(
+      'suggestionKey',
+    );
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'auto_classifier',
+    });
+  });
+
+  it('consults for a deterministic-safe unattended job without requester gating', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Approved capability read.',
+      latencyMs: 1,
+    }));
+    const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    const decision = await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-unattended-trusted',
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:trusted-gate',
+        unattended: true,
+        jobId: 'job-1',
+        toolName: 'mcp__crm__read',
+        toolInput: { id: 'crm-1' },
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:trusted-gate': {
+            folder: 'main_agent',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'channel',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {
+            main_agent: {
+              capabilities: [{ id: 'mcp.crm.positions.read', version: '1' }],
+            },
+          },
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+        getToolRepository: () => ({
+          listAgentToolBindings: async () => [
+            {
+              status: 'active',
+              toolId: 'tool:capability:mcp.crm.positions.read',
+            },
+          ],
+          getTool: async () => ({
+            appId: 'default',
+            name: 'capability:mcp.crm.positions.read',
+            inputSchema: semanticCapabilityInputSchema({
+              capabilityId: 'mcp.crm.positions.read',
+              displayName: 'CRM positions read',
+              category: 'CRM',
+              risk: 'read',
+              can: 'Read CRM positions.',
+              cannot: 'Mutate CRM positions.',
+              credentialSource: 'none',
+              implementationBindings: [
+                { kind: 'mcp_tool', mcpTool: 'mcp__crm__read' },
+              ],
+            }),
+          }),
+        }),
+      } as never,
+    });
+
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnIntentSummary: '',
+        posture: 'allow_leaning',
+      }),
+    );
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ intentSource: 'none' }),
+      }),
+    );
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: 'auto_classifier',
+    });
+  });
+
+  it('denies an unattended gray-zone mutation after classifier consultation', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'ask' as const,
+      reason: 'Destructive filesystem mutation.',
+      latencyMs: 1,
+    }));
+    const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    const decision = await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-unattended-mutation',
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:unattended',
+        unattended: true,
+        jobId: 'job-1',
+        toolName: 'RunCommand',
+        toolInput: { command: 'rm report.txt' },
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:unattended': {
+            folder: 'main_agent',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'channel',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {
+            main_agent: {
+              capabilities: [{ id: 'shell.execute', version: '1' }],
+            },
+          },
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+    });
+
+    expect(classifierConsult).toHaveBeenCalledOnce();
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({
+      approved: false,
+      mode: 'cancel',
+      decidedBy: 'runtime',
+      reason: expect.stringContaining('Classifier requested human approval'),
+    });
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.classifier_decision',
+        payload: expect.objectContaining({ decision: 'ask' }),
+      }),
+    );
+  });
+
+  it('denies an unattended read-only command matched by the YOLO denylist backstop', async () => {
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Read-only workspace file.',
+      latencyMs: 1,
+    }));
+    const requestPermissionApproval = vi.fn();
+
+    const decision = await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-unattended-yolo-denylist',
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:unattended',
+        unattended: true,
+        jobId: 'job-1',
+        toolName: 'Bash',
+        toolInput: { command: 'cat README.md' },
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:unattended': {
+            folder: 'main_agent',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'channel',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent: vi.fn(async () => undefined),
+        getPermissionRuntimeSettings: () => ({
+          agents: {
+            main_agent: {
+              capabilities: [{ id: 'filesystem.read', version: '1' }],
+            },
+          },
+          permissions: {
+            autoMode: {},
+            yoloMode: {
+              enabled: true,
+              denylist: ['cat README.md'],
+              denylistPaths: [],
+            },
+          },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+    });
+
+    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({
+      approved: false,
+      mode: 'cancel',
+      decidedBy: 'runtime',
+      reason: expect.stringContaining('YOLO-mode denylist backstop'),
+    });
+  });
+
+  it('promotes the persistent option when IPC omits decision options', async () => {
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: false,
+      mode: 'cancel' as const,
+      decidedBy: 'owner',
+    }));
+    const counter = {
+      appId: 'app:test',
+      agentFolder: 'main_agent',
+      suggestionKey: 'main_agent|RunCommand(git status)',
+      allowCount: 2,
+      lastOfferedAt: null,
+      deniedAt: null,
+      createdAt: '2026-07-12T00:00:00.000Z',
+      updatedAt: '2026-07-12T00:00:00.000Z',
+    };
+
+    await resolvePermissionIpcDecision({
+      request: {
+        requestId: 'perm-ask-hint',
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'RunCommand',
+        toolInput: { command: 'git status' },
+        suggestions: [
+          {
+            type: 'addRules',
+            behavior: 'allow',
+            rules: [{ toolName: 'RunCommand', ruleContent: 'git status' }],
+          },
+        ],
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({}),
+        requestPermissionApproval,
+        getPermissionPromotionRepository: () => ({
+          incrementAndGet: vi.fn(),
+          get: vi.fn(async () => counter),
+          markOffered: vi.fn(),
+          markDenied: vi.fn(),
+        }),
+        getPermissionRuntimeSettings: () => ({
+          agents: { main_agent: { permissionMode: 'ask' } },
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+    });
+
+    expect(requestPermissionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promotionHintCount: 2,
+        decisionOptions: ['allow_persistent_rule', 'allow_once', 'cancel'],
+      }),
+    );
+  });
+
+  it('classifies a benign IPC RunCommand beyond the display limit with full input', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-auto-ask.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const fullCommand = `printf '%s' '${'x'.repeat(600)}'`;
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Benign command.',
+      latencyMs: 1,
+    }));
+    const requestPermissionApproval = vi.fn(async () => ({
+      approved: false,
+      mode: 'cancel' as const,
+      decidedBy: 'owner',
+      decisionClassification: 'user_reject' as const,
+    }));
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-auto-ask',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce-auto-ask',
+        responseKeyId: envelope.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:auto',
+        senderId: 'approver-1',
+        toolName: 'RunCommand',
+        toolInput: { command: `${fullCommand.slice(0, 500)}...[truncated]` },
+        classifierToolInput: { command: fullCommand },
+        toolInputSanitized: true,
+        toolInputSanitizedPaths: ['command'],
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:auto': {
+            folder: 'main_agent',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'dm',
+          },
+        }),
+        requestPermissionApproval,
+        isControlApproverAllowed: vi.fn(async () => true),
+        getPermissionMessageRepository: () => ({
+          getRecentTopLevelMessagesBefore: vi.fn(async () => [
+            {
+              content: 'Read CRM record crm-1.',
+              sender: 'approver-1',
+              is_from_me: false,
+              is_bot_message: false,
+            },
+          ]),
+          getLatestThreadMessages: vi.fn(),
+        }),
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {},
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+      ipcBaseDir: tempDir,
+      file: 'claimed-auto-ask.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(classifierConsult).toHaveBeenCalledWith(
+      expect.objectContaining({ toolInput: { command: fullCommand } }),
+    );
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.classifier_decision',
+        payload: expect.objectContaining({
+          decision: 'allow',
+          latencyMs: 1,
+        }),
+      }),
+    );
+  });
+
+  it('turns unattended secret-redacted auto input into an immediate IPC denial', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-unattended-ask.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const classifierConsult = vi.fn(async () => ({
+      decision: 'allow' as const,
+      reason: 'Would allow if consulted.',
+      latencyMs: 1,
+    }));
+    const requestPermissionApproval = vi.fn();
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-unattended-ask',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce-unattended-ask',
+        responseKeyId: envelope.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'tg:auto',
+        jobId: 'job:auto',
+        toolName: 'RunCommand',
+        unattended: true,
+        toolInput: { command: "curl -H 'Authorization: [REDACTED]'" },
+        classifierToolInput: {
+          command: "curl -H 'Authorization: [REDACTED]'",
+        },
+        toolInputSanitized: true,
+        toolInputSanitizedPaths: ['command'],
+        toolInputRedactedPaths: ['command'],
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        conversationRoutes: () => ({
+          'tg:auto': {
+            folder: 'main_agent',
+            agentConfig: { permissionMode: 'auto' },
+            conversationKind: 'channel',
+          },
+        }),
+        requestPermissionApproval,
+        classifierConsult,
+        publishRuntimeEvent,
+        getPermissionRuntimeSettings: () => ({
+          agents: {},
+          permissions: { autoMode: {} },
+          memory: { llm: { models: { extractor: 'sonnet' } } },
+        }),
+      } as never,
+      ipcBaseDir: tempDir,
+      file: 'claimed-unattended-ask.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(classifierConsult).not.toHaveBeenCalled();
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(
+            tempDir,
+            'main_agent',
+            'permission-responses',
+            'perm-unattended-ask.json',
+          ),
+          'utf-8',
+        ),
+      ),
+    ).toMatchObject({
+      approved: false,
+      mode: 'cancel',
+      decidedBy: 'runtime',
+      reason: expect.stringContaining('tool input view was incomplete'),
+      decisionClassification: 'user_reject',
+    });
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'permission.classifier_decision',
+        payload: expect.objectContaining({ failureCode: 'input_truncated' }),
+      }),
+    );
+  });
+
+  it.each([
+    ['auto', 'mcp__gantry__request_access', true],
+    ['ask', 'Bash', false],
+  ] as const)(
+    'does not consult mode %s for %s when eligibility/mode excludes it',
+    async (permissionMode, toolName, unattended) => {
+      const envelope = createIpcAuthEnvelope('main_agent', null);
+      const requestId = `perm-no-consult-${permissionMode}`;
+      const claimedPath = path.join(tempDir, `${requestId}.json`);
+      fs.writeFileSync(claimedPath, '{}');
+      const classifierConsult = vi.fn();
+      const requestPermissionApproval = vi.fn(async () => ({
+        approved: false,
+        mode: 'cancel' as const,
+        decisionClassification: 'user_reject' as const,
+      }));
+
+      await processPermissionInteractionIpc({
+        request: {
+          requestId,
+          appId: 'app:test',
+          agentId: 'agent:test',
+          responseNonce: `nonce-${permissionMode}`,
+          responseKeyId: envelope.responseKeyId,
+          sourceAgentFolder: 'main_agent',
+          targetJid: 'tg:auto',
+          toolName,
+          unattended,
+        },
+        sourceAgentFolder: 'main_agent',
+        deps: {
+          conversationRoutes: () => ({
+            'tg:auto': {
+              folder: 'main_agent',
+              agentConfig: { permissionMode },
+            },
+          }),
+          requestPermissionApproval,
+          classifierConsult,
+          publishRuntimeEvent: vi.fn(async () => undefined),
+          getPermissionRuntimeSettings: () => ({
+            agents: {},
+            permissions: { autoMode: {} },
+            memory: { llm: { models: { extractor: 'sonnet' } } },
+          }),
+        } as never,
+        ipcBaseDir: tempDir,
+        file: `${requestId}.json`,
+        claimedPath,
+        logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+      });
+
+      expect(classifierConsult).not.toHaveBeenCalled();
+      if (unattended) {
+        expect(requestPermissionApproval).not.toHaveBeenCalled();
+      } else {
+        expect(requestPermissionApproval).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
   it('emits structured permission events and redacted Bash command telemetry', async () => {
     const claimedPath = path.join(tempDir, 'claimed-bash-permission.json');
     fs.writeFileSync(claimedPath, '{}');
     const publishRuntimeEvent = vi.fn(async () => undefined);
+    const createTransientGrant = vi.fn(async () => true);
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     configurePendingInteractionDurability({
       repository: {
@@ -572,8 +1346,10 @@ describe('ipc-interaction-handler', () => {
           heartbeatAt: '2026-06-10T00:00:00.000Z',
         })),
         createPendingInteraction: vi.fn(async () => true),
+        findPendingPermissionPromptByMember: vi.fn(async () => null),
+        listPendingInteractions: vi.fn(async () => []),
         resolvePendingInteraction: vi.fn(async () => true),
-        createTransientGrant: vi.fn(async () => true),
+        createTransientGrant,
       } as never,
     });
     const command =
@@ -616,6 +1392,7 @@ describe('ipc-interaction-handler', () => {
     expect(
       publishRuntimeEvent.mock.calls.map((call) => call[0].eventType),
     ).toEqual([
+      'interaction.pending',
       'permission.requested',
       'permission.allowed',
       'permission.resumed',
@@ -643,6 +1420,432 @@ describe('ipc-interaction-handler', () => {
     expect(JSON.stringify(publishRuntimeEvent.mock.calls)).not.toContain(
       'sk-ant',
     );
+    expect(createTransientGrant).toHaveBeenCalledOnce();
+  });
+
+  it('releases a live callback claim when grant application fails so retry can claim it', async () => {
+    const claimedPath = path.join(tempDir, 'claimed-failed-grant.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const claim = {
+      id: 'claim-failed-grant',
+      scope: {
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        interactionId: 'interaction-failed-grant',
+      },
+    };
+    let claimHeld = true;
+    const releasePendingPermissionCallback = vi.fn(async () => {
+      claimHeld = false;
+      return 1;
+    });
+    const repository = {
+      createPendingInteraction: vi.fn(async () => true),
+      findPendingPermissionPromptByMember: vi.fn(async () => null),
+      listPendingInteractions: vi.fn(async () => []),
+      claimPendingPermissionCallback: vi.fn(async () => {
+        if (claimHeld) return null;
+        claimHeld = true;
+        return { prompt: { claim: null }, members: [] };
+      }),
+      releasePendingPermissionCallback,
+      resolvePendingInteraction: vi.fn(async () => true),
+    };
+    configurePendingInteractionDurability({ repository: repository as never });
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-failed-grant',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: true,
+          mode: 'allow_persistent_rule',
+          decidedBy: 'owner',
+          decisionClassification: 'user_permanent',
+          permissionCallbackClaim: claim,
+        })),
+      },
+      ipcBaseDir: tempDir,
+      file: 'claimed-failed-grant.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(releasePendingPermissionCallback).toHaveBeenCalledWith({ claim });
+    await expect(
+      claimPermissionInteractionCallback({
+        scope: claim.scope,
+        mode: 'allow_persistent_rule',
+        approverRef: 'owner',
+        matchKind: 'individual',
+        claimId: 'claim-failed-grant-retry',
+      }),
+    ).resolves.toMatchObject({ status: 'claimed' });
+  });
+
+  it('replays a decided Review-each member after restart without opening a fresh prompt', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-replayed-decision.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const request = {
+      requestId: 'perm-replayed-decision',
+      appId: 'app:replay',
+      agentId: 'agent:test',
+      responseNonce: 'nonce-replayed-decision',
+      responseKeyId: envelope.responseKeyId,
+      sourceAgentFolder: 'main_agent',
+      runId: 'run:replay',
+      runLeaseToken: 'lease-replay',
+      runLeaseFencingVersion: 3,
+      targetJid: 'tg:prompt-target',
+      approvalContextJid: 'tg:approval-context',
+      toolName: 'Bash',
+      toolInput: { command: 'npm test' },
+    } as const;
+    const scope = {
+      appId: request.appId,
+      sourceAgentFolder: request.sourceAgentFolder,
+      interactionId: request.requestId,
+    };
+    const persistedClaim = {
+      id: 'claim-replayed-decision',
+      scope,
+      intent: {
+        mode: 'allow_once' as const,
+        approverRef: 'owner',
+        decidedAt: '2026-07-17T00:00:00.000Z',
+      },
+      match: {
+        kind: 'individual' as const,
+        canonicalId: request.requestId,
+        providerAliases: ['provider:member-0'],
+      },
+    };
+    const activeLease = {
+      runId: request.runId,
+      jobId: null,
+      workerInstanceId: 'worker-replay',
+      leaseToken: request.runLeaseToken,
+      fencingVersion: request.runLeaseFencingVersion,
+      status: 'active',
+      claimedAt: '2026-07-17T00:00:00.000Z',
+      expiresAt: '2026-07-17T01:00:00.000Z',
+      heartbeatAt: '2026-07-17T00:00:00.000Z',
+    } as const;
+    const pending = {
+      id: 'pending-replayed-decision',
+      appId: request.appId,
+      runId: request.runId,
+      sourceAgentFolder: request.sourceAgentFolder,
+      requestId: request.requestId,
+      runLeaseToken: request.runLeaseToken,
+      runLeaseFencingVersion: request.runLeaseFencingVersion,
+      envelopeId: 'prompt-replayed-decision',
+      memberIndex: 0,
+      kind: 'permission',
+      status: 'pending',
+      payload: { request },
+      callbackRoute: null,
+      idempotencyKey: `${request.appId}:permission:${request.sourceAgentFolder}:${request.requestId}`,
+      approverRef: null,
+      resolution: null,
+      createdAt: '2026-07-17T00:00:00.000Z',
+      expiresAt: '2026-07-18T00:00:00.000Z',
+      resolvedAt: null,
+    } as const;
+    const findPendingPermissionPromptByMember = vi.fn(async (input: any) =>
+      input.appId === request.appId &&
+      input.sourceAgentFolder === request.sourceAgentFolder &&
+      input.requestId === request.requestId
+        ? {
+            prompt: {
+              id: pending.envelopeId,
+              appId: request.appId,
+              sourceAgentFolder: request.sourceAgentFolder,
+              interactionId: request.requestId,
+              claim: persistedClaim,
+              settlementState: 'claimed',
+            },
+            members: [pending],
+          }
+        : null,
+    );
+    const createTransientGrant = vi.fn(async () => true);
+    const resolvePendingInteraction = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async () => true),
+        findPendingPermissionPromptByMember,
+        getActiveRunLease: vi.fn(async () => activeLease),
+        createTransientGrant,
+        resolvePendingInteraction,
+      } as never,
+    });
+    const requestPermissionApproval = vi.fn();
+
+    await processPermissionInteractionIpc({
+      request,
+      sourceAgentFolder: request.sourceAgentFolder,
+      deps: { requestPermissionApproval },
+      ipcBaseDir: tempDir,
+      file: 'claimed-replayed-decision.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(findPendingPermissionPromptByMember).toHaveBeenCalledWith({
+      appId: request.appId,
+      sourceAgentFolder: request.sourceAgentFolder,
+      requestId: request.requestId,
+    });
+    expect(requestPermissionApproval).not.toHaveBeenCalled();
+    expect(createTransientGrant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: request.appId,
+        runId: request.runId,
+        leaseToken: request.runLeaseToken,
+        grant: expect.objectContaining({
+          toolName: request.toolName,
+          mode: 'allow_once',
+          requestId: request.requestId,
+        }),
+      }),
+    );
+    expect(resolvePendingInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permissionCallbackClaim: {
+          id: persistedClaim.id,
+          scope,
+        },
+        resolution: expect.objectContaining({
+          approved: true,
+          mode: 'allow_once',
+        }),
+      }),
+    );
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(
+            tempDir,
+            request.sourceAgentFolder,
+            'permission-responses',
+            `${request.requestId}.json`,
+          ),
+          'utf-8',
+        ),
+      ),
+    ).toMatchObject({
+      requestId: request.requestId,
+      approved: true,
+      mode: 'allow_once',
+      decidedBy: persistedClaim.intent.approverRef,
+    });
+  });
+
+  it('preserves a callback claim when processing throws after grant application', async () => {
+    const claimedPath = path.join(tempDir, 'claimed-thrown-decision.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const claim = {
+      id: 'claim-thrown-decision',
+      scope: {
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        interactionId: 'interaction-thrown-decision',
+      },
+    };
+    const releasePendingPermissionCallback = vi.fn(async () => 1);
+    const publishRuntimeEvent = vi.fn(async (event) => {
+      if (event.eventType === 'permission.allowed') {
+        throw new Error('simulated post-decision failure');
+      }
+    });
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async () => true),
+        releasePendingPermissionCallback,
+      } as never,
+    });
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-thrown-decision',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        sourceAgentFolder: 'main_agent',
+        toolName: 'Bash',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: true,
+          mode: 'allow_once',
+          decidedBy: 'owner',
+          permissionCallbackClaim: claim,
+        })),
+        publishRuntimeEvent,
+      },
+      ipcBaseDir: tempDir,
+      file: 'claimed-thrown-decision.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(releasePendingPermissionCallback).not.toHaveBeenCalled();
+  });
+
+  it('releases a callback claim when the scheduled lease becomes stale after the decision', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-stale-after-decision.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const claim = {
+      id: 'claim-stale-after-decision',
+      scope: {
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        interactionId: 'interaction-stale-after-decision',
+      },
+    };
+    const activeLease = {
+      runId: 'run:test',
+      jobId: 'job:test',
+      workerInstanceId: 'worker-1',
+      leaseToken: 'lease-token',
+      fencingVersion: 7,
+      status: 'active',
+      claimedAt: '2026-06-10T00:00:00.000Z',
+      expiresAt: '2026-06-10T00:05:00.000Z',
+      heartbeatAt: '2026-06-10T00:00:00.000Z',
+    } as const;
+    const releasePendingPermissionCallback = vi.fn(async () => 1);
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async () => true),
+        findPendingPermissionPromptByMember: vi.fn(async () => null),
+        listPendingInteractions: vi.fn(async () => []),
+        getActiveRunLease: vi
+          .fn()
+          .mockResolvedValueOnce(activeLease)
+          .mockResolvedValueOnce(null),
+        releasePendingPermissionCallback,
+      } as never,
+    });
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-stale-after-decision',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce-stale-after-decision',
+        responseKeyId: envelope.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        runId: 'run:test',
+        runLeaseToken: 'lease-token',
+        runLeaseFencingVersion: 7,
+        jobId: 'job:test',
+        toolName: 'Bash',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: false,
+          mode: 'cancel',
+          decidedBy: 'owner',
+          permissionCallbackClaim: claim,
+        })),
+      },
+      ipcBaseDir: tempDir,
+      file: 'claimed-stale-after-decision.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(releasePendingPermissionCallback).toHaveBeenCalledWith({ claim });
+  });
+
+  it('does not release a callback claim after durable settlement succeeds', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-stale-after-settle.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const claim = {
+      id: 'claim-stale-after-settle',
+      scope: {
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        interactionId: 'interaction-stale-after-settle',
+      },
+    };
+    const activeLease = {
+      runId: 'run:test',
+      jobId: 'job:test',
+      workerInstanceId: 'worker-1',
+      leaseToken: 'lease-token',
+      fencingVersion: 7,
+      status: 'active',
+      claimedAt: '2026-06-10T00:00:00.000Z',
+      expiresAt: '2026-06-10T00:05:00.000Z',
+      heartbeatAt: '2026-06-10T00:00:00.000Z',
+    } as const;
+    const releasePendingPermissionCallback = vi.fn(async () => 1);
+    const resolvePendingInteraction = vi.fn(async () => true);
+    const createTransientGrant = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async () => true),
+        findPendingPermissionPromptByMember: vi.fn(async () => null),
+        listPendingInteractions: vi.fn(async () => []),
+        getActiveRunLease: vi
+          .fn()
+          .mockResolvedValueOnce(activeLease)
+          .mockResolvedValueOnce(activeLease)
+          .mockResolvedValueOnce(activeLease)
+          .mockResolvedValueOnce(activeLease)
+          .mockResolvedValueOnce(null),
+        createTransientGrant,
+        resolvePendingInteraction,
+        releasePendingPermissionCallback,
+      } as never,
+    });
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-stale-after-settle',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce-stale-after-settle',
+        responseKeyId: envelope.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        runId: 'run:test',
+        runLeaseToken: 'lease-token',
+        runLeaseFencingVersion: 7,
+        jobId: 'job:test',
+        toolName: 'Bash',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: false,
+          mode: 'cancel',
+          decidedBy: 'owner',
+          permissionCallbackClaim: claim,
+        })),
+      },
+      ipcBaseDir: tempDir,
+      file: 'claimed-stale-after-settle.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(resolvePendingInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionCallbackClaim: claim }),
+    );
+    expect(releasePendingPermissionCallback).not.toHaveBeenCalled();
   });
 
   it('does not prompt or resume scheduled permission IPC when the run lease is stale', async () => {
@@ -719,6 +1922,355 @@ describe('ipc-interaction-handler', () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  it('dispatches and resolves a single question through the live loop', async () => {
+    const signing = createIpcAuthEnvelope('main_agent', 'persisted-thread');
+    const claimedPath = path.join(tempDir, 'claimed-single-question.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const persistedRequest: UserQuestionRequest = {
+      requestId: 'question-live-single',
+      appId: 'app:test',
+      sourceAgentFolder: 'main_agent',
+      targetJid: 'slack:persisted',
+      threadId: 'persisted-thread',
+      responseKeyId: signing.responseKeyId,
+      questions: [
+        {
+          header: 'First',
+          question: 'First question?',
+          options: [{ label: 'Alpha', description: 'Choose alpha' }],
+          multiSelect: false,
+        },
+      ],
+    };
+    const persisted = durableQuestionInteraction({
+      request: persistedRequest,
+      envelope: {
+        version: 1,
+        targetJid: 'slack:persisted',
+        threadId: 'persisted-thread',
+        request: persistedRequest,
+        selections: [],
+        completedQuestionIndexes: [],
+      },
+    });
+    const resolvePendingInteraction = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async (input) => ({
+          ...persisted,
+          id: input.id,
+        })),
+        resolvePendingInteraction,
+        createTransientGrant: vi.fn(async () => true),
+      } as never,
+    });
+    const requestUserAnswer = vi.fn(async () => ({
+      requestId: persistedRequest.requestId,
+      answers: { 'First question?': 'Alpha' },
+      answeredBy: 'owner',
+    }));
+
+    await processUserQuestionInteractionIpc({
+      request: persistedRequest,
+      sourceAgentFolder: 'main_agent',
+      deps: { requestUserAnswer },
+      ipcBaseDir: tempDir,
+      file: 'claimed-single-question.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(requestUserAnswer).toHaveBeenCalledOnce();
+    expect(requestUserAnswer).toHaveBeenCalledWith(persistedRequest);
+    expect(resolvePendingInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'resolved',
+        resolution: { answers: { 'First question?': 'Alpha' } },
+      }),
+    );
+    const response = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          tempDir,
+          'main_agent',
+          'user-answers',
+          `${persistedRequest.requestId}.json`,
+        ),
+        'utf-8',
+      ),
+    );
+    expect(response).toMatchObject({
+      requestId: persistedRequest.requestId,
+      answers: { 'First question?': 'Alpha' },
+      answeredBy: 'owner',
+    });
+  });
+
+  it('dispatches a fresh multi-question interaction once through the live loop', async () => {
+    const signing = createIpcAuthEnvelope('main_agent', 'multi-thread');
+    const claimedPath = path.join(tempDir, 'claimed-multi-question.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const request: UserQuestionRequest = {
+      requestId: 'question-live-multi',
+      sourceAgentFolder: 'main_agent',
+      threadId: 'multi-thread',
+      responseKeyId: signing.responseKeyId,
+      questions: [
+        {
+          header: 'First',
+          question: 'First question?',
+          options: [{ label: 'Alpha', description: '' }],
+          multiSelect: false,
+        },
+        {
+          header: 'Second',
+          question: 'Second question?',
+          options: [{ label: 'Beta', description: '' }],
+          multiSelect: false,
+        },
+      ],
+    };
+    const pending = durableQuestionInteraction({
+      request,
+      envelope: {
+        version: 1,
+        targetJid: null,
+        threadId: 'multi-thread',
+        request,
+        selections: [],
+        completedQuestionIndexes: [],
+      },
+    });
+    const resolvePendingInteraction = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async (input) => ({
+          ...pending,
+          id: input.id,
+        })),
+        resolvePendingInteraction,
+        createTransientGrant: vi.fn(async () => true),
+      } as never,
+    });
+    const requestUserAnswer = vi.fn(async () => ({
+      requestId: request.requestId,
+      answers: {
+        'First question?': 'Alpha',
+        'Second question?': 'Beta',
+      },
+    }));
+
+    await processUserQuestionInteractionIpc({
+      request,
+      sourceAgentFolder: 'main_agent',
+      deps: { requestUserAnswer },
+      ipcBaseDir: tempDir,
+      file: 'claimed-multi-question.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(requestUserAnswer).toHaveBeenCalledOnce();
+    expect(requestUserAnswer).toHaveBeenCalledWith(request);
+    expect(resolvePendingInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'resolved',
+        resolution: {
+          answers: {
+            'First question?': 'Alpha',
+            'Second question?': 'Beta',
+          },
+        },
+      }),
+    );
+  });
+
+  it('cancels and reopens an orphaned question under the incoming active lease', async () => {
+    const signing = createIpcAuthEnvelope('main_agent', 'incoming-thread');
+    const claimedPath = path.join(tempDir, 'claimed-recovered-question.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const persistedRequest: UserQuestionRequest = {
+      requestId: 'question-restart-partial',
+      appId: 'app:test',
+      sourceAgentFolder: 'main_agent',
+      runId: 'run:test',
+      runLeaseToken: 'test-lease-old-token',
+      runLeaseFencingVersion: 7,
+      targetJid: 'slack:persisted',
+      threadId: 'persisted-thread',
+      responseKeyId: signing.responseKeyId,
+      questions: [
+        {
+          header: 'First',
+          question: 'First question?',
+          options: [{ label: 'Alpha', description: 'Choose alpha' }],
+          multiSelect: false,
+        },
+        {
+          header: 'Second',
+          question: 'Second question?',
+          options: [{ label: 'Beta', description: 'Choose beta' }],
+          multiSelect: false,
+        },
+      ],
+    };
+    const persistedBase = durableQuestionInteraction({
+      request: persistedRequest,
+      envelope: {
+        version: 1,
+        targetJid: 'slack:persisted',
+        threadId: 'persisted-thread',
+        request: persistedRequest,
+        selections: [],
+        completedQuestionIndexes: [0],
+      },
+    });
+    const persisted = {
+      ...persistedBase,
+      runId: 'run:test',
+      payload: {
+        ...persistedBase.payload,
+        runLeaseToken: 'test-lease-old-token',
+        runLeaseFencingVersion: 7,
+      },
+    } satisfies PendingInteraction;
+    const incomingRequest: UserQuestionRequest = {
+      requestId: persistedRequest.requestId,
+      appId: 'app:test',
+      sourceAgentFolder: 'main_agent',
+      runId: 'run:test',
+      runLeaseToken: 'test-lease-new-token',
+      runLeaseFencingVersion: 8,
+      targetJid: 'slack:incoming',
+      threadId: 'incoming-thread',
+      responseKeyId: signing.responseKeyId,
+      questions: [
+        {
+          header: 'Current',
+          question: 'Incoming question?',
+          options: [{ label: 'Gamma', description: 'Choose gamma' }],
+          multiSelect: false,
+        },
+      ],
+    };
+    let row = persisted;
+    let reopenCount = 0;
+    const createPendingInteraction = vi.fn(
+      async (
+        input: Parameters<
+          PendingInteractionRepository['createPendingInteraction']
+        >[0],
+      ) => {
+        if (row.status === 'cancelled') {
+          reopenCount += 1;
+          row = {
+            ...row,
+            id: input.id,
+            runId: input.runId ?? null,
+            status: 'pending',
+            payload: input.payload,
+            callbackRoute: input.callbackRoute ?? null,
+            resolution: null,
+            approverRef: null,
+            resolvedAt: null,
+          };
+        }
+        return row;
+      },
+    );
+    const cancelPendingQuestionInteractionIfRunLeaseInactive = vi.fn(
+      async ({
+        id,
+        resolution,
+      }: Parameters<
+        PendingInteractionRepository['cancelPendingQuestionInteractionIfRunLeaseInactive']
+      >[0]) => {
+        if (
+          row.id !== id ||
+          row.status !== 'pending' ||
+          row.payload.runLeaseToken !== 'test-lease-old-token' ||
+          row.payload.runLeaseFencingVersion !== 7
+        ) {
+          return false;
+        }
+        row = {
+          ...row,
+          status: 'cancelled',
+          resolution,
+          resolvedAt: '2026-07-17T00:01:00.000Z',
+        };
+        return true;
+      },
+    );
+    const resolvePendingInteraction = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        getActiveRunLease: vi.fn(async () => ({
+          runId: 'run:test',
+          jobId: null,
+          workerInstanceId: 'worker-2',
+          leaseToken: 'test-lease-new-token',
+          fencingVersion: 8,
+          status: 'active',
+          claimedAt: '2026-07-17T00:01:00.000Z',
+          expiresAt: '2026-07-18T00:00:00.000Z',
+          heartbeatAt: '2026-07-17T00:01:00.000Z',
+        })),
+        createPendingInteraction,
+        cancelPendingQuestionInteractionIfRunLeaseInactive,
+        resolvePendingInteraction,
+        createTransientGrant: vi.fn(async () => true),
+      } as never,
+    });
+    const requestUserAnswer = vi.fn(async () => ({
+      requestId: incomingRequest.requestId,
+      answers: { 'Incoming question?': 'Gamma' },
+      answeredBy: 'incoming-owner',
+    }));
+
+    await processUserQuestionInteractionIpc({
+      request: incomingRequest,
+      sourceAgentFolder: 'main_agent',
+      deps: { requestUserAnswer },
+      ipcBaseDir: tempDir,
+      file: 'claimed-recovered-question.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(
+      cancelPendingQuestionInteractionIfRunLeaseInactive,
+    ).toHaveBeenCalledOnce();
+    expect(createPendingInteraction).toHaveBeenCalledTimes(2);
+    expect(reopenCount).toBe(1);
+    expect(requestUserAnswer).toHaveBeenCalledOnce();
+    expect(requestUserAnswer).toHaveBeenCalledWith(incomingRequest);
+    expect(resolvePendingInteraction).toHaveBeenCalledOnce();
+    expect(resolvePendingInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'resolved',
+        resolution: { answers: { 'Incoming question?': 'Gamma' } },
+      }),
+    );
+    expect(fs.existsSync(claimedPath)).toBe(false);
+    const response = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          tempDir,
+          'main_agent',
+          'user-answers',
+          `${persistedRequest.requestId}.json`,
+        ),
+        'utf-8',
+      ),
+    );
+    expect(response).toMatchObject({
+      requestId: incomingRequest.requestId,
+      answers: { 'Incoming question?': 'Gamma' },
+      answeredBy: 'incoming-owner',
+    });
   });
 
   it('does not prompt or answer scheduled question IPC when the run lease is stale', async () => {
@@ -804,12 +2356,26 @@ describe('ipc-interaction-handler', () => {
   });
 
   it('does not write a scheduled permission response when durable resolution fails', async () => {
+    const before = getOperationalErrorCount(
+      'interaction',
+      'permission_request',
+    );
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(
       tempDir,
       'claimed-unresolved-permission.json',
     );
     fs.writeFileSync(claimedPath, '{}');
+    const claim = {
+      id: 'claim-unresolved-run',
+      scope: {
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        interactionId: 'interaction-unresolved-run',
+      },
+    };
+    const releasePendingPermissionCallback = vi.fn(async () => 1);
+    const resolvePendingInteraction = vi.fn(async () => false);
     configurePendingInteractionDurability({
       repository: {
         getActiveRunLease: vi.fn(async () => ({
@@ -824,8 +2390,11 @@ describe('ipc-interaction-handler', () => {
           heartbeatAt: '2026-06-10T00:00:00.000Z',
         })),
         createPendingInteraction: vi.fn(async () => true),
-        resolvePendingInteraction: vi.fn(async () => false),
+        findPendingPermissionPromptByMember: vi.fn(async () => null),
+        listPendingInteractions: vi.fn(async () => []),
+        resolvePendingInteraction,
         createTransientGrant: vi.fn(async () => true),
+        releasePendingPermissionCallback,
       } as never,
     });
 
@@ -852,6 +2421,7 @@ describe('ipc-interaction-handler', () => {
           mode: 'cancel',
           decidedBy: 'owner',
           decisionClassification: 'user_reject',
+          permissionCallbackClaim: claim,
         })),
       },
       ipcBaseDir: tempDir,
@@ -870,9 +2440,115 @@ describe('ipc-interaction-handler', () => {
         ),
       ),
     ).toBe(false);
+    expect(resolvePendingInteraction).toHaveBeenCalledOnce();
+    expect(releasePendingPermissionCallback).not.toHaveBeenCalled();
+    expect(getOperationalErrorCount('interaction', 'permission_request')).toBe(
+      before + 1,
+    );
+    expect(fs.existsSync(claimedPath)).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(
+          tempDir,
+          'errors',
+          'main_agent-claimed-unresolved-permission.json',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('retries only durable resolution after a transient post-authority failure', async () => {
+    const envelope = createIpcAuthEnvelope('main_agent', null);
+    const file = 'retryable-resolution-permission.json';
+    const claimedPath = path.join(tempDir, `.processing-test-${file}`);
+    fs.writeFileSync(claimedPath, '{}');
+    const claim = {
+      id: 'claim-retryable-resolution',
+      scope: {
+        appId: 'app:test',
+        sourceAgentFolder: 'main_agent',
+        interactionId: 'interaction-retryable-resolution',
+      },
+    };
+    const resolvePendingInteraction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockResolvedValueOnce(true);
+    const createTransientGrant = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        getActiveRunLease: vi.fn(async () => ({
+          runId: 'run:test',
+          jobId: 'job:test',
+          workerInstanceId: 'worker-1',
+          leaseToken: 'lease-token',
+          fencingVersion: 7,
+          status: 'active',
+          claimedAt: '2026-06-10T00:00:00.000Z',
+          expiresAt: '2026-06-10T00:05:00.000Z',
+          heartbeatAt: '2026-06-10T00:00:00.000Z',
+        })),
+        createPendingInteraction: vi.fn(async () => true),
+        findPendingPermissionPromptByMember: vi.fn(async () => null),
+        listPendingInteractions: vi.fn(async () => []),
+        resolvePendingInteraction,
+        createTransientGrant,
+      } as never,
+    });
+
+    await processPermissionInteractionIpc({
+      request: {
+        requestId: 'perm-retryable-resolution',
+        appId: 'app:test',
+        agentId: 'agent:test',
+        responseNonce: 'nonce-retryable',
+        responseKeyId: envelope.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        runHandle: 'agent-run-1',
+        runId: 'run:test',
+        runLeaseToken: 'lease-token',
+        runLeaseFencingVersion: 7,
+        jobId: 'job:test',
+        targetJid: 'tg:team',
+        toolName: 'Bash',
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestPermissionApproval: vi.fn(async () => ({
+          approved: true,
+          mode: 'allow_once',
+          decidedBy: 'owner',
+          decisionClassification: 'user_temporary',
+          permissionCallbackClaim: claim,
+        })),
+      },
+      ipcBaseDir: tempDir,
+      file,
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(resolvePendingInteraction).toHaveBeenCalledTimes(2);
+    expect(createTransientGrant).toHaveBeenCalledOnce();
+    expect(fs.existsSync(claimedPath)).toBe(false);
+    expect(fs.existsSync(path.join(tempDir, file))).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(
+          tempDir,
+          'main_agent',
+          'permission-responses',
+          'perm-retryable-resolution.json',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('does not write scheduled question answers when durable resolution fails', async () => {
+    const before = getOperationalErrorCount(
+      'interaction',
+      'user_question_request',
+    );
     const envelope = createIpcAuthEnvelope('main_agent', null);
     const claimedPath = path.join(tempDir, 'claimed-unresolved-question.json');
     fs.writeFileSync(claimedPath, '{}');
@@ -940,6 +2616,65 @@ describe('ipc-interaction-handler', () => {
           'main_agent',
           'user-answers',
           'userq-unresolved-run.json',
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      getOperationalErrorCount('interaction', 'user_question_request'),
+    ).toBe(before + 1);
+  });
+
+  it('withholds question IPC output when prompt persistence fails', async () => {
+    const signing = createIpcAuthEnvelope('main_agent', null);
+    const claimedPath = path.join(tempDir, 'claimed-question-persistence.json');
+    fs.writeFileSync(claimedPath, '{}');
+    const resolvePendingInteraction = vi.fn(async () => true);
+    configurePendingInteractionDurability({
+      repository: {
+        createPendingInteraction: vi.fn(async () => true),
+        resolvePendingInteraction,
+      } as never,
+    });
+    const persistenceError = new DurableInteractionPersistenceError(
+      'question prompt delivery was not persisted',
+    );
+
+    await processUserQuestionInteractionIpc({
+      request: {
+        requestId: 'userq-persistence-failure',
+        appId: 'app:test',
+        responseKeyId: signing.responseKeyId,
+        sourceAgentFolder: 'main_agent',
+        targetJid: 'dc:channel-1',
+        questions: [
+          {
+            header: 'Mode',
+            question: 'Pick one',
+            options: [{ label: 'Retry', description: 'Try again' }],
+            multiSelect: false,
+          },
+        ],
+      },
+      sourceAgentFolder: 'main_agent',
+      deps: {
+        requestUserAnswer: vi.fn(async () => {
+          throw persistenceError;
+        }),
+      },
+      ipcBaseDir: tempDir,
+      file: 'claimed-question-persistence.json',
+      claimedPath,
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    });
+
+    expect(resolvePendingInteraction).not.toHaveBeenCalled();
+    expect(
+      fs.existsSync(
+        path.join(
+          tempDir,
+          'main_agent',
+          'user-answers',
+          'userq-persistence-failure.json',
         ),
       ),
     ).toBe(false);
@@ -1071,6 +2806,8 @@ describe('ipc-interaction-handler', () => {
     const repository = {
       getActiveRunLease,
       createPendingInteraction: vi.fn(async () => true),
+      findPendingPermissionPromptByMember: vi.fn(async () => null),
+      listPendingInteractions: vi.fn(async () => []),
       resolvePendingInteraction: vi.fn(async () => true),
       createTransientGrant: vi.fn(async () => true),
     };
@@ -1161,6 +2898,8 @@ describe('ipc-interaction-handler', () => {
       repository: {
         getActiveRunLease,
         createPendingInteraction: vi.fn(async () => true),
+        findPendingPermissionPromptByMember: vi.fn(async () => null),
+        listPendingInteractions: vi.fn(async () => []),
         resolvePendingInteraction: vi.fn(async () => true),
         createTransientGrant: vi.fn(async () => true),
       } as never,

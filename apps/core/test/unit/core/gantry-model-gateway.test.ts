@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
+import { Readable, Writable } from 'node:stream';
 
-import { GantryModelGatewayBroker } from '@core/adapters/llm/anthropic-claude-agent/gantry-model-gateway.js';
+import {
+  extractGatewayResponseUsage,
+  GantryModelGatewayBroker,
+} from '@core/adapters/llm/anthropic-claude-agent/gantry-model-gateway.js';
 import { clearAwsDefaultCredentialProviderCacheForTest } from '@core/adapters/llm/anthropic-claude-agent/gantry-model-gateway-auth-aws-default.js';
 import { signAwsSigV4Request } from '@core/adapters/llm/anthropic-claude-agent/gantry-model-gateway-auth-sigv4.js';
 import {
@@ -204,17 +208,29 @@ function gatewayRequest(input: {
 }
 
 function gatewayStreamingRequest(input: { url: string; token: string }): {
-  firstChunk: Promise<string>;
-  done: Promise<{ status: number; body: string }>;
+  firstChunk: Promise<{
+    status: number;
+    headers: http.IncomingHttpHeaders;
+    body: Buffer;
+  }>;
+  done: Promise<{ status: number; body: Buffer }>;
 } {
-  let resolveFirstChunk!: (value: string) => void;
+  let resolveFirstChunk!: (value: {
+    status: number;
+    headers: http.IncomingHttpHeaders;
+    body: Buffer;
+  }) => void;
   let rejectFirstChunk!: (error: unknown) => void;
   let sawFirstChunk = false;
-  const firstChunk = new Promise<string>((resolve, reject) => {
+  const firstChunk = new Promise<{
+    status: number;
+    headers: http.IncomingHttpHeaders;
+    body: Buffer;
+  }>((resolve, reject) => {
     resolveFirstChunk = resolve;
     rejectFirstChunk = reject;
   });
-  const done = new Promise<{ status: number; body: string }>(
+  const done = new Promise<{ status: number; body: Buffer }>(
     (resolve, reject) => {
       const req = http.request(
         input.url,
@@ -232,13 +248,17 @@ function gatewayStreamingRequest(input: { url: string; token: string }): {
             chunks.push(buffer);
             if (!sawFirstChunk) {
               sawFirstChunk = true;
-              resolveFirstChunk(buffer.toString('utf-8'));
+              resolveFirstChunk({
+                status: res.statusCode ?? 0,
+                headers: res.headers,
+                body: buffer,
+              });
             }
           });
           res.on('end', () =>
             resolve({
               status: res.statusCode ?? 0,
-              body: Buffer.concat(chunks).toString('utf-8'),
+              body: Buffer.concat(chunks),
             }),
           );
         },
@@ -308,7 +328,7 @@ describe('GantryModelGatewayBroker', () => {
     signAwsSigV4Request({
       method: 'POST',
       url: new URL(
-        'https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions?b=two&a=one&a=zero&space=a%20b',
+        'https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions?b=two&a=one&a=zero&space=a%20b',
       ),
       headers,
       body: Buffer.from('{"model":"openai.gpt-oss-120b-1:0"}'),
@@ -327,7 +347,7 @@ describe('GantryModelGatewayBroker', () => {
       'e6f5b76929970d12f510677a95e505022a28268c8cfcc023e92171adbc006101',
     );
     expect(headers.authorization).toBe(
-      'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260614/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-meta-a;x-amz-meta-z;x-amz-security-token, Signature=9ca220b8a1973977afd325d4d2bbf0b66aecb7526d9e58f88551693e5a863a91',
+      'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260614/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-meta-a;x-amz-meta-z;x-amz-security-token, Signature=4cdbaf49e3dfc9fba8f49918ba3b3ba947962ef45872812d5fdce97ac16a38dc',
     );
   });
 
@@ -339,7 +359,7 @@ describe('GantryModelGatewayBroker', () => {
     signAwsSigV4Request({
       method: 'POST',
       url: new URL(
-        'https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions?x=a+b&plus=%2B',
+        'https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions?x=a+b&plus=%2B',
       ),
       headers,
       body: Buffer.from('{"model":"openai.gpt-oss-120b-1:0"}'),
@@ -353,7 +373,7 @@ describe('GantryModelGatewayBroker', () => {
     });
 
     expect(headers.authorization).toBe(
-      'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260614/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=acea999188994dd6fd93f65f2b63331d18c89119e972a96823c9b3ff96e638ae',
+      'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260614/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=17644a21688828ebaed34d77b4061cb80824ff7eb88412c6ee7a666d3dfe120d',
     );
   });
 
@@ -768,6 +788,44 @@ describe('GantryModelGatewayBroker', () => {
     }
   });
 
+  it.each([
+    [
+      'Anthropic',
+      {
+        model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 12, output_tokens: 4 },
+      },
+      { inputTokens: 12, outputTokens: 4, model: 'sonnet' },
+    ],
+    [
+      'OpenAI-compatible',
+      { model: 'gpt-5.5', usage: { prompt_tokens: 9, completion_tokens: 3 } },
+      { inputTokens: 9, outputTokens: 3, model: 'gpt' },
+    ],
+  ])(
+    'extracts normalized %s non-streaming usage',
+    async (_name, payload, expected) => {
+      const usage = await extractGatewayResponseUsage(
+        new Response(JSON.stringify(payload), {
+          headers: { 'content-type': 'application/json' },
+        }),
+        Buffer.from(JSON.stringify({ model: payload.model })),
+      );
+      expect(usage).toMatchObject(expected);
+    },
+  );
+
+  it('skips streamed usage without parsing SSE frames', async () => {
+    await expect(
+      extractGatewayResponseUsage(
+        new Response('data: {"usage":{"input_tokens":12}}\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+        Buffer.from(JSON.stringify({ stream: true })),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('does not publish ephemeral credential revocation scopes as runtime run ids', async () => {
     const repo = new MutableModelCredentialRepository();
     repo.set('anthropic', 'sk-ant-old');
@@ -834,10 +892,88 @@ describe('GantryModelGatewayBroker', () => {
     }
   });
 
-  it('streams upstream provider responses without buffering the full body', async () => {
+  it('supports API-key-scoped gateway tokens without runtime run ids', async () => {
     const repo = new MutableModelCredentialRepository();
-    repo.set('anthropic', 'sk-ant-stream');
+    repo.set('anthropic', 'sk-ant-api-key-scope');
+    const audit = vi.fn(async () => undefined);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"ok":true}')),
+    );
+    const broker = new GantryModelGatewayBroker(repo, { audit });
+    try {
+      const injection = await broker.getInjection({
+        binding: {
+          profile: 'gantry',
+          purpose: 'model_runtime',
+          appId,
+          apiKeyId: 'control-key-a',
+          modelRouteId: 'anthropic',
+        },
+      });
+
+      expect(audit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appId,
+          eventType: 'credential.model.used',
+          actor: 'gantry-model-gateway',
+          payload: expect.objectContaining({
+            providerId: 'anthropic',
+            tokenScope: 'api_key:control-key-a',
+            outcome: 'token_issued',
+          }),
+        }),
+      );
+      expect(audit.mock.calls[0]?.[0]).not.toHaveProperty('runId');
+
+      const response = await gatewayRequest({
+        url: `${injection.env[anthropicBaseUrlKey]}/v1/messages`,
+        token: injection.env[anthropicApiKeyKey]!,
+      });
+      expect(response.status).toBe(200);
+
+      await broker.revokeInjection({
+        binding: {
+          profile: 'gantry',
+          purpose: 'model_runtime',
+          appId,
+          apiKeyId: 'control-key-a',
+          modelRouteId: 'anthropic',
+        },
+      });
+      const afterRevoke = await gatewayRequest({
+        url: `${injection.env[anthropicBaseUrlKey]}/v1/messages`,
+        token: injection.env[anthropicApiKeyKey]!,
+      });
+      expect(afterRevoke.status).toBe(401);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it('streams byte-identically before a blocked usage audit settles', async () => {
+    const repo = new MutableModelCredentialRepository();
+    repo.set('anthropic', 'mock-anthropic-cred');
+    const firstBytes = Buffer.from('data: first\n\n');
+    const secondBytes = Buffer.from('data: second\n\n');
     let releaseSecondChunk!: () => void;
+    let releaseUsageAudit!: () => void;
+    let resolveUsageAuditSettled!: () => void;
+    let auditCalls = 0;
+    let usageAuditSettled = false;
+    const usageAuditGate = new Promise<void>((resolve) => {
+      releaseUsageAudit = resolve;
+    });
+    const usageAuditSettledPromise = new Promise<void>((resolve) => {
+      resolveUsageAuditSettled = resolve;
+    });
+    const audit = vi.fn(async () => {
+      auditCalls += 1;
+      if (auditCalls !== 2) return;
+      await usageAuditGate;
+      usageAuditSettled = true;
+      resolveUsageAuditSettled();
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -845,9 +981,9 @@ describe('GantryModelGatewayBroker', () => {
           new Response(
             new ReadableStream<Uint8Array>({
               start(controller) {
-                controller.enqueue(Buffer.from('data: first\n\n'));
+                controller.enqueue(firstBytes);
                 releaseSecondChunk = () => {
-                  controller.enqueue(Buffer.from('data: second\n\n'));
+                  controller.enqueue(secondBytes);
                   controller.close();
                 };
               },
@@ -858,7 +994,7 @@ describe('GantryModelGatewayBroker', () => {
           ),
       ),
     );
-    const broker = new GantryModelGatewayBroker(repo);
+    const broker = new GantryModelGatewayBroker(repo, { audit });
     try {
       const injection = await broker.getInjection({
         binding: {
@@ -874,11 +1010,160 @@ describe('GantryModelGatewayBroker', () => {
         token: injection.env[anthropicApiKeyKey]!,
       });
 
-      await expect(response.firstChunk).resolves.toBe('data: first\n\n');
+      const firstChunk = await response.firstChunk;
+      expect(firstChunk).toMatchObject({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+      expect(firstChunk.body).toEqual(firstBytes);
+      expect(usageAuditSettled).toBe(false);
       releaseSecondChunk();
+      releaseUsageAudit();
+      await usageAuditSettledPromise;
       await expect(response.done).resolves.toMatchObject({
         status: 200,
-        body: 'data: first\n\ndata: second\n\n',
+        body: Buffer.concat([firstBytes, secondBytes]),
+      });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it('awaits the usage audit before surfacing a streaming pipe error', async () => {
+    const repo = new MutableModelCredentialRepository();
+    repo.set('anthropic', 'mock-anthropic-cred');
+    const pipeError = new Error('client disconnected');
+    let releaseUsageAudit!: () => void;
+    let auditCalls = 0;
+    let pipeWrites = 0;
+    let pipeRejected = false;
+    let usageAuditSettled = false;
+    const usageAuditGate = new Promise<void>((resolve) => {
+      releaseUsageAudit = resolve;
+    });
+    const audit = vi.fn(async () => {
+      auditCalls += 1;
+      if (auditCalls !== 2) return;
+      await usageAuditGate;
+      usageAuditSettled = true;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(Buffer.from('data: first\n\n'));
+                controller.enqueue(Buffer.from('data: second\n\n'));
+                controller.close();
+              },
+            }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          ),
+      ),
+    );
+    const broker = new GantryModelGatewayBroker(repo, { audit });
+    try {
+      const injection = await broker.getInjection({
+        binding: {
+          profile: 'gantry',
+          purpose: 'model_runtime',
+          appId,
+          modelRouteId: 'anthropic',
+        },
+      });
+      const req = Object.assign(Readable.from(['{}']), {
+        url: '/anthropic/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': injection.env[anthropicApiKeyKey]!,
+          'content-type': 'application/json',
+        },
+      }) as unknown as http.IncomingMessage;
+      const res = Object.assign(
+        new Writable({
+          write(_chunk, _encoding, callback) {
+            pipeWrites += 1;
+            if (pipeWrites === 1) {
+              callback();
+              return;
+            }
+            pipeRejected = true;
+            callback(pipeError);
+          },
+        }),
+        { statusCode: 200, setHeader: vi.fn() },
+      ) as unknown as http.ServerResponse;
+
+      const handlerPromise = (
+        broker as unknown as {
+          handleRequest(
+            request: http.IncomingMessage,
+            response: http.ServerResponse,
+          ): Promise<void>;
+        }
+      ).handleRequest(req, res);
+      let handlerSettled = false;
+      void handlerPromise.then(
+        () => {
+          handlerSettled = true;
+        },
+        () => {
+          handlerSettled = true;
+        },
+      );
+
+      await vi.waitFor(() => expect(audit).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(pipeRejected).toBe(true));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(handlerSettled).toBe(false);
+      expect(usageAuditSettled).toBe(false);
+      releaseUsageAudit();
+      await expect(handlerPromise).rejects.toBe(pipeError);
+      expect(usageAuditSettled).toBe(true);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it('delivers the full stream when the usage audit throws', async () => {
+    const repo = new MutableModelCredentialRepository();
+    repo.set('anthropic', 'mock-anthropic-cred');
+    const expected = Buffer.from('data: first\n\ndata: second\n\n');
+    let auditCalls = 0;
+    const audit = vi.fn(async () => {
+      auditCalls += 1;
+      if (auditCalls === 2) throw new Error('audit unavailable');
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(expected, {
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+      ),
+    );
+    const broker = new GantryModelGatewayBroker(repo, { audit });
+    try {
+      const injection = await broker.getInjection({
+        binding: {
+          profile: 'gantry',
+          purpose: 'model_runtime',
+          appId,
+          modelRouteId: 'anthropic',
+        },
+      });
+
+      const response = gatewayStreamingRequest({
+        url: `${injection.env[anthropicBaseUrlKey]}/v1/messages`,
+        token: injection.env[anthropicApiKeyKey]!,
+      });
+
+      await expect(response.done).resolves.toMatchObject({
+        status: 200,
+        body: expected,
       });
     } finally {
       await broker.close();
@@ -1418,9 +1703,7 @@ describe('GantryModelGatewayBroker', () => {
 
       expect(response.status).toBe(200);
       expect(upstreamFetch).toHaveBeenCalledWith(
-        new URL(
-          'https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions',
-        ),
+        new URL('https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions'),
         expect.objectContaining({
           headers: expect.objectContaining({
             authorization: 'Bearer bedrock-upstream-key',
@@ -1471,9 +1754,7 @@ describe('GantryModelGatewayBroker', () => {
       });
       expect(awsDefaultCredentialProviderMock).toHaveBeenCalledTimes(1);
       expect(upstreamFetch).toHaveBeenCalledWith(
-        new URL(
-          'https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions',
-        ),
+        new URL('https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions'),
         expect.objectContaining({
           headers: expect.objectContaining({
             authorization: expect.stringContaining(
@@ -1517,9 +1798,7 @@ describe('GantryModelGatewayBroker', () => {
         SecretId: 'prod/bedrock/api-key',
       });
       expect(upstreamFetch).toHaveBeenCalledWith(
-        new URL(
-          'https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions',
-        ),
+        new URL('https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions'),
         expect.objectContaining({
           headers: expect.objectContaining({
             authorization: 'Bearer bedrock-secret-ref-key',

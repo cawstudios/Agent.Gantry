@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DURABLE_ACCESS_RULE_REJECTION_REASON,
   formatDurableAccessRulesForUser,
   isDurableAccessRuleAllowed,
   validateDurableAccessRule,
@@ -61,20 +62,21 @@ describe('durable access policy', () => {
     }
   });
 
-  it('allows canonical Browser and exact durable Gantry MCP tools', () => {
+  it('allows canonical Browser and exact Gantry admin tools', () => {
     expect(validateDurableAccessRule('Browser')).toEqual({ ok: true });
     expect(
       validateDurableAccessRule('mcp__gantry__settings_desired_state'),
     ).toEqual({ ok: true });
-    expect(validateDurableAccessRule('mcp__gantry__scheduler_run_now')).toEqual(
-      { ok: true },
-    );
-    expect(
-      validateDurableAccessRule('mcp__gantry__scheduler_list_jobs'),
-    ).toEqual({ ok: true });
   });
 
-  it('rejects baseline non-durable Gantry MCP tools as durable access rules', () => {
+  it('rejects exact third-party MCP tools', () => {
+    expect(validateDurableAccessRule('mcp__github__get_issue')).toEqual({
+      ok: false,
+      reason: DURABLE_ACCESS_RULE_REJECTION_REASON,
+    });
+  });
+
+  it('rejects non-admin Gantry MCP tools as durable access rules', () => {
     expect(
       validateDurableAccessRule('mcp__gantry__send_message'),
     ).toMatchObject({ ok: false });
