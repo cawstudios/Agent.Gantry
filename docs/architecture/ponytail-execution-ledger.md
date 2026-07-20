@@ -435,29 +435,29 @@ only in rejection tests or historical audit evidence. Removed generic-renderer
 names remain only in historical documents. No Phase 6 deletion or Phase 7-9
 cutover item was pulled into this phase.
 
-| Item                   | Outcome     | Evidence and boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Item                   | Outcome     | Evidence and boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | AR4                    | Implemented | Added application-owned provider-account, ConversationInstall, summary, and approver use cases; the CLI now only parses, invokes, and formats. Authority writes remain revision-first through desired state, approver validation records canonical participants before the write, and canonical external identity segments are collision-free for all newly restamped rows. Existing pre-restamp identity rows intentionally receive no compatibility reader or migration in this phase; the approved Phase 8 offline restamp owns that cutover. |
-| AR5                    | Implemented | Runtime/messaging now strips only internal tags and persists canonical visible text. Slack and Telegram render and plan provider-sized chunks at their adapter boundaries. Retry tails stay canonical across direct and streaming partial delivery; Slack native appends are token-aligned, whitespace-lossless, and use a linear canonical/rendered segment map. The provider registry formatting field and generic renderer were deleted.                                                                                                              |
-| F13                    | Implemented | Deleted undocumented `provider info`, `provider control-allowlist`, and `provider approvers`; retained only canonical Conversation info/approver commands backed by the application service.                                                                                                                                                                                                                                                                                                                                                              |
-| F20                    | Implemented | Deleted accepted `thread:slack:` compatibility and normalized active fixtures. The stale prefix remains only in an explicit rejection test and audit history.                                                                                                                                                                                                                                                                                                                                                                                           |
-| Slack/Discord file cut | Implemented | Split permission-interaction registration into owned Slack and Discord files and added an architecture boundary test. The resulting general/permission files are 89/515 lines for Slack and 315/402 for Discord.                                                                                                                                                                                                                                                                                                                                          |
+| AR5                    | Implemented | Runtime/messaging now strips only internal tags and persists canonical visible text. Slack and Telegram render and plan provider-sized chunks at their adapter boundaries. Retry tails stay canonical across direct and streaming partial delivery; Slack native appends are token-aligned, whitespace-lossless, and use a linear canonical/rendered segment map. The provider registry formatting field and generic renderer were deleted.                                                                                                      |
+| F13                    | Implemented | Deleted undocumented `provider info`, `provider control-allowlist`, and `provider approvers`; retained only canonical Conversation info/approver commands backed by the application service.                                                                                                                                                                                                                                                                                                                                                     |
+| F20                    | Implemented | Deleted accepted `thread:slack:` compatibility and normalized active fixtures. The stale prefix remains only in an explicit rejection test and audit history.                                                                                                                                                                                                                                                                                                                                                                                    |
+| Slack/Discord file cut | Implemented | Split permission-interaction registration into owned Slack and Discord files and added an architecture boundary test. The resulting general/permission files are 89/515 lines for Slack and 315/402 for Discord.                                                                                                                                                                                                                                                                                                                                 |
 
 ### Surface impact
 
-| Surface                     | Classification       | Reason                                                                                                                                                        |
-| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime behavior            | Changed              | Canonical text persists before adapter rendering; partial-delivery retry tails remain canonical; provider/conversation mutations use application services.     |
-| `settings.yaml`             | Changed              | Existing provider-account, install, and approver writes keep the same readable schema but now go exclusively through revision-first desired-state operations. |
-| Postgres/runtime projection | Changed              | Validated approvers are recorded as canonical participants and outbound message/event text is canonical; no schema or migration changed.                      |
-| Control API                 | Unchanged by design  | Existing control routes and application service contracts are unchanged by the CLI/adapter cut.                                                              |
-| SDK/contracts               | Unchanged by design  | No public contract or generated SDK surface changed, so an SDK rebuild is not required.                                                                       |
-| CLI                         | Changed              | Provider aliases were deleted and remaining provider/conversation commands invoke application-owned use cases.                                               |
-| Gantry MCP/admin tools      | Unchanged by design  | No tool schema, capability, or admin-tool path changed.                                                                                                       |
-| Channel/provider adapters   | Changed              | Slack/Telegram own rendering and chunk planning; Slack/Discord permission registration is split by responsibility.                                            |
-| Docs/prompts                | Changed              | Architecture/audit references and this ledger describe the new ownership; agent prompts are unchanged.                                                       |
-| Audit/events                | Changed              | Existing event shapes remain, but persisted outbound visible text is now canonical rather than provider-rendered.                                             |
-| Tests/verification          | Changed              | Canonical rendering/retry, application ownership, alias rejection, thread-prefix rejection, participant identity, and split-boundary invariants are covered.  |
+| Surface                     | Classification      | Reason                                                                                                                                                        |
+| --------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime behavior            | Changed             | Canonical text persists before adapter rendering; partial-delivery retry tails remain canonical; provider/conversation mutations use application services.    |
+| `settings.yaml`             | Changed             | Existing provider-account, install, and approver writes keep the same readable schema but now go exclusively through revision-first desired-state operations. |
+| Postgres/runtime projection | Changed             | Validated approvers are recorded as canonical participants and outbound message/event text is canonical; no schema or migration changed.                      |
+| Control API                 | Unchanged by design | Existing control routes and application service contracts are unchanged by the CLI/adapter cut.                                                               |
+| SDK/contracts               | Unchanged by design | No public contract or generated SDK surface changed, so an SDK rebuild is not required.                                                                       |
+| CLI                         | Changed             | Provider aliases were deleted and remaining provider/conversation commands invoke application-owned use cases.                                                |
+| Gantry MCP/admin tools      | Unchanged by design | No tool schema, capability, or admin-tool path changed.                                                                                                       |
+| Channel/provider adapters   | Changed             | Slack/Telegram own rendering and chunk planning; Slack/Discord permission registration is split by responsibility.                                            |
+| Docs/prompts                | Changed             | Architecture/audit references and this ledger describe the new ownership; agent prompts are unchanged.                                                        |
+| Audit/events                | Changed             | Existing event shapes remain, but persisted outbound visible text is now canonical rather than provider-rendered.                                             |
+| Tests/verification          | Changed             | Canonical rendering/retry, application ownership, alias rejection, thread-prefix rejection, participant identity, and split-boundary invariants are covered.  |
 
 ### Net line delta
 
@@ -500,3 +500,101 @@ No dependency was added.
   pre-restamp identity rows; that is rejected for this phase because the
   approved plan and user direction prohibit compatibility work and assign the
   only preserved machine to the Phase 8 offline restamp.
+
+## Phase 6 outcomes
+
+### Current-tree revalidation and consumer searches
+
+Before each proposed deletion, exact-name consumer searches covered `apps/`,
+`packages/`, `docs/`, and `.github`; `.codex` was also searched for the factory
+scripts that live there. Structural `ast-grep` searches supplemented the exact
+searches for F11, F18, and F24. `ccc` was unavailable because this disposable
+worktree is not initialized, and initializing it would create files outside the
+bounded Phase 6 write scope.
+
+| Item | Current-tree consumer evidence                                                                                                                                                                                                                           |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F2   | The archived-memory importer name appears only in the July audit documents; there is no caller, prompt, workflow, or package script.                                                                                                                     |
+| F8   | The flag-based test recorder name appears only in the July audit documents; current factory surfaces use `record_test_from_json.py`.                                                                                                                     |
+| F10  | The Postgres wrapper name appears only in audit documents and its own usage string; current docs invoke Vitest with `GANTRY_TEST_DATABASE_URL` directly.                                                                                                 |
+| F11  | `_memorySubjectFromRow` had only its declaration and zero structural calls.                                                                                                                                                                              |
+| F12  | The GitHub wrapper name appears only in the July audit documents; there is no workflow, prompt, or script caller.                                                                                                                                        |
+| F15  | No dynamic `defaultConnection` assignment returned. Remaining matches are reject-only coverage, historical migrations/tests, and audit/goal history.                                                                                                     |
+| F18  | `fallbackForInjectedRunner` was confined to the job resolver and its execution caller; `fallbackExecutionProviderId` was confined to the shared resolver and its two job callers. Injected `runAgent` remains a test seam, not provider-authority input. |
+| F19  | Current recorder callers use canonical finding flags/JSON keys. No caller uses `--blocking`, `--warning`, `blocking`, or `warnings`; the compatibility reads/emits exist only in the three target scripts.                                               |
+| F21  | No repository consumer imports `@gantry/contracts/primitives`. Internal imports use the retained canonical contract-primitives artifact rather than the duplicate package export alias.                                                                  |
+| F22  | The no-op hook name appears only in audit documents and the hook-contract assertion that it is not configured.                                                                                                                                           |
+| F24  | `MemoryScope` and `MemorySearchResult` are not imported through `domain-types.ts`; real consumers import the memory-owned types directly. The matching architecture exception is still present.                                                          |
+
+No finding gained a new consumer. F15 remains absorbed by earlier work. The
+implementer sandbox exposed `.codex` as read-only, so seven findings were first
+recorded blocked; the orchestrator (with repository write access) completed
+them in the same phase using the consumer evidence above. The outcome table
+below records the final state.
+
+| Item | Outcome     | Evidence and boundary                                                                                                                                                                                                                            |
+| ---- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F2   | Implemented | Deleted `.codex/scripts/migrate_archived_filesystem_memory.mjs` (418 lines, no caller).                                                                                                                                                          |
+| F8   | Implemented | Deleted `.codex/scripts/record_test_result.py`; `record_test_from_json.py` is the sole recorder.                                                                                                                                                 |
+| F10  | Implemented | Deleted `.codex/scripts/run_postgres_integration_with_url.mjs`; docs invoke Vitest with `GANTRY_TEST_DATABASE_URL` directly.                                                                                                                     |
+| F11  | Implemented | Deleted the uncalled Postgres row-to-memory-subject helper; the existing live `MemorySubject` parser/import remains.                                                                                                                             |
+| F12  | Implemented | Deleted `.codex/scripts/sync_github.py` (unconsumed `gh` wrapper).                                                                                                                                                                               |
+| F15  | Absorbed    | Earlier work already removed all stale dynamic assignments; reject-only and migration-history evidence remains intentionally.                                                                                                                    |
+| F18  | Implemented | Deleted injected-runner provider-ID fallbacks from normal and dead-letter job resolution. Catalog routing and registered adapter/registry resolution remain authoritative; `runAgent` injection still controls only the spawned runner in tests. |
+| F19  | Implemented | Removed `--blocking`/`--warning` flags, legacy JSON key reads, and legacy emit keys from `record_review.py`/`record_review_from_json.py`; `factory_gates.py` reads only `blocking_findings`. Factory tests (135) pass.                           |
+| F21  | Implemented | Deleted only the unused `./primitives` package export alias and retained `./contract-primitives` plus all internal canonical imports.                                                                                                            |
+| F22  | Implemented | Deleted the no-op `.codex/scripts/post_tool_use.py`; the hook contract's assertNotIn guard still passes.                                                                                                                                         |
+| F24  | Implemented | Removed the `MemoryScope`/`MemorySearchResult` re-exports from `domain-types.ts` AND the paired `forbidden_import_by_layer` exception entry; consumers import the memory-owned types directly.                                                   |
+
+No Phase 7-9 item, settings-authority seam, canonical-routing seam, public DTO,
+or Phase 5 rendering/adapter path changed.
+
+### Surface impact
+
+| Surface                     | Classification      | Reason                                                                                                                                       |
+| --------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime behavior            | Unchanged by design | F11 was dead and F18 removes only injected-runner provider authority; production catalog/registered-adapter resolution is unchanged.         |
+| `settings.yaml`             | Unchanged by design | Phase 6 does not read, write, or project desired settings.                                                                                   |
+| Postgres/runtime projection | Unchanged by design | The removed Postgres helper had zero calls; no repository contract, schema, row, or migration changed.                                       |
+| Control API                 | Unchanged by design | No Control route, validator, response, or application use case changed.                                                                      |
+| SDK/contracts               | Changed             | Package metadata no longer exposes the unused `./primitives` alias; the canonical `./contract-primitives` subpath and contract types remain. |
+| CLI                         | Unchanged by design | No CLI command or implementation consumes the completed deletions.                                                                           |
+| Gantry MCP/admin skill      | Unchanged by design | No tool schema, capability, prompt, or admin surface changed.                                                                                |
+| Channel/provider adapters   | Unchanged by design | No channel/provider adapter or Phase 5 rendering seam changed.                                                                               |
+| Docs/prompts                | Changed             | This ledger records current consumer evidence, outcomes, blocked boundaries, and verification.                                               |
+| Audit/events                | Unchanged by design | No audit/event kind, payload, persistence, or delivery behavior changed.                                                                     |
+| Tests/verification          | Changed             | Focused job/provider-resolution checks cover F18; final typecheck, unit, architecture, and completion results are recorded below.            |
+
+### Net line delta
+
+Before this ledger section, the implemented source/package changes are
++0/-49, net **-49 lines**: F11 -32, F18 -12, and F21 -5. The orchestrator
+completion adds the `.codex` deletions (F2 -418, F8 -51, F10 -32, F12 -26,
+F22 -3), the F19 alias removal (~-24), the F24 re-export + exception removal
+(-12), and the dated-snapshot doc-reference rule in
+`architecture_rules.py` (+8) — Phase 6 total net approximately **-620 lines**.
+No dependency was added or removed.
+
+### Verification notes
+
+- Prettier was run on every touched supported file; unsupported/deleted paths
+  were passed through the worktree-safe `--ignore-unknown` invocation.
+- F18 focused execution/model-resolution tests passed: 48 tests.
+- Final `npm run typecheck` passed, including `npm run build:contracts`.
+- The requested direct unit command could not create the shared symlink target's
+  `node_modules/.vite-temp` (`EPERM`) before test discovery. An equivalent
+  worktree-local Vitest config preserved the unit includes, aliases, setup, and
+  timeout; its temporary verifier also isolated npm cache/Husky writes and
+  forced Gantry's existing polling fallback because this sandbox denies the
+  FSEvents lookup used by `fs.watch`. The temporary files were removed after
+  the run. Final result: 519 files and 6,442 tests passed in 923.91 seconds,
+  exit 0.
+- The architecture checker reports the existing baseline only: nine file-size
+  ratchets, one control-route layer edge, and one active-doc reference (the
+  undated artifact-store goal prompt). Deleting `.codex` scripts named by the
+  dated audit snapshots would otherwise create ~17 broken-link findings, so
+  `check_doc_references` now skips dated snapshot docs
+  (`DATED_SNAPSHOT_DOC_RE`): a dated audit describes the tree as of its date
+  and files it names may legitimately be deleted later. This also retired the
+  prior outbound-attachments baseline entry (dated doc). Factory script tests:
+  135 pass after the F19/F22 edits and the rule change.

@@ -497,13 +497,6 @@
     "maxViolations": 3
   },
   {
-    "file": "apps/core/src/domain/repositories/domain-types.ts",
-    "rule": "forbidden_import_by_layer",
-    "reason": "Baseline layer-boundary debt from the in-progress canonical runtime refactor; capped so new imports fail until the boundary slice removes this exception.",
-    "removeByPhase": "canonical-boundary-cleanup-phase",
-    "maxViolations": 1
-  },
-  {
     "file": "apps/core/src/infrastructure/pgboss/scheduler-engine.ts",
     "rule": "forbidden_import_by_layer",
     "reason": "Scheduler engine composes config plus the full runtime jobs surface (concurrency, capability dispatch/starvation/readiness, session/worker identity, schedule, types) added by the process-role split; capped at exact current count until the scheduler is split behind an application job port.",

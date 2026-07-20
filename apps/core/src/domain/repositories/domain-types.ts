@@ -8,11 +8,6 @@ export type {
   NewMessage,
   ConversationRoute,
 } from '../types.js';
-export type {
-  MemoryScope,
-  MemorySearchResult,
-} from '../../memory/memory-types.js';
-
 export interface ChatInfo {
   jid: string;
   name: string;

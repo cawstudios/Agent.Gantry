@@ -190,7 +190,7 @@ def _validate_review_entry(
             path,
         )
 
-    blockers = _as_list(entry.get("blocking_findings", entry.get("blocking")))
+    blockers = _as_list(entry.get("blocking_findings"))
     if blockers:
         _append_issue(
             report,

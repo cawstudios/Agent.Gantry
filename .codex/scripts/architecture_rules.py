@@ -1534,9 +1534,16 @@ def looks_like_local_file_reference(token: str) -> bool:
     return suffix in RECOGNIZED_CODE_PATH_EXTENSIONS and "/" in token
 
 
+DATED_SNAPSHOT_DOC_RE = re.compile(r"-20\d{2}-\d{2}(-\d{2})?\b")
+
+
 def check_doc_references(root: Path) -> list[str]:
     missing: set[str] = set()
     for doc in active_docs(root):
+        # Dated audit/evidence snapshots describe the tree as of their date;
+        # files they name may legitimately be deleted later.
+        if DATED_SNAPSHOT_DOC_RE.search(doc.stem):
+            continue
         rel_doc = doc.relative_to(root).as_posix()
         text = doc.read_text()
         for raw_target in MARKDOWN_LINK_RE.findall(text):

@@ -258,38 +258,6 @@ function jsonTextEquals(column: unknown, keys: string[], value: string): SQL {
     sql` OR `,
   )}))`;
 }
-function _memorySubjectFromRow(row: {
-  appId: string;
-  agentId: string | null;
-  subjectType: string;
-  subjectId: string;
-  userId: string | null;
-  conversationId: string | null;
-  threadId: string | null;
-}): MemorySubject {
-  if (row.subjectType === 'agent') {
-    return {
-      kind: 'agent',
-      appId: row.appId,
-      agentId: row.subjectId,
-    } as MemorySubject;
-  }
-  if (row.subjectType === 'user') {
-    return {
-      kind: 'user',
-      appId: row.appId,
-      userId: row.userId ?? row.subjectId,
-    } as MemorySubject;
-  }
-  if (row.subjectType === 'conversation') {
-    return {
-      kind: 'conversation',
-      appId: row.appId,
-      conversationId: row.conversationId ?? row.subjectId,
-    } as MemorySubject;
-  }
-  return { kind: 'app', appId: row.appId } as MemorySubject;
-}
 function messagePartToPayload(part: MessagePart): Record<string, unknown> {
   switch (part.kind) {
     case 'text':

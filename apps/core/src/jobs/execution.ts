@@ -177,7 +177,6 @@ async function runActiveJob(
     resolvedModel,
     executionAdapter: deps.executionAdapter,
     executionAdapters: deps.executionAdapters,
-    fallbackForInjectedRunner: Boolean(deps.runAgent),
   });
   const leaseContext = await claimSchedulerRunLease({
     deps,

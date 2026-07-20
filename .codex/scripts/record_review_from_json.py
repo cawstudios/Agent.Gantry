@@ -34,8 +34,8 @@ else:
 
 root = repo_root()
 path = review_dir(root) / f"{args.aspect}.json"
-blocking_findings = ensure_list(payload.get("blocking_findings", payload.get("blocking")))
-non_blocking_findings = ensure_list(payload.get("non_blocking_findings", payload.get("warnings")))
+blocking_findings = ensure_list(payload.get("blocking_findings"))
+non_blocking_findings = ensure_list(payload.get("non_blocking_findings"))
 residual_risks = ensure_list(payload.get("residual_risks"))
 reviewed_scope = ensure_list(payload.get("reviewed_scope"))
 review = {
@@ -47,8 +47,6 @@ review = {
     "residual_risks": residual_risks,
     "recommendation": str(payload.get("recommendation", "approve-with-caveats")),
     "reviewed_scope": reviewed_scope,
-    "blocking": blocking_findings,
-    "warnings": non_blocking_findings,
     "recorded_at": now_iso(),
 }
 dump_json(path, review)
