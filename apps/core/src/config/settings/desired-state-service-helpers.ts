@@ -1,4 +1,8 @@
 import type { AgentId } from '../../domain/agent/agent.js';
+import {
+  agentIdForFolder,
+  folderForAgentId,
+} from '../../domain/agent/agent-folder-id.js';
 import type { AppId } from '../../domain/app/app.js';
 import type {
   ConversationId,
@@ -30,16 +34,20 @@ import type {
   RuntimeSettings,
 } from './runtime-settings-types.js';
 import type { AgentConfig } from '../../domain/types.js';
-export {
-  agentIdForFolder,
-  folderForAgentId,
-} from '../../domain/agent/agent-folder-id.js';
+import {
+  findConversationRouteForQueue,
+  makeAgentThreadQueueKey,
+  normalizeThreadQueueId,
+  parseAgentThreadQueueKey,
+} from '../../shared/thread-queue-key.js';
+export { agentIdForFolder, folderForAgentId };
 
 export function configuredRoutingBindingsByAgent(
   settings: RuntimeSettings,
+  existingRoutes: Record<string, StoredAgentBinding> = {},
 ): Map<string, ConfiguredRoutingBinding[]> {
   const result = new Map<string, ConfiguredRoutingBinding[]>();
-  for (const binding of configuredRoutingBindings(settings)) {
+  for (const binding of configuredRoutingBindings(settings, existingRoutes)) {
     const entries = result.get(binding.agentFolder) ?? [];
     entries.push(binding);
     result.set(binding.agentFolder, entries);
@@ -60,8 +68,74 @@ export function configuredAgentConfig(
   return Object.values(config).some(Boolean) ? config : undefined;
 }
 
+function canonicalRouteConversationId(
+  jid: string,
+  providerAccountId?: string,
+): string | undefined {
+  const normalizedProviderAccountId = providerAccountId?.trim();
+  if (!normalizedProviderAccountId) return undefined;
+  const { chatJid } = parseAgentThreadQueueKey(jid);
+  return `conversation:${normalizedProviderAccountId}:${chatJid}`;
+}
+
+function configuredRouteConversationId(input: {
+  existingRoutes: Record<string, StoredAgentBinding>;
+  agentFolder: string;
+  jid: string;
+  threadId?: string;
+  providerAccountId?: string;
+}): string | undefined {
+  const existingRoute =
+    findConversationRouteForQueue(
+      input.existingRoutes,
+      makeAgentThreadQueueKey(
+        input.jid,
+        agentIdForFolder(input.agentFolder),
+        input.threadId,
+        input.providerAccountId,
+      ),
+      (route) => agentIdForFolder(route.folder),
+    ) ??
+    findConversationRouteForQueue(
+      input.existingRoutes,
+      makeAgentThreadQueueKey(
+        input.jid,
+        input.agentFolder,
+        input.threadId,
+        input.providerAccountId,
+      ),
+      (route) =>
+        folderForAgentId(agentIdForFolder(route.folder)) ?? route.folder,
+    );
+  // Existing legacy IDs stay authoritative; Phase 8 owns their restamp.
+  return (
+    existingRoute?.conversationId ??
+    canonicalRouteConversationId(input.jid, input.providerAccountId)
+  );
+}
+
+function configuredInstallForAgentThread(
+  conversation: RuntimeConfiguredConversation,
+  agentId: string,
+  threadId?: string,
+): RuntimeConfiguredConversation['installedAgents'][string] | undefined {
+  const normalizedThreadId = normalizeThreadQueueId(threadId);
+  const matchesAgentThread = (
+    install: RuntimeConfiguredConversation['installedAgents'][string],
+  ): boolean =>
+    install.agentId === agentId &&
+    normalizeThreadQueueId(install.threadId) === normalizedThreadId;
+  const installedAgents = conversation.installedAgents ?? {};
+  const directlyKeyedInstall = installedAgents[agentId];
+  if (directlyKeyedInstall && matchesAgentThread(directlyKeyedInstall)) {
+    return directlyKeyedInstall;
+  }
+  return Object.values(installedAgents).find(matchesAgentThread);
+}
+
 export function configuredRoutingBindings(
   settings: RuntimeSettings,
+  existingRoutes: Record<string, StoredAgentBinding> = {},
 ): ConfiguredRoutingBinding[] {
   const byAgentAndJid = new Map<string, ConfiguredRoutingBinding>();
 
@@ -77,13 +151,11 @@ export function configuredRoutingBindings(
           return false;
         }
         if (!binding.providerAccountId) return true;
-        const candidateInstall =
-          candidate.installedAgents[folder] ??
-          Object.values(candidate.installedAgents).find(
-            (install) =>
-              install.agentId === folder &&
-              (install.threadId ?? '') === (binding.threadId ?? ''),
-          );
+        const candidateInstall = configuredInstallForAgentThread(
+          candidate,
+          folder,
+          binding.threadId,
+        );
         const candidateProviderAccountId =
           candidateInstall?.providerAccountId ??
           candidate.providerAccount ??
@@ -94,14 +166,32 @@ export function configuredRoutingBindings(
         configuredConversationCandidates.length === 1
           ? configuredConversationCandidates[0]
           : undefined;
+      const configuredInstall = configuredConversation
+        ? configuredInstallForAgentThread(
+            configuredConversation[1],
+            folder,
+            binding.threadId,
+          )
+        : undefined;
+      const providerAccountId =
+        binding.providerAccountId ??
+        configuredInstall?.providerAccountId ??
+        configuredConversation?.[1].providerAccount ??
+        configuredConversation?.[1].providerConnection;
       byAgentAndJid.set(
-        `${folder}\0${binding.providerAccountId ?? ''}\0${binding.jid}\0${binding.threadId ?? ''}`,
+        `${folder}\0${providerAccountId ?? ''}\0${binding.jid}\0${binding.threadId ?? ''}`,
         {
           agentFolder: folder,
-          conversationId: configuredConversation?.[0],
+          conversationId: configuredRouteConversationId({
+            existingRoutes,
+            agentFolder: folder,
+            jid: binding.jid,
+            threadId: binding.threadId,
+            providerAccountId,
+          }),
           jid: binding.jid,
           threadId: binding.threadId,
-          providerAccountId: binding.providerAccountId,
+          providerAccountId,
           name: binding.name,
           trigger: binding.trigger,
           addedAt: binding.addedAt,
@@ -132,7 +222,13 @@ export function configuredRoutingBindings(
       `${binding.agent}\0${providerAccountId ?? ''}\0${jid}\0${binding.threadId ?? ''}`,
       {
         agentFolder: binding.agent,
-        conversationId: binding.conversation,
+        conversationId: configuredRouteConversationId({
+          existingRoutes,
+          agentFolder: binding.agent,
+          jid,
+          threadId: binding.threadId,
+          providerAccountId,
+        }),
         jid,
         installKey: binding.installKey,
         threadId: binding.threadId,
