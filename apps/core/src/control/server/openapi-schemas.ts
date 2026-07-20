@@ -295,6 +295,11 @@ export const openApiSchemas: Record<string, JsonSchema> = {
     required: ['conversationId'],
     properties: {
       appId: { type: 'string', description: 'Optional API key app assertion.' },
+      agentId: {
+        type: 'string',
+        description:
+          'Optional agent id to bind the session to that agent workspace.',
+      },
       conversationId: { type: 'string' },
       title: { type: 'string' },
       responseMode: {

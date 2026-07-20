@@ -5,6 +5,7 @@ import {
   SettingsDesiredStateService,
 } from '@core/application/settings/desired-state-service.js';
 import { configuredRoutingBindings } from '@core/application/settings/desired-state-service-helpers.js';
+import { makeAgentThreadQueueKey } from '@core/application/provider-conversations/thread-queue-key.js';
 import {
   createDefaultRuntimeSettings,
   ensureConfiguredConversationBinding,
@@ -58,7 +59,10 @@ function settingsWithInstall(status: 'active' | 'disabled' = 'active') {
   return settings;
 }
 
-function makeReconcileHarness(existingConversation?: object) {
+function makeReconcileHarness(
+  existingConversation?: object,
+  existingRoutes: Record<string, any> = {},
+) {
   const saveConversation = vi.fn(async (_conversation: unknown) => undefined);
   const setConversationRoute = vi.fn(async () => undefined);
   const persistedConversationInstalls = new Map<string, unknown>();
@@ -68,7 +72,7 @@ function makeReconcileHarness(existingConversation?: object) {
   });
   const service = new SettingsDesiredStateService({
     ops: {
-      getAllConversationRoutes: vi.fn(async () => ({})),
+      getAllConversationRoutes: vi.fn(async () => existingRoutes),
       setConversationRoute,
     },
     repositories: {
@@ -110,6 +114,63 @@ function makeReconcileHarness(existingConversation?: object) {
 }
 
 describe('desired-state settings projection', () => {
+  it('never uses a settings key as a new conversation id', () => {
+    const settings = settingsWithInstall();
+
+    expect(configuredRoutingBindings(settings)[0]).toMatchObject({
+      conversationId: 'conversation:slack_one:sl:C123',
+      jid: 'sl:C123',
+      providerAccountId: 'slack_one',
+    });
+    expect(configuredRoutingBindings(settings)[0]?.conversationId).not.toBe(
+      'sales',
+    );
+  });
+
+  it('keeps an existing legacy conversation id across normalized route projection', async () => {
+    const settings = settingsWithInstall();
+    const legacyRouteKey = makeAgentThreadQueueKey(
+      'sl:C123',
+      'main_agent',
+      '171.222',
+      'slack_one',
+    );
+    const existingRoutes = {
+      [legacyRouteKey]: {
+        name: 'Main',
+        folder: 'main_agent',
+        conversationId: 'sales_slack',
+        trigger: '@main',
+        added_at: '2026-05-02T00:00:00.000Z',
+        requiresTrigger: true,
+        providerAccountId: 'slack_one',
+        conversationKind: 'channel',
+      },
+    };
+
+    expect(
+      configuredRoutingBindings(settings, existingRoutes)[0],
+    ).toMatchObject({
+      conversationId: 'sales_slack',
+    });
+
+    const { service, setConversationRoute } = makeReconcileHarness(
+      undefined,
+      existingRoutes,
+    );
+    await service.reconcile(settings);
+
+    expect(setConversationRoute).toHaveBeenCalledWith(
+      makeAgentThreadQueueKey(
+        'sl:C123',
+        'agent:main_agent',
+        '171.222',
+        'slack_one',
+      ),
+      expect.objectContaining({ conversationId: 'sales_slack' }),
+    );
+  });
+
   it('inherits the conversation provider account for a nested install', () => {
     const settings = settingsWithInstall();
     settings.conversations.sales.installedAgents.main_agent.providerAccountId =
@@ -118,7 +179,7 @@ describe('desired-state settings projection', () => {
     expect(configuredRoutingBindings(settings)).toEqual([
       expect.objectContaining({
         agentFolder: 'main_agent',
-        conversationId: 'sales',
+        conversationId: 'conversation:slack_one:sl:C123',
         providerAccountId: 'slack_one',
         threadId: '171.222',
         requiresTrigger: true,

@@ -120,7 +120,7 @@ export class SettingsDesiredStateService {
     ]);
     const configuredFolders = new Set(Object.keys(settings.agents));
     const configuredJids = new Set<string>();
-    for (const binding of configuredRoutingBindings(settings)) {
+    for (const binding of configuredRoutingBindings(settings, groups)) {
       configuredJids.add(binding.jid);
       configuredJids.add(
         makeAgentThreadQueueKey(
@@ -166,7 +166,10 @@ export class SettingsDesiredStateService {
     const existingGroups = await this.deps.ops.getAllConversationRoutes();
     const configuredFolders = new Set(Object.keys(settings.agents));
     const configuredJids = new Set<string>();
-    const bindingsByAgent = configuredRoutingBindingsByAgent(settings);
+    const bindingsByAgent = configuredRoutingBindingsByAgent(
+      settings,
+      existingGroups,
+    );
     const providerAccountEntries = Object.entries(settings.providerAccounts);
 
     for (const [folder, agent] of Object.entries(settings.agents)) {
@@ -490,7 +493,7 @@ export class SettingsDesiredStateService {
       input.storedConversation.id,
     ]);
     for (const binding of configuredRoutingBindings(input.settings)) {
-      if (binding.conversationId !== input.conversationKey) continue;
+      if (binding.conversation !== input.conversation) continue;
       const agent = input.settings.agents[binding.agentFolder];
       if (!agent) continue;
       const agentId = agentIdForFolder(binding.agentFolder);

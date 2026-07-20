@@ -15,7 +15,10 @@ import {
 import type { NewMessage } from '../../../../domain/repositories/domain-types.js';
 import type { LiveAdmissionWorkItemEnqueueResult } from '../../../../domain/ports/live-turns.js';
 import { agentIdForFolder as normalizeAgentIdForFolder } from '../../../../domain/agent/agent-folder-id.js';
-import { normalizeProviderId } from '../../../../channels/provider-registry.js';
+import {
+  fallbackProviderAccountId,
+  normalizeProviderId,
+} from '../../../../channels/provider-registry.js';
 import { sanitizeRetryTailProviderPayload } from '../../../../domain/messages/retry-tail-provider-payload.js';
 import {
   encodeGroupMessageCursor,
@@ -258,12 +261,24 @@ export class PostgresCanonicalMessageRepository {
       msg.providerAccountId?.trim() ||
       options.liveAdmission?.providerAccountId?.trim() ||
       null;
+    const existingConversationId = requestedProviderAccountId
+      ? undefined
+      : await this.graph.findConversationIdForJid(msg.chat_jid, tx);
+    const providerAccountId =
+      requestedProviderAccountId ??
+      (existingConversationId
+        ? await this.graph.getConversationInstallationId(
+            existingConversationId,
+            tx,
+          )
+        : undefined) ??
+      fallbackProviderAccountId(CANONICAL_APP_ID, providerId);
     const conversationId = await this.graph.ensureConversation(
       msg.chat_jid,
       {
         timestamp: msg.timestamp,
         channel: providerId,
-        providerAccountId: requestedProviderAccountId,
+        providerAccountId,
       },
       tx,
     );
@@ -271,12 +286,8 @@ export class PostgresCanonicalMessageRepository {
       msg.chat_jid,
       msg.thread_id,
       tx,
-      { channel: providerId, providerAccountId: requestedProviderAccountId },
+      { channel: providerId, providerAccountId },
     );
-    const providerAccountId =
-      requestedProviderAccountId ??
-      (await this.graph.getConversationInstallationId(conversationId, tx)) ??
-      `channel-providerAccount:${CANONICAL_APP_ID}:${providerId}`;
     let canonicalMessageId = messageIdFor(
       msg.chat_jid,
       msg.id,

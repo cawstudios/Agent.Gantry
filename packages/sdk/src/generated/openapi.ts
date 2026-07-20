@@ -2588,6 +2588,8 @@ export interface components {
         SessionEnsureRequest: {
             /** @description Optional API key app assertion. */
             appId?: string;
+            /** @description Optional agent id to bind the session to that agent workspace. */
+            agentId?: string;
             conversationId: string;
             title?: string;
             /** @enum {string} */

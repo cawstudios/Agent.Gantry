@@ -34,7 +34,7 @@ import type {
 } from '../../../../domain/repositories/ops-repo.js';
 import type { RuntimeEventPublishInput } from '../../../../domain/events/events.js';
 import {
-  bindingRowToGroup,
+  bindingRowsToGroups,
   PostgresCanonicalBindingRepository,
 } from '../repositories/canonical-binding-repository.postgres.js';
 import {
@@ -700,11 +700,6 @@ export class PostgresRuntimeRepositoryBundle
   }
 
   async getAllConversationRoutes(): Promise<Record<string, ConversationRoute>> {
-    const routes: Record<string, ConversationRoute> = {};
-    for (const row of await this.bindings.listConversationRoutes()) {
-      const route = bindingRowToGroup(row);
-      if (route) routes[route.jid] = route.group;
-    }
-    return routes;
+    return bindingRowsToGroups(await this.bindings.listConversationRoutes());
   }
 }

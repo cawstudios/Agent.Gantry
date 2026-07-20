@@ -339,14 +339,10 @@ describe('ipc-interaction-handler', () => {
       { appId: 'app:test' },
     );
     expect(mirrorAgentToolRulesToSettings).toHaveBeenCalledOnce();
-    expect(sendMessage).toHaveBeenCalledWith(
-      'tg:team',
-      expect.stringContaining('Allowed for future:'),
-      expect.any(Object),
-    );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it('records persistent approvals at parent conversation scope while routing the receipt to the thread', async () => {
+  it('records persistent approvals at parent conversation scope and reports only a remaining setup blocker', async () => {
     const claimedPath = path.join(tempDir, 'claimed-thread-permission.json');
     fs.writeFileSync(claimedPath, '{}');
     const saveDecision = vi.fn(async () => undefined);
@@ -394,7 +390,21 @@ describe('ipc-interaction-handler', () => {
         })),
         sendMessage,
         publishRuntimeEvent,
-        opsRepository: createEmptyJobRepository() as never,
+        opsRepository: {
+          listJobs: vi.fn(async () => [
+            {
+              id: 'job-still-blocked',
+              name: 'Lead sync',
+              workspace_key: 'main_agent',
+              status: 'paused',
+              pause_reason: 'Setup required',
+              setup_state: { state: 'blocked' },
+              recovery_intent: { state: 'running' },
+            },
+          ]),
+          getJobById: vi.fn(async () => null),
+          updateJob: vi.fn(async () => null),
+        } as never,
         getToolRepository: () => toolRepository as never,
         getPermissionRepository: () =>
           ({
@@ -430,7 +440,7 @@ describe('ipc-interaction-handler', () => {
     );
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:team',
-      expect.stringContaining('Allowed for future:'),
+      'Still needs setup: Recovery is already running for this job.',
       { threadId: 'topic-7' },
     );
   });

@@ -34,14 +34,6 @@ function job(input: Partial<Job>): Job {
     session_id: null,
     thread_id: null,
     workspace_key: 'agent-folder',
-    execution_context: {
-      conversationJid: 'chat-a',
-      threadId: null,
-      workspaceKey: 'agent-folder',
-    },
-    notification_routes: [
-      { conversationJid: 'chat-a', threadId: null, label: 'primary' },
-    ],
     created_by: 'agent',
     status: 'active',
     next_run: null,

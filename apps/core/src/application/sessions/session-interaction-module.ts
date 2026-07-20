@@ -13,11 +13,14 @@ import type {
 } from '../../domain/repositories/ops-repo.js';
 import type { LiveAdmissionWorkItemEnqueueResult } from '../../domain/ports/live-turns.js';
 import type {
+  AgentRepository,
   AgentRunRepository,
   AgentSessionRepository,
   MessageRepository,
   ProviderSessionRepository,
 } from '../../domain/ports/repositories.js';
+import type { AgentId } from '../../domain/agent/agent.js';
+import { folderForAgentId } from '../../domain/agent/agent-folder-id.js';
 import type { IsoTimestamp } from '../../shared/time/primitives.js';
 import type { AgentRuntime } from '../../shared/agent-runtime.js';
 import { ApplicationError } from '../common/application-error.js';
@@ -78,6 +81,7 @@ export type SessionInteractionDeps = {
   control: SessionControlPort;
   ops: RuntimeChatMetadataRepository & RuntimeMessageRepository;
   repositories: {
+    agents: AgentRepository;
     agentSessions: AgentSessionRepository;
     providerSessions: ProviderSessionRepository;
     messages: MessageRepository;
@@ -104,6 +108,7 @@ export class SessionInteractionModule {
   async ensureSession(input: {
     appId: string;
     assertedAppId?: string | null;
+    agentId?: string | null;
     conversationId: string;
     title?: string | null;
     responseMode?: unknown;
@@ -127,7 +132,7 @@ export class SessionInteractionModule {
       );
     }
     const conversationJid = `app:${input.appId}:${conversationId}`;
-    const group = makeAppGroup({
+    let group = makeAppGroup({
       appId: input.appId,
       conversationId,
       conversationJid,
@@ -136,6 +141,31 @@ export class SessionInteractionModule {
         .slice(0, 12),
       addedAt: this.deps.now(),
     });
+    const requestedAgentId = input.agentId?.trim();
+    if (requestedAgentId) {
+      const agent = await this.deps.repositories.agents.getAgent(
+        requestedAgentId as AgentId,
+      );
+      if (!agent || agent.appId !== input.appId) {
+        throw new ApplicationError('NOT_FOUND', 'Agent not found');
+      }
+      if (agent.status !== 'active') {
+        throw new ApplicationError(
+          'INVALID_REQUEST',
+          `Agent is not active: ${requestedAgentId}`,
+        );
+      }
+      const agentFolder = folderForAgentId(agent.id);
+      if (!agentFolder) {
+        throw new ApplicationError(
+          'INVALID_REQUEST',
+          'Agent does not have a settings folder.',
+        );
+      }
+      // Bind the session to the requested agent's workspace folder so turns
+      // run with that agent's config and grants instead of a synthetic one.
+      group = { ...group, name: agent.name, folder: agentFolder };
+    }
     const defaultWebhookId = await this.resolveOwnedWebhookId(
       input.appId,
       input.webhookId ?? null,

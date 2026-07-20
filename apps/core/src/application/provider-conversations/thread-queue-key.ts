@@ -124,9 +124,15 @@ export function findConversationRoutesForChat<T>(
   for (const entry of Object.entries(routes)) {
     const parsed = parseAgentThreadQueueKey(entry[0]);
     if (parsed.chatJid !== chatJid) continue;
+    const routeProviderAccountId =
+      parsed.providerAccountId ??
+      (typeof (entry[1] as { providerAccountId?: unknown })
+        .providerAccountId === 'string'
+        ? (entry[1] as { providerAccountId: string }).providerAccountId.trim()
+        : undefined);
     if (
       normalizedProviderAccountId &&
-      parsed.providerAccountId !== normalizedProviderAccountId
+      routeProviderAccountId !== normalizedProviderAccountId
     ) {
       continue;
     }
@@ -179,32 +185,127 @@ export function findConversationRouteForQueue<T>(
 ): T | undefined {
   const queue = parseAgentThreadQueueKey(queueJid);
   const queueThreadId = normalizeThreadQueueId(queue.threadId);
-  const queueAgentId = queue.agentId?.trim();
+  const normalizeAgentId = (value?: string): string | undefined => {
+    const normalized = value?.trim();
+    if (!normalized) return undefined;
+    return normalized.startsWith('agent:') ? normalized : `agent:${normalized}`;
+  };
+  const agentIdForRoute = (route: T): string | undefined => {
+    const candidate = route as { agentId?: unknown; folder?: unknown };
+    return normalizeAgentId(
+      typeof candidate.agentId === 'string'
+        ? candidate.agentId
+        : typeof candidate.folder === 'string'
+          ? candidate.folder
+          : undefined,
+    );
+  };
+  const queueAgentId = normalizeAgentId(queue.agentId);
   const queueProviderAccountId = queue.providerAccountId?.trim();
-  const candidates: Array<{ route: T; threadId?: string }> = [];
+  if (
+    queueThreadId &&
+    queueAgentId &&
+    queueProviderAccountId &&
+    Object.hasOwn(routes, queueJid)
+  ) {
+    return routes[queueJid];
+  }
+  if (queueAgentId && queueProviderAccountId) {
+    const wholeConversationKey = makeAgentThreadQueueKey(
+      queue.chatJid,
+      queueAgentId,
+      undefined,
+      queueProviderAccountId,
+    );
+    if (Object.hasOwn(routes, wholeConversationKey)) {
+      return routes[wholeConversationKey];
+    }
+  }
+  const candidates: Array<{
+    route: T;
+    routeThreadId?: string;
+    routeAgentId?: string;
+    routeConversationId?: string;
+    routeProviderAccountId?: string;
+    routeKeyHasAgent: boolean;
+  }> = [];
 
   for (const [key, route] of Object.entries(routes)) {
     const parsed = parseAgentThreadQueueKey(key);
     if (parsed.chatJid !== queue.chatJid) continue;
+    const routeProviderAccountId =
+      parsed.providerAccountId ??
+      (typeof (route as { providerAccountId?: unknown }).providerAccountId ===
+      'string'
+        ? (route as { providerAccountId: string }).providerAccountId.trim() ||
+          undefined
+        : undefined);
     if (
       queueProviderAccountId &&
-      parsed.providerAccountId !== queueProviderAccountId
+      routeProviderAccountId !== queueProviderAccountId
     )
       continue;
-    if (queueAgentId && parsed.agentId !== queueAgentId) continue;
-    candidates.push({ route, threadId: parsed.threadId });
+    const routeAgentId =
+      normalizeAgentId(parsed.agentId) ?? agentIdForRoute(route);
+    if (queueAgentId && routeAgentId !== queueAgentId) continue;
+    candidates.push({
+      route,
+      routeThreadId: parsed.threadId,
+      routeAgentId,
+      routeConversationId:
+        typeof (route as { conversationId?: unknown }).conversationId ===
+        'string'
+          ? (route as { conversationId: string }).conversationId.trim() ||
+            undefined
+          : undefined,
+      routeProviderAccountId,
+      routeKeyHasAgent: Boolean(parsed.agentId),
+    });
   }
 
   const exactThreadRoutes = queueThreadId
-    ? candidates.filter((candidate) => candidate.threadId === queueThreadId)
+    ? candidates.filter(
+        (candidate) => candidate.routeThreadId === queueThreadId,
+      )
     : [];
   const wholeConversationRoutes = candidates.filter(
-    (candidate) => !candidate.threadId,
+    (candidate) => !candidate.routeThreadId,
   );
   const matches =
     queueThreadId && exactThreadRoutes.length > 0
       ? exactThreadRoutes
       : wholeConversationRoutes;
+  if (queueAgentId) {
+    const routeIdentities = new Set(
+      matches.map(
+        (candidate) =>
+          `${candidate.routeConversationId ?? ''}::${
+            candidate.routeProviderAccountId ?? ''
+          }`,
+      ),
+    );
+    if (routeIdentities.size > 1) return undefined;
+    return (
+      matches.find((candidate) => candidate.routeKeyHasAgent)?.route ??
+      matches[0]?.route
+    );
+  }
+  const routeIdentities = new Set(
+    matches.map(
+      (candidate) =>
+        `${candidate.routeAgentId ?? ''}::${
+          candidate.routeThreadId ?? ''
+        }::${candidate.routeConversationId ?? ''}::${
+          candidate.routeProviderAccountId ?? ''
+        }`,
+    ),
+  );
+  if (routeIdentities.size === 1) {
+    return (
+      matches.find((candidate) => candidate.routeKeyHasAgent)?.route ??
+      matches[0]?.route
+    );
+  }
   return matches.length === 1 ? matches[0]?.route : undefined;
 }
 

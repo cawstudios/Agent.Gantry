@@ -34,7 +34,9 @@ function sendApplicationError(res: ServerResponse, error: unknown): boolean {
   const notFoundCode =
     error instanceof Error && error.message === 'Webhook not found'
       ? 'WEBHOOK_NOT_FOUND'
-      : 'SESSION_NOT_FOUND';
+      : error instanceof Error && error.message === 'Agent not found'
+        ? 'AGENT_NOT_FOUND'
+        : 'SESSION_NOT_FOUND';
   return sendApplicationErrorResponse(res, error, { NOT_FOUND: notFoundCode });
 }
 
@@ -176,6 +178,7 @@ export async function handleSessionRoutes(
       const result = await ensureSessionForControl(ctx, {
         appId,
         assertedAppId,
+        agentId: body.agentId ?? null,
         conversationId,
         title: body.title ?? null,
         responseMode: body.responseMode,

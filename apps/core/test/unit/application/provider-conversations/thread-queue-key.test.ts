@@ -81,6 +81,86 @@ describe('thread queue keys', () => {
     ).toBeUndefined();
   });
 
+  it('does not collapse same chat and agent routes across conversations', () => {
+    const routes = {
+      'sl:C123': {
+        folder: 'triage',
+        providerAccountId: 'one',
+        conversationId: 'conversation:first',
+      },
+      [makeAgentThreadQueueKey('sl:C123', 'agent:triage')]: {
+        folder: 'triage',
+        providerAccountId: 'one',
+        conversationId: 'conversation:second',
+      },
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'one'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('selects an exact qualified route over divergent stale aliases', () => {
+    const exact = {
+      folder: 'main',
+      providerAccountId: 'telegram_named',
+      conversationId: 'conversation:telegram_named:tg:123',
+    };
+    const routes = {
+      'tg:123': {
+        folder: 'main',
+        providerAccountId: 'telegram_named',
+        conversationId: 'conversation:tg:123',
+      },
+      [makeAgentThreadQueueKey('tg:123', 'agent:main')]: {
+        folder: 'main',
+        providerAccountId: 'telegram_named',
+        conversationId: 'conversation:telegram_default:tg:123',
+      },
+      [makeAgentThreadQueueKey(
+        'tg:123',
+        'agent:main',
+        undefined,
+        'telegram_named',
+      )]: exact,
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey(
+          'tg:123',
+          'agent:main',
+          'topic:7',
+          'telegram_named',
+        ),
+      ),
+    ).toBe(exact);
+  });
+
+  it('matches an unscoped migrated key by its stored provider account', () => {
+    const route = { folder: 'triage', providerAccountId: 'one' };
+    const routes = {
+      [makeAgentThreadQueueKey('sl:C123', 'agent:triage')]: route,
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'one'),
+      ),
+    ).toBe(route);
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:triage', undefined, 'two'),
+      ),
+    ).toBeUndefined();
+  });
+
   it('parses old thread-only keys unchanged', () => {
     const queueJid = makeThreadQueueKey('sl:C123', 'thread:one');
 
@@ -102,8 +182,9 @@ describe('thread queue keys', () => {
     });
   });
 
-  it('finds agent-qualified routes for a provider conversation', () => {
+  it('finds bare and agent-qualified routes for a provider conversation', () => {
     const routes = {
+      'sl:C123': { folder: 'main' },
       [makeAgentThreadQueueKey('sl:C123', 'agent:triage')]: {
         folder: 'triage',
       },
@@ -117,15 +198,15 @@ describe('thread queue keys', () => {
       findConversationRoutesForChat(routes, 'sl:C123').map(
         ([, route]) => route.folder,
       ),
-    ).toEqual(['triage']);
+    ).toEqual(['main', 'triage']);
     expect(
       findConversationRoutesForChat(routes, 'sl:C123', '171.1').map(
         ([, route]) => route.folder,
       ),
     ).toEqual(['topic']);
-    expect(findSingleConversationRouteForChat(routes, 'sl:C123')).toEqual({
-      folder: 'triage',
-    });
+    expect(findSingleConversationRouteForChat(routes, 'sl:C123')).toBe(
+      undefined,
+    );
     expect(
       findSingleConversationRouteForChat(routes, 'sl:C123', '171.1'),
     ).toEqual({ folder: 'topic' });
@@ -139,9 +220,7 @@ describe('thread queue keys', () => {
       [makeAgentThreadQueueKey('sl:C123', 'agent:topic', '171.1')]: {
         folder: 'topic',
       },
-      [makeAgentThreadQueueKey('sl:C123', 'agent:other', '171.2')]: {
-        folder: 'other',
-      },
+      [makeThreadQueueKey('sl:C123', '171.2')]: { folder: 'legacy-topic' },
     };
 
     expect(findConversationRoutesForChat(routes, 'sl:C123')).toEqual([]);
@@ -262,5 +341,30 @@ describe('thread queue keys', () => {
         makeAgentThreadQueueKey('sl:C123', 'agent:alpha'),
       ),
     ).toBeUndefined();
+  });
+
+  it('prefers agent-qualified aliases for qualified and unqualified queues', () => {
+    const legacy = {
+      folder: 'alpha',
+      name: 'legacy',
+      conversationId: 'conversation:shared',
+    };
+    const qualified = {
+      folder: 'alpha',
+      name: 'qualified',
+      conversationId: 'conversation:shared',
+    };
+    const routes = {
+      'sl:C123': legacy,
+      [makeAgentThreadQueueKey('sl:C123', 'agent:alpha')]: qualified,
+    };
+
+    expect(
+      findConversationRouteForQueue(
+        routes,
+        makeAgentThreadQueueKey('sl:C123', 'agent:alpha'),
+      ),
+    ).toBe(qualified);
+    expect(findConversationRouteForQueue(routes, 'sl:C123')).toBe(qualified);
   });
 });

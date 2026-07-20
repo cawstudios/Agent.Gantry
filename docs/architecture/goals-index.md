@@ -39,16 +39,48 @@ B2 hardening batch.
    4-6; Phases 7-9 (DB baselining + live restamp) LAST, only after explicit user
    cutover go + the live-settings runbook in the branch execution ledger.
    _(worktree `wt-ponytail`, `feature/ponytail-audit`)_
-2. **S3/MinIO file-artifact bytes** — the attach lane's follow-on (attachments
-   shipped as PR #234). Stage 1 (bytes port + `S3FileArtifactBytes` + factory
-   driver switch) in review; then presigned-link Teams delivery, host-side
-   workspace registration, terraform prefix + MinIO CI leg.
-   `artifact-store-s3-goal-prompt.md` _(worktree `wt-attach`, `feature/s3-file-artifacts`)_
-3. **Durable-work primitive** — plan-validation COMPLETE; validated goal doc
-   committed (19-consumer inventory, 9 stages, 20 invariants; fold/don't-fold
-   verdicts guard against over-unification). Implementation starts on user
-   sign-off. `durable-work-primitive-goal-prompt.md`
+2. **S3/MinIO file-artifact bytes** — PROTOCOL DECIDED (user 2026-07-20):
+   pending-state row + upload + verified commit + TTL janitor for orphans. Lane
+   stays LOW PRIORITY (live uses local; opt-in path) — resume with that protocol
+   when prioritized. `artifact-store-s3-goal-prompt.md`
+   _(worktree `wt-attach`, `feature/s3-file-artifacts`)_
+3. **Durable-work primitive** — DEFERRED until ponytail ships (user
+   2026-07-20): it refactors jobs/interactions state that Phases 5-6 delete/move.
+   Becomes the FIRST post-cutover lane on the settled tree. Plan-validation
+   COMPLETE. `durable-work-primitive-goal-prompt.md`
    _(worktree `wt-convo`, `feature/durable-work-primitive`)_
+4. **Media render capability + environment-facts guidance** — V4 SHAPE LOCKED
+   (user 2026-07-20): FACADE-PREFLIGHT v1 — provisioner + facade + selected
+   skill + env-facts; capability/inventory/admission machinery CUT (3 rounds
+   NOT-SAFE → YAGNI). One focused validation round on the v4 delta, then
+   implementation queues after the E2E gate lane. `media-render-goal-prompt.md`
+   _(worktree `wt-media`, `feature/media-render-capability`)_
+5. **Route-loader dedup + conversationId leak (incident closeout)** — the
+   durable fix behind the 2026-07-20 routing incident: loader imports every
+   active `conversation-route:%` row without dedup by chat+account, and the
+   settings projection leaks the settings key into `route.conversationId`.
+   Small fix lane + regression tests (incl. the sourceAgentFolderJids
+   chat-jid derivation test skipped during the live hotfix).
+   _(worktree `wt-routefix`, `fix/route-loader-dedup`)_
+6. **Permission floor + command-class promotion** — grill-scoped 2026-07-20.
+   Stay-direct posture confirmed. auto_strict becomes the new-agent default
+   (deterministic read-only pre-gate + YOLO backstop under the classifier) AND
+   "allow for future" persists a user-confirmed command-NAME class scoped to
+   conversation+agent (kills the novel-task prompt flood). Tight scope:
+   env-facts defers to media Stage 5, audit-write fix is separate.
+   `permission-floor-and-promotion-goal-prompt.md`
+7. **Fail-loud audit writes (separate tiny lane)** — `runtime_events` insert in
+   `publishGatewayUseAudit` has thrown ~98× since 2026-07-04 (WARN-swallowed);
+   durable credential/model-usage audit silently not persisting. Fix the insert
+   + add a failure counter so silent audit loss can't hide. Not yet scoped.
+8. **Agent E2E CI merge gate** — grill-scoped 2026-07-20, full build one goal.
+   Packaged real-image runtime + real agent turn + evidence artifacts; wire the
+   omitted `test:integration:postgres` into CI; GRANULAR permission + capability
+   matrices at the integration layer (dedup existing tests) + thin real-turn E2E
+   proofs; skill (internal-comms) + MCP (everything server) fixtures; path-map
+   policy classifier with `e2e-reviewed` override; hermetic always-required +
+   label-gated live model matrix; `agent-e2e-gate` required check. i-have-adhd
+   hard-excluded. `agent-e2e-ci-merge-gate-goal-prompt.md` — plan-validation next.
 
 Per-lane loop: codex lands → independent verify (typecheck + FULL unit +
 throwaway-DB integration when schema touched) → local autoreview to clean →
@@ -57,15 +89,11 @@ commit. Merge only on explicit user "merge NNN".
 **Next — PRIORITIZED by user 2026-07-19 ("UX improvements and latency of agent
 messages as next, that's important"):**
 
-4. **Messaging hot-path latency + ambient liveness + dead-plumbing cleanup** —
-   **NOW A RUNNING LANE** (plan-validation in flight on `feature/messaging-hotpath`,
-   wt-convo). SCOPED from two parallel audits (Codex latency/over-engineering +
-   Fable UX). Cuts time-to-first-reply (history-hydration watermark, ~20 redundant
-   per-message upserts, double message-fetch/context-hydration) and revives dead
-   liveness plumbing as AMBIENT-ONLY signals (heartbeat card edit, typing/ack
-   parity, reaction flips) under the no-clutter rule. Net deletion. Absorbs the
-   deepagents/Anthropic-SDK model-client latency audit findings (prompt-caching,
-   TTFT, streaming) as they land. `messaging-hotpath-and-liveness-goal-prompt.md`
+4. **Messaging hot-path** — Stages 1-2 SHIPPED (#235 cleanup, #236 latency:
+   first-token piping, cache parity, SDK off critical path). **Stage 3 CLOSED
+   (user 2026-07-20, YAGNI)**: hydration watermark / upsert-collapse /
+   double-fetch / liveness-heartbeat contracts stay unbuilt — reopen ONLY on a
+   real latency/liveness complaint. `messaging-hotpath-and-liveness-goal-prompt.md`
 5. **Model management: unify then UX** — FINALIZED 2026-07-19; starts when the
    ponytail lane closes (shares the settings parser/renderer surface). 8 decisions
    locked (aggressive knob collapse, sticky conversation switch via

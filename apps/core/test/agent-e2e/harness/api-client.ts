@@ -1,0 +1,181 @@
+// Minimal typed Control API client for agent E2E runs. Plain fetch on purpose:
+// the hand SDK (packages/sdk) needs a build step and lacks agent/skill admin
+// wrappers (agent-e2e-plan-validation-round3.md §2), so the harness talks to
+// the same public HTTP surface any client would.
+
+export interface ApiResponse<T = unknown> {
+  status: number;
+  body: T;
+}
+
+export interface SessionEnsureResult {
+  sessionId: string;
+  appId: string;
+  conversationId: string;
+  chatJid: string;
+}
+
+export interface AcceptedMessage {
+  accepted: boolean;
+  messageId: string;
+  acceptedEventId: number;
+}
+
+export interface SessionEvent {
+  eventId: number;
+  eventType: string;
+  sessionId: string | null;
+  threadId: string | null;
+  correlationId: string | null;
+  createdAt: string;
+  payload: unknown;
+}
+
+/** Raw runtime event types that end a run (run-event-projection.ts). */
+export const TERMINAL_RUN_EVENT_TYPES = new Set([
+  'run.completed',
+  'run.failed',
+  'run.timeout',
+  'run.dead_lettered',
+  'run.canceled',
+]);
+
+export class AgentE2EApiClient {
+  constructor(
+    readonly baseUrl: string,
+    readonly apiKey: string,
+  ) {}
+
+  /** Generic escape hatch: any Control API request with bearer auth. */
+  async request<T = unknown>(
+    method: string,
+    requestPath: string,
+    options: {
+      body?: unknown;
+      /** Raw body (e.g. skill zip). Wins over `body`. */
+      rawBody?: Uint8Array;
+      contentType?: string;
+    } = {},
+  ): Promise<ApiResponse<T>> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.apiKey}`,
+    };
+    let body: string | Uint8Array | undefined;
+    if (options.rawBody !== undefined) {
+      headers['content-type'] = options.contentType ?? 'application/zip';
+      body = options.rawBody;
+    } else if (options.body !== undefined) {
+      headers['content-type'] = options.contentType ?? 'application/json';
+      body = JSON.stringify(options.body);
+    }
+    const res = await fetch(`${this.baseUrl}${requestPath}`, {
+      method,
+      headers,
+      body,
+    });
+    const text = await res.text();
+    let parsed: unknown = text;
+    try {
+      parsed = text ? JSON.parse(text) : undefined;
+    } catch {
+      // Non-JSON body (kept raw for the caller's assertion/message).
+    }
+    return { status: res.status, body: parsed as T };
+  }
+
+  private async expect<T>(
+    expectedStatus: number,
+    method: string,
+    requestPath: string,
+    options?: Parameters<AgentE2EApiClient['request']>[2],
+  ): Promise<T> {
+    const res = await this.request<T>(method, requestPath, options);
+    if (res.status !== expectedStatus) {
+      throw new Error(
+        `${method} ${requestPath} returned ${res.status} (expected ${expectedStatus}): ${JSON.stringify(res.body).slice(0, 500)}`,
+      );
+    }
+    return res.body;
+  }
+
+  async ensureSession(input: {
+    conversationId: string;
+    appId?: string;
+    title?: string;
+  }): Promise<SessionEnsureResult> {
+    return await this.expect<SessionEnsureResult>(
+      200,
+      'POST',
+      '/v1/sessions/ensure',
+      { body: input },
+    );
+  }
+
+  /** 202 = accepted, NOT completed — pair with waitForTerminalRunEvent. */
+  async postMessage(
+    sessionId: string,
+    message: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<AcceptedMessage> {
+    return await this.expect<AcceptedMessage>(
+      202,
+      'POST',
+      `/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
+      { body: { message, ...extra } },
+    );
+  }
+
+  async listEvents(
+    sessionId: string,
+    afterEventId = 0,
+  ): Promise<SessionEvent[]> {
+    const body = await this.expect<{ events: SessionEvent[] }>(
+      200,
+      'GET',
+      `/v1/sessions/${encodeURIComponent(sessionId)}/events?afterEventId=${afterEventId}`,
+    );
+    return body.events;
+  }
+
+  /**
+   * Poll events until a terminal run event appears (a 202 on the message POST
+   * is accepted-not-done). Returns every event observed plus the terminal one.
+   */
+  async waitForTerminalRunEvent(
+    sessionId: string,
+    options: { afterEventId?: number; timeoutMs?: number } = {},
+  ): Promise<{ terminal: SessionEvent; events: SessionEvent[] }> {
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    const deadline = Date.now() + timeoutMs;
+    const events: SessionEvent[] = [];
+    let cursor = options.afterEventId ?? 0;
+    while (Date.now() < deadline) {
+      const page = await this.listEvents(sessionId, cursor);
+      for (const event of page) {
+        events.push(event);
+        cursor = Math.max(cursor, event.eventId);
+        if (TERMINAL_RUN_EVENT_TYPES.has(event.eventType)) {
+          return { terminal: event, events };
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(
+      `No terminal run event for session ${sessionId} within ${timeoutMs}ms ` +
+        `(saw: ${events.map((event) => event.eventType).join(', ') || 'none'})`,
+    );
+  }
+
+  /** POST /v1/skills/install (application/zip). Returns the created skill. */
+  async installSkillZip(
+    zip: Uint8Array,
+    options: { agentId?: string } = {},
+  ): Promise<unknown> {
+    const query = options.agentId
+      ? `?agentId=${encodeURIComponent(options.agentId)}`
+      : '';
+    return await this.expect(201, 'POST', `/v1/skills/install${query}`, {
+      rawBody: zip,
+    });
+  }
+}
