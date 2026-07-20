@@ -84,6 +84,17 @@ plus the audit's "what else is the prompt missing" list (max 5, adjudicated
 before adoption). Implementer: Fable subagent. Verification: typecheck + full
 unit + prompt-snapshot unit tests. Rides the normal merge-on-green policy.
 
+## Cache-safety constraint (user, 2026-07-20 night — HARD)
+
+The runner splits the system prompt static/dynamic at
+SYSTEM_PROMPT_DYNAMIC_BOUNDARY for Anthropic prompt-cache parity (#236).
+Nothing per-turn-varying may enter the static side: time/timezone rides ONLY
+the existing dynamic date section (minimal mode gains that DYNAMIC section,
+never a static timestamp); the model line changes only with config;
+channel/speaker/workspace/job facts must be session-stable or move to the
+dynamic tail. REQUIRED test: two builds of the same session at different clock
+times produce a byte-identical static prefix.
+
 ## Non-goals
 
 - No output post-processing/rewriting layer.
