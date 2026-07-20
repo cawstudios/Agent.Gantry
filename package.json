@@ -74,6 +74,7 @@
     "test:integration:postgres:hot-path": "node .codex/scripts/require-postgres-integration-env.mjs && npm run build:contracts && GANTRY_POSTGRES_HOT_PATH=1 vitest run -c vitest.integration.postgres.hot-path.config.ts",
     "test:e2e": "npm run build:contracts && vitest run -c vitest.e2e.config.ts",
     "test:e2e:postgres": "node .codex/scripts/require-postgres-integration-env.mjs && npm run build:contracts && vitest run -c vitest.e2e.postgres.config.ts",
+    "test:e2e:agent:hermetic": "node .codex/scripts/require-postgres-integration-env.mjs && npm run build:contracts && vitest run -c vitest.agent-e2e.config.ts",
     "test:watch": "npm run build:contracts && vitest -c vitest.config.ts"
   },
   "dependencies": {
