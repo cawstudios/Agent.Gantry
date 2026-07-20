@@ -49,6 +49,21 @@ B2 hardening batch.
    verdicts guard against over-unification). Implementation starts on user
    sign-off. `durable-work-primitive-goal-prompt.md`
    _(worktree `wt-convo`, `feature/durable-work-primitive`)_
+4. **Media render capability + environment-facts guidance** — user-locked
+   2026-07-20 (grill): out-of-box in-sandbox video/screenshot rendering
+   (pinned chrome-headless-shell single-process recipe, empirically proven
+   under srt), full pre-provision at setup, `media.render` semantic capability
+   + bundled skill, generated environment-facts guidance section. Starts
+   immediately in parallel (user accepts contract-surface merge risk vs
+   ponytail Phase 4+). `media-render-goal-prompt.md`
+   _(worktree `wt-media`, `feature/media-render-capability`)_
+5. **Route-loader dedup + conversationId leak (incident closeout)** — the
+   durable fix behind the 2026-07-20 routing incident: loader imports every
+   active `conversation-route:%` row without dedup by chat+account, and the
+   settings projection leaks the settings key into `route.conversationId`.
+   Small fix lane + regression tests (incl. the sourceAgentFolderJids
+   chat-jid derivation test skipped during the live hotfix).
+   _(worktree `wt-routefix`, `fix/route-loader-dedup`)_
 
 Per-lane loop: codex lands → independent verify (typecheck + FULL unit +
 throwaway-DB integration when schema touched) → local autoreview to clean →
