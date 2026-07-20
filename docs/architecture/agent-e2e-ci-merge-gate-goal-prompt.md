@@ -463,6 +463,13 @@ gate never gets an endpoint the product wouldn't want. Round-3's six gaps recut:
    decision.
 Net: ONE bug fix, zero new endpoints. Everything else uses surfaces that exist.
 
+**Testing ladder (user, 2026-07-20):** (1) drive the PUBLIC API where one
+exists; (2) where none exists and none is product-justified, test the SERVICE
+layer underneath in-process at the integration layer (real service + test
+Postgres, no HTTP); (3) NEVER invent an endpoint for testing. Service-layer
+tests still assert the same three layers (contract of the service call,
+persisted effect, runtime behavior).
+
 ### Corrections to fold into v4 (mechanical)
 - **All-tools sweep scoping:** classify the effective set into invocation
   classes (read-only / side-effecting-fixture-backed / authority-lifecycle);
