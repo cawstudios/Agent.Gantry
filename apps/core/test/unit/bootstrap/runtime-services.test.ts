@@ -965,7 +965,7 @@ describe('startRuntimeServices', () => {
       const processMessages = vi.mocked(app.queue.setProcessMessagesFn as any)
         .mock.calls[0]?.[0] as (queueJid: string) => Promise<boolean>;
 
-      await expect(processMessages('tg:primary')).resolves.toBe(false);
+      await expect(processMessages('tg:primary')).resolves.toBe(true);
 
       expect(channelWiring.renderAgentTodo).toHaveBeenCalledWith(
         'tg:primary',
@@ -1896,6 +1896,9 @@ describe('startRuntimeServices', () => {
     );
 
     expect(schedulerDeps).toBeDefined();
+    expect(schedulerDeps?.projectConversationRoute).toBe(
+      app.projectConversationRoute,
+    );
     await schedulerDeps?.sendMessage('tg:primary', 'scheduler output', {
       threadId: 'thread-42',
     });
@@ -2396,11 +2399,13 @@ describe('startRuntimeServices', () => {
         delivery: {
           id: 'delivery:teams:1',
           appId: 'default',
+          idempotencyKey: 'live-send:outbound:api:teams-test',
           conversationId: 'conversation:provider-connection:teams:main',
           threadId: 'thread-1',
         },
         item: {
           id: 'delivery-item:teams:1',
+          attemptCount: 4,
           canonicalText: 'Recovered outbound',
           providerPayload: {
             conversationId: rawTeamsConversationId,
@@ -2465,6 +2470,9 @@ describe('startRuntimeServices', () => {
         permit: expect.objectContaining({
           destinationJid: `teams:${rawTeamsConversationId}`,
           canonicalText: 'Recovered outbound',
+          sourceMessageId: 'outbound:api:teams-test',
+          attemptCount: 4,
+          terminalFailure: true,
         }),
       }),
     );

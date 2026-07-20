@@ -5,7 +5,7 @@ import { TaskHandler, TaskContext } from './ipc-types.js';
 import { invalidateSystemJobRegistrationSignature } from './system-registration-cache.js';
 import { createTaskResponder } from './ipc-shared.js';
 import { mapApplicationError } from './ipc-application-error.js';
-import { runtimeJobSchedulePlanner } from './job-schedule-planner.js';
+import { runtimeJobSchedulePlanner } from './scheduler.js';
 import {
   getDefaultModelConfig,
   getSelectedAgentHarness,

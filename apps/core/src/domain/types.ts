@@ -45,6 +45,7 @@ export type AgentControlThinking =
 export type AgentControlEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface AgentControlOverrides {
+  modelAlias?: string;
   effort?: AgentControlEffort;
   thinking?: AgentControlThinking;
   maxOutputTokens?: number;
@@ -83,10 +84,16 @@ export interface ConversationRoute {
 
 export interface NewMessage {
   id: string;
+  /** Canonical persisted message id; `id` remains the provider-facing id. */
+  canonicalMessageId?: string;
   chat_jid: string;
   provider?: string;
   providerAccountId?: string;
   agentId?: string;
+  /** Provider-neutral admission policy selected by the configured account. */
+  admissionMode?: 'agent' | 'event_only';
+  /** Bounded provider context required by the owning application. */
+  providerData?: Record<string, unknown>;
   sender: string;
   sender_name: string;
   content: string;
@@ -107,7 +114,38 @@ export interface NewMessage {
   };
   responseSchema?: Record<string, unknown>;
   agentControls?: AgentControlOverrides;
+  callerResolvedTools?: CallerResolvedToolsConfig;
+  /** Provider continuity policy selected by the SDK caller for this turn. */
+  continuityMode?: SessionContinuityMode;
+  /** Immutable caller response route owned by this accepted app message. */
+  appResponseRoute?: AppMessageResponseRoute;
   attachments?: NewMessageAttachment[];
+}
+
+export type SessionContinuityMode = 'provider' | 'bounded';
+
+/** Durable per-message routing used when an app session turn emits events. */
+export interface AppMessageResponseRoute {
+  sessionId: string;
+  threadId: string | null;
+  responseMode: 'sse' | 'webhook' | 'both' | 'none';
+  webhookId: string | null;
+  correlationId: string | null;
+}
+
+/** A tool whose implementation is supplied by the SDK caller, not Gantry. */
+export interface CallerResolvedToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** Per-turn caller-tool projection kept domain-neutral by the runtime. */
+export interface CallerResolvedToolsConfig {
+  sessionId: string;
+  tools: CallerResolvedToolDefinition[];
+  maxInteractions: number;
+  interactionTimeoutMs: number;
 }
 
 export interface NewMessageAttachment {
@@ -370,6 +408,8 @@ export interface InteractionDescriptor {
 export interface StreamingChunkOptions {
   threadId?: string;
   providerAccountId?: string;
+  runId?: string;
+  appResponseRoute?: AppMessageResponseRoute;
   done?: boolean;
   generation?: number;
 }
@@ -429,8 +469,12 @@ export interface MessageSendOptions {
   threadId?: string;
   providerAccountId?: string;
   agentId?: string;
+  runId?: string;
+  appResponseRoute?: AppMessageResponseRoute;
   actionAffordances?: MessageActionAffordance[];
   files?: MessageFileAttachment[];
+  providerData?: Record<string, unknown>;
+  adaptiveCard?: Record<string, unknown>;
 }
 
 export interface MessageFileAttachment {
@@ -470,7 +514,10 @@ export type OnChatMetadata = (
   name?: string,
   channel?: string,
   isGroup?: boolean,
-  options?: { providerAccountId?: string },
+  options?: {
+    providerAccountId?: string;
+    externalRef?: Record<string, unknown>;
+  },
 ) => Promise<void>;
 
 export interface ChannelLifecyclePort {

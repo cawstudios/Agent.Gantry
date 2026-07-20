@@ -13,17 +13,22 @@ import {
 } from 'drizzle-orm';
 
 import type { NewMessage } from '../../../../domain/repositories/domain-types.js';
-import type { LiveAdmissionWorkItemEnqueueResult } from '../../../../domain/ports/live-turns.js';
+import type {
+  LiveAdmissionWorkItemEnqueueResult,
+  SdkSessionAdmissionPreflight,
+} from '../../../../domain/ports/live-turns.js';
 import { agentIdForFolder as normalizeAgentIdForFolder } from '../../../../domain/agent/agent-folder-id.js';
 import { normalizeProviderId } from '../../../../channels/provider-registry.js';
-import { sanitizeRetryTailProviderPayload } from '../../../../domain/messages/retry-tail-provider-payload.js';
 import {
   encodeGroupMessageCursor,
   toGroupMessageCursor,
 } from '../../../../shared/message-cursor.js';
 import { makeAgentThreadQueueKey } from '../../../../shared/thread-queue-key.js';
 import * as pgSchema from '../schema/schema.js';
-import { enqueueLiveAdmissionWorkItem } from './live-admission-work-item-repository.postgres.js';
+import {
+  enqueueLiveAdmissionWorkItem,
+  promoteSdkSessionAdmissionWithExecutor,
+} from './live-admission-work-item-repository.postgres.js';
 import {
   CANONICAL_APP_ID,
   type CanonicalDb,
@@ -39,6 +44,9 @@ import {
   existingAttachmentStorageMaps,
   storageRefForIncomingAttachment,
 } from './canonical-message-attachments.postgres.js';
+import { externalRefForMessage } from './canonical-message-external-ref.js';
+
+export { externalRefForMessage } from './canonical-message-external-ref.js';
 
 export interface CanonicalOpsMessageRow {
   id: string;
@@ -64,6 +72,15 @@ export interface MessageLiveAdmissionInput {
   agentSessionId?: string | null;
   providerAccountId?: string | null;
   triggerDecision?: Record<string, unknown>;
+  /**
+   * Present only after preflightSdkSessionAdmissionWithExecutor succeeded in
+   * this same transaction. Saving the message promotes that preflight with the
+   * canonical messages.id, avoiding a request-id/canonical-id mismatch.
+   */
+  sdkSessionAdmission?: {
+    requestMessageId: string;
+    preflight: SdkSessionAdmissionPreflight;
+  };
   now?: string;
 }
 
@@ -200,36 +217,6 @@ function liveAdmissionIdempotencyKey(
     msg.thread_id?.trim() || 'main',
     providerMessageId,
   ].join(':');
-}
-
-export function externalRefForMessage(msg: NewMessage) {
-  const retryTailPayload = sanitizeRetryTailProviderPayload(
-    msg.delivery_retry_tail?.providerPayload,
-  );
-  const retryTail = msg.delivery_retry_tail
-    ? {
-        canonicalText: msg.delivery_retry_tail.canonicalText,
-        ...(retryTailPayload !== undefined
-          ? { providerPayload: retryTailPayload }
-          : {}),
-      }
-    : undefined;
-  return {
-    kind: 'message',
-    id: msg.id,
-    chat_jid: msg.chat_jid,
-    provider: msg.provider,
-    provider_account_id: msg.providerAccountId,
-    thread_id: msg.thread_id,
-    external_message_id: msg.external_message_id,
-    reply_to_message_id: msg.reply_to_message_id,
-    reply_to_sender_name: msg.reply_to_sender_name,
-    response_schema: msg.responseSchema,
-    effort: msg.agentControls?.effort,
-    thinking: msg.agentControls?.thinking,
-    max_output_tokens: msg.agentControls?.maxOutputTokens,
-    delivery_retry_tail: retryTail,
-  };
 }
 
 export class PostgresCanonicalMessageRepository {
@@ -433,7 +420,11 @@ export class PostgresCanonicalMessageRepository {
     const agentId = admission.agentId
       ? normalizeAgentIdForFolder(admission.agentId)
       : null;
-    return enqueueLiveAdmissionWorkItem(tx, {
+    const routingProviderAccountId =
+      providerId === 'app' && requestedProviderAccountId === null
+        ? null
+        : providerAccountId;
+    const workItemInput = {
       id: liveAdmissionWorkItemId(
         admission.appId,
         canonicalMessageId,
@@ -449,12 +440,28 @@ export class PostgresCanonicalMessageRepository {
         msg.chat_jid,
         agentId,
         msg.thread_id,
-        providerAccountId,
+        routingProviderAccountId,
       ),
       messageId: canonicalMessageId,
       messageCursor: encodeGroupMessageCursor(toGroupMessageCursor(msg)),
       senderUserId: msg.sender,
       senderDisplayName: msg.sender_name,
+      triggerDecision: admission.triggerDecision,
+      now: admission.now ?? msg.timestamp,
+    };
+    if (admission.sdkSessionAdmission) {
+      if (!admission.agentSessionId) {
+        throw new Error('SDK session admission requires agentSessionId.');
+      }
+      return promoteSdkSessionAdmissionWithExecutor(tx, {
+        ...workItemInput,
+        agentSessionId: admission.agentSessionId,
+        requestMessageId: admission.sdkSessionAdmission.requestMessageId,
+        preflight: admission.sdkSessionAdmission.preflight,
+      });
+    }
+    return enqueueLiveAdmissionWorkItem(tx, {
+      ...workItemInput,
       idempotencyKey: liveAdmissionIdempotencyKey(
         msg,
         admission.appId,
@@ -462,8 +469,6 @@ export class PostgresCanonicalMessageRepository {
         providerAccountId,
         agentId,
       ),
-      triggerDecision: admission.triggerDecision,
-      now: admission.now ?? msg.timestamp,
     });
   }
 

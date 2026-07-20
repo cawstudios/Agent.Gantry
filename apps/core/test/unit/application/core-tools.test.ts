@@ -24,6 +24,7 @@ function taskBackend(): CoreTaskLifecycleBackend {
     task_get: vi.fn(async () => ({ ok: true, message: 'found' })),
     task_list: vi.fn(async () => ({ ok: true, message: 'listed' })),
     task_cancel: vi.fn(async () => ({ ok: true, message: 'cancelled' })),
+    task_wait: vi.fn(async () => ({ ok: true, message: 'waited' })),
     task_message: vi.fn(async () => ({ ok: true, message: 'sent' })),
   };
 }

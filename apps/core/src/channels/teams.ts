@@ -45,6 +45,8 @@ import {
   type TeamsInboundMessage,
   type TeamsSdkClient,
 } from './teams-types.js';
+import { createMicrosoftTeamsSdkClient } from './teams-microsoft-sdk.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   hydrateTeamsConversationContext,
   teamsMessageAttachments as teamsInboundMessageAttachments,
@@ -153,6 +155,13 @@ export class TeamsChannel implements ChannelAdapter {
     return this.connected || this.outboundReady;
   }
 
+  getOperationalSnapshot() {
+    return {
+      authenticatedConversationRegistrationCount:
+        this.sdkClient.getAuthenticatedConversationRegistrationCount?.() ?? 0,
+    };
+  }
+
   async disconnect(): Promise<void> {
     if (!this.connected && !this.outboundReady) return;
     if (this.connected) {
@@ -196,12 +205,44 @@ export class TeamsChannel implements ChannelAdapter {
     options: MessageSendOptions = {},
   ): Promise<MessageDeliveryResult | void> {
     if (!this.outboundReady) return;
+    const conversationId = teamsConversationIdFromJid(jid);
+    if (
+      conversationId &&
+      options.adaptiveCard &&
+      this.sdkClient.sendAdaptiveCard
+    ) {
+      return this.sdkClient.sendAdaptiveCard({
+        conversationId,
+        card: options.adaptiveCard,
+        ...(options.threadId ? { threadId: options.threadId } : {}),
+        ...(options.providerData?.microsoftConversationReference &&
+        typeof options.providerData.microsoftConversationReference === 'object'
+          ? {
+              conversationReference: options.providerData
+                .microsoftConversationReference as Record<string, unknown>,
+            }
+          : {}),
+      });
+    }
     return sendTeamsTextOrActionMessage({
       sdkClient: this.sdkClient,
       jid,
       text: teamsTextWithAttachmentNotice(text, Boolean(options.files?.length)),
       options,
     });
+  }
+
+  async handleHttpIngress(
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.sdkClient.handleHttpIngress) {
+      response.statusCode = 503;
+      response.end('Microsoft Teams ingress is unavailable.');
+      return;
+    }
+    await this.sdkClient.handleHttpIngress(request, response, body);
   }
 
   async renderRichInteraction(
@@ -354,7 +395,9 @@ export class TeamsChannel implements ChannelAdapter {
       return;
     }
 
-    const content = message.text?.trim() || '';
+    const applicationAction = isApplicationAction(message.value);
+    const content =
+      message.text?.trim() || (applicationAction ? '[application_action]' : '');
     const attachments = teamsInboundMessageAttachments(message);
     if (!content && attachments.length === 0) return;
 
@@ -364,7 +407,16 @@ export class TeamsChannel implements ChannelAdapter {
       message.conversationName,
       'teams',
       message.conversationType !== 'personal',
-      { providerAccountId: this.opts.providerAccountId },
+      {
+        providerAccountId: this.opts.providerAccountId,
+        ...(message.conversationReference
+          ? {
+              externalRef: {
+                microsoftConversationReference: message.conversationReference,
+              },
+            }
+          : {}),
+      },
     );
 
     const normalized: NewMessage = {
@@ -381,6 +433,7 @@ export class TeamsChannel implements ChannelAdapter {
       reply_to_message_id: message.replyToId,
       external_message_id: message.id,
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...(message.providerData ? { providerData: message.providerData } : {}),
     };
     await this.opts.onMessage(jid, normalized);
   }
@@ -593,6 +646,12 @@ export class TeamsChannel implements ChannelAdapter {
   }
 }
 
+function isApplicationAction(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  return payload.action === 'application_action';
+}
+
 export async function createTeamsChannel(
   opts: ChannelOpts,
   deps: TeamsChannelDependencies = {},
@@ -619,10 +678,4 @@ export async function createTeamsChannel(
     return null;
   }
   return new TeamsChannel(credentials, opts, sdkClient);
-}
-
-function createMicrosoftTeamsSdkClient(
-  _credentials: TeamsChannelCredentials,
-): TeamsSdkClient | null {
-  return null;
 }

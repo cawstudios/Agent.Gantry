@@ -42,10 +42,8 @@ import type {
   SchedulerDependencies,
   SchedulerDispatchPayload,
 } from '../../jobs/types.js';
-import {
-  schedulerJobStaleness,
-  staleOnceRequeueBucket,
-} from '../../shared/scheduler-job-staleness.js';
+import { schedulerJobStaleness } from '../../shared/scheduler-job-staleness.js';
+import { schedulerScheduleSignature } from './scheduler-signature.js';
 import {
   nowMs as currentTimeMs,
   parseIso,
@@ -55,7 +53,6 @@ import {
 const SCHEDULER_QUEUE = 'gantry.jobs';
 const SCHEDULER_QUEUE_DEAD_LETTER = 'gantry.jobs.dead_letter';
 const PGBOSS_KEY_PREFIX = 'gantry';
-const STALE_ONCE_REENQUEUE_THROTTLE_MS = 60_000;
 export const SCHEDULER_MAINTENANCE_SYNC_INTERVAL_MS = 60_000;
 
 interface PgBossSchedulerCallbacks {
@@ -148,7 +145,7 @@ export class PgBossSchedulerEngine {
     }
     const boss = new PgBoss({
       connectionString: STORAGE_POSTGRES_URL,
-      schema: 'pgboss',
+      schema: 'gantry_pgboss',
       createSchema: true,
       migrate: true,
       schedule: true,
@@ -378,7 +375,7 @@ export class PgBossSchedulerEngine {
 
   private async syncJob(boss: PgBoss, job: Job): Promise<void> {
     const nowMs = currentTimeMs();
-    const signature = this.scheduleSignature(job, nowMs);
+    const signature = schedulerScheduleSignature(job, nowMs, TIMEZONE);
     if (this.scheduleSignatures.get(job.id) === signature) return;
     await this.clearBossSchedule(boss, job.id);
     if (job.status !== 'active') {
@@ -411,7 +408,7 @@ export class PgBossSchedulerEngine {
         { jobId: job.id },
         {
           key: pgBossJobKey(job.id),
-          tz: TIMEZONE,
+          tz: job.schedule_timezone ?? TIMEZONE,
           group: { id: pgBossGroupId(job.workspace_key) },
           singletonKey: pgBossJobKey(job.id),
           retryLimit: 0,
@@ -444,23 +441,6 @@ export class PgBossSchedulerEngine {
         priority: schedulerDeliveryPriorityForJob(job),
       },
     );
-  }
-
-  private scheduleSignature(job: Job, nowMs: number): string {
-    return JSON.stringify({
-      id: job.id,
-      status: job.status,
-      scheduleType: job.schedule_type,
-      scheduleValue: job.schedule_value,
-      nextRun: job.schedule_type === 'cron' ? null : job.next_run,
-      staleOnceRequeueBucket: staleOnceRequeueBucket(
-        job,
-        nowMs,
-        STALE_ONCE_REENQUEUE_THROTTLE_MS,
-      ),
-      workspaceKey: job.workspace_key,
-      admissionPriority: schedulerDeliveryPriorityForJob(job),
-    });
   }
 
   private async clearDeletedJob(boss: PgBoss, jobId: string): Promise<void> {

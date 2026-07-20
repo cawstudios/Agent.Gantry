@@ -73,6 +73,7 @@ export interface AgentCapabilityContext {
   externalMcpAllowedTools?: readonly string[];
   externalMcpAlwaysAllowedTools?: readonly string[];
   isScheduledJob?: boolean;
+  callerResolvedTools?: import('../../../domain/types.js').CallerResolvedToolsConfig;
 }
 
 export type McpServerConfig =
@@ -121,6 +122,10 @@ const RUNNER_SUPPRESSED_GANTRY_MCP_TOOL_NAME_SET = new Set<string>([
   'memory_dream',
   'memory_consolidate',
 ]);
+const EAGER_CALLER_DELEGATION_TOOL_NAMES = [
+  'delegate_task',
+  'task_wait',
+] as const;
 function gantryMcpAllowedTools(input: {
   configuredTools?: readonly string[];
   hideAuthorityTools?: boolean;
@@ -243,6 +248,12 @@ const permissionProvider: AgentCapabilityProvider = {
 const gantryMcpProvider: AgentCapabilityProvider = {
   id: 'gantry-mcp',
   provide: (ctx) => {
+    const eagerDelegationTools =
+      ctx.callerResolvedTools &&
+      ctx.asyncTaskToolsEnabled === true &&
+      (ctx.configuredAllowedTools ?? []).includes('AgentDelegation')
+        ? EAGER_CALLER_DELEGATION_TOOL_NAMES.map(gantryMcpFullToolName)
+        : [];
     const env: Record<string, string> = {
       ...(ctx.appId ? { GANTRY_APP_ID: ctx.appId } : {}),
       ...(ctx.agentId ? { GANTRY_AGENT_ID: ctx.agentId } : {}),
@@ -303,6 +314,13 @@ const gantryMcpProvider: AgentCapabilityProvider = {
       ...(ctx.asyncTaskToolsEnabled
         ? { GANTRY_ASYNC_TASK_TOOLS_ENABLED: '1' }
         : {}),
+      ...(ctx.callerResolvedTools
+        ? {
+            GANTRY_CALLER_RESOLVED_TOOLS_JSON: JSON.stringify(
+              ctx.callerResolvedTools,
+            ),
+          }
+        : {}),
       GANTRY_MEMORY_IPC_ACTIONS_JSON: JSON.stringify(
         selectedMemoryIpcActions(ctx.configuredAllowedTools ?? [], {
           memoryReviewerIsControlApprover: ctx.memoryReviewerIsControlApprover,
@@ -326,6 +344,15 @@ const gantryMcpProvider: AgentCapabilityProvider = {
     };
     applyAgentEgressNoProxyEnv(env);
     return {
+      allowedTools: (ctx.callerResolvedTools?.tools ?? []).map(
+        (tool) => `mcp__gantry__${tool.name}`,
+      ),
+      availableTools: [
+        ...eagerDelegationTools,
+        ...(ctx.callerResolvedTools?.tools ?? []).map(
+          (tool) => `mcp__gantry__${tool.name}`,
+        ),
+      ],
       mcpServers: {
         gantry: {
           command: 'node',

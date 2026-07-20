@@ -27,11 +27,12 @@ const todoItemSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
-async function submitTaskLifecycleRequest(input: {
+export async function submitTaskLifecycleRequest(input: {
   type: string;
   payload: Record<string, unknown>;
   timeoutMessage: string;
   fallbackError: string;
+  responseTimeoutMs?: number;
 }) {
   const taskId = makeIpcId(input.type.replaceAll('_', '-'));
   writeIpcFile(TASKS_DIR, {
@@ -59,7 +60,10 @@ async function submitTaskLifecycleRequest(input: {
     authThreadId: threadId,
     timestamp: nowIso(),
   });
-  const response = await waitForTaskResponse(taskId, TASK_TOOL_TIMEOUT_MS);
+  const response = await waitForTaskResponse(
+    taskId,
+    input.responseTimeoutMs ?? TASK_TOOL_TIMEOUT_MS,
+  );
   if (!response) {
     return {
       content: [{ type: 'text' as const, text: input.timeoutMessage }],
@@ -161,6 +165,7 @@ export function registerTaskLifecycleTools(server: McpServer): void {
     'delegate_task',
     'Start a durable async child agent run. Use task_get/task_list to inspect it and task_message to steer it while it is running.',
     {
+      taskKey: z.string().min(1).max(80).optional(),
       objective: z.string().min(1).max(10_000),
       context: z.string().max(20_000).optional(),
       expectedOutput: z.string().max(2_000).optional(),
@@ -178,6 +183,27 @@ export function registerTaskLifecycleTools(server: McpServer): void {
         payload: args,
         timeoutMessage: 'Delegated task start timed out.',
         fallbackError: 'Delegated task start failed.',
+      }),
+  );
+
+  server.tool(
+    'task_wait',
+    'Suspend this tool call until all selected durable tasks finish or the timeout expires. Completion is host-driven; do not poll task_get while waiting.',
+    {
+      taskIds: z.array(z.string().min(1).max(160)).min(1).max(64),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .max(30 * 60_000),
+    },
+    async (args) =>
+      submitTaskLifecycleRequest({
+        type: 'task_wait',
+        payload: args,
+        responseTimeoutMs: args.timeoutMs + TASK_TOOL_TIMEOUT_MS,
+        timeoutMessage: 'Task wait IPC response timed out.',
+        fallbackError: 'Task wait failed.',
       }),
   );
 

@@ -15,6 +15,7 @@ export const CreateSessionRequestSchema = z
   .object({
     appId: z.string().optional(),
     agentId: z.string().optional(),
+    agentName: z.string().optional(),
     conversationId: z.string().optional(),
     threadId: z.string().optional(),
     jobId: z.string().optional(),

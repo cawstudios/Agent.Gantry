@@ -435,6 +435,11 @@ async function executeInlineRun(input: {
                   status: 'error',
                   result: null,
                   error: `Inline agent timed out after ${formatDuration(timeoutMs)}`,
+                  failure: {
+                    type: 'timeout',
+                    attemptedAction:
+                      'Execute agent turn within configured timeout',
+                  },
                 }
               : activeRunStopWasRequested(handle)
                 ? {
@@ -483,7 +488,15 @@ async function executeInlineRun(input: {
 
   try {
     const first = await Promise.race([settledLane, aborted]);
-    if (first.kind === 'aborted') await settledLane;
+    if (first.kind === 'aborted' && timedOut) {
+      // A provider lane is expected to honor the abort signal, but the SDK
+      // deadline must not depend on that cooperation. Stop accepting output
+      // immediately and observe the detached lane without awaiting it.
+      active = false;
+      void settledLane;
+    } else if (first.kind === 'aborted') {
+      await settledLane;
+    }
     await outputChain;
     return outputWithProviderSession(first.output, providerSessionId);
   } finally {

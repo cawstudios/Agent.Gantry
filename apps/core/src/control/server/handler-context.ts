@@ -85,6 +85,15 @@ export type ControlRouteContext = {
   isSchedulerReady?: () => boolean;
   oldestWaitingLiveAdmissionSeconds?: () => number;
   liveCapacityLimit?: () => number;
+  getChannelTransportHealth?: () => Array<{
+    providerId: string;
+    configured: boolean;
+    connected: boolean;
+    configuredAccountCount: number;
+    connectedAccountCount: number;
+    authenticatedConversationRegistrationCount: number;
+    authenticatedConversationRegistrationAvailable: boolean;
+  }>;
   socketPath: string;
   port: number;
   maxConcurrentStreams: number;
@@ -128,6 +137,20 @@ export type ControlRouteContext = {
     providerAccountId: string;
     text: string;
   }) => Promise<void>;
+  sendConversationMessage?: (input: {
+    appId: string;
+    conversationId: string;
+    threadId?: string;
+    idempotencyKey: string;
+    text: string;
+    adaptiveCard?: Record<string, unknown>;
+  }) => Promise<{ messageId: string; providerMessageId?: string }>;
+  handleProviderHttpIngress?: (
+    providerId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: Record<string, unknown>,
+  ) => Promise<boolean>;
   addMessageReaction?: (
     jid: string,
     messageRef: string,

@@ -16,8 +16,6 @@ import {
 import type { TaskContext, TaskHandler } from './ipc-types.js';
 import { resolveConfiguredAllowedTools } from '../runtime/configured-agent-tools.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
-import type { AgentOutput } from '../runtime/agent-spawn-types.js';
-import { spawnAgent } from '../runtime/agent-spawn.js';
 import {
   taskContinuationThreadId,
   writeContinuationInput,
@@ -43,6 +41,12 @@ import { resolveTurnToolPolicy } from '../runtime/group-run-context.js';
 import { createCoreTaskLifecycleBackend } from '../application/core-tools/task-lifecycle.js';
 import { delegatedTaskAgentInScope } from './async-command-task-helpers.js';
 import { resolveDelegatedAgentTarget } from './ipc-agent-delegation-target.js';
+import { createCallerResolvedToolHandler } from './ipc-caller-resolved-tool-handler.js';
+import {
+  createDelegatedTaskTerminalPublisher,
+  createInheritedDelegatedAgentRunner,
+} from './ipc-delegated-task-support.js';
+import { createTaskWaitHandler } from './ipc-task-wait-handler.js';
 
 const TODO_STATUSES = new Set([
   'pending',
@@ -131,6 +135,7 @@ function taskService(context: TaskContext): AsyncCommandTaskService | null {
         }),
     },
     {
+      onDelegatedTaskTerminal: createDelegatedTaskTerminalPublisher(context),
       prepareRun: async ({ task, allowedNetworkHosts }) => {
         const gateway = await ensureEgressGateway({
           key: `${task.appId}:${task.agentId}:${task.id}`,
@@ -173,6 +178,8 @@ function taskBackend(
     service,
     owner,
     parentTaskId: parent.parentTaskId,
+    parentJobId: context.data.jobId ?? null,
+    parentJobRunId: context.data.jobId ? (context.data.runId ?? null) : null,
     workspaceFolder: context.sourceAgentFolder,
     deliverTaskMessage,
   });
@@ -185,13 +192,35 @@ function taskScope(context: TaskContext): {
   threadId?: string | null;
   sandboxPolicy: AsyncCommandSandboxPolicy;
 } | null {
-  const conversationId = validateSameConversation(context);
-  if (!conversationId) return null;
+  const conversationId = toTrimmedString(context.data.chatJid, {
+    maxLen: 255,
+  });
   const sandboxPolicy = readAsyncCommandSandboxPolicy({
     sourceAgentFolder: context.sourceAgentFolder,
     runHandle: context.data.runHandle,
   });
-  if (!sandboxPolicy) return null;
+  if (!conversationId || !sandboxPolicy) return null;
+  const isBoundConversation =
+    context.sourceAgentFolderJids.includes(conversationId);
+  const isCurrentJobConversation = Boolean(
+    context.data.jobId &&
+    context.data.runId &&
+    sandboxPolicy.jobId === context.data.jobId &&
+    sandboxPolicy.runId === context.data.runId &&
+    sandboxPolicy.conversationId === conversationId,
+  );
+  const isCurrentLiveConversation = Boolean(
+    !context.data.jobId &&
+    context.data.runId &&
+    sandboxPolicy.runId === context.data.runId &&
+    sandboxPolicy.conversationId === conversationId,
+  );
+  if (
+    !isBoundConversation &&
+    !isCurrentJobConversation &&
+    !isCurrentLiveConversation
+  )
+    return null;
   const appId = toTrimmedString(context.data.appId, { maxLen: 120 });
   const agentId = toTrimmedString(context.data.agentId, { maxLen: 120 });
   const expectedAgentId = memoryAgentIdForWorkspaceFolder(
@@ -472,6 +501,17 @@ const taskCancelHandler: TaskHandler = async (context) => {
   const tasks = taskBackend(context, service, scopedTaskOwner, parentTask);
   respondTaskLifecycleResult(context, await tasks.task_cancel({ taskId }));
 };
+const taskWaitHandler = createTaskWaitHandler({
+  responder,
+  taskScope,
+  taskService,
+  validateParentTaskScope,
+  taskBackend,
+});
+const callerResolvedToolHandler = createCallerResolvedToolHandler({
+  responder,
+  taskScope,
+});
 const delegateTaskHandler: TaskHandler = async (context) => {
   const { reject } = responder(context);
   const scope = taskScope(context);
@@ -515,109 +555,22 @@ const delegateTaskHandler: TaskHandler = async (context) => {
     reject(target.message, target.code);
     return;
   }
-  const {
-    group,
-    targetOwner,
-    toolPolicy,
-    selectedSkillContext,
-    semanticCapabilities,
-    attachedMcpSourceIds,
-  } = target;
+  const { group } = target;
   const sharedResult = await createCoreTaskLifecycleBackend({
     service,
     owner: { ...scopedTaskOwner, providerAccountId: target.providerAccountId },
     parentRunId: context.data.jobId ? null : (context.data.runId ?? null),
+    parentJobId: context.data.jobId ?? null,
+    parentJobRunId: context.data.jobId ? (context.data.runId ?? null) : null,
     workspaceFolder: group.folder,
-    runDelegatedAgent: async ({
-      task,
-      prompt,
-      signal,
-      onProcessStarted,
-      onProgress,
-      timeoutMs: delegatedTimeoutMs,
-    }) => {
-      const runAgent = context.deps.runAgent ?? spawnAgent;
-      let latestResult: string | null = null;
-      let processHandlePersisted: Promise<void> | null = null;
-      const output = await runAgent(
-        group,
-        {
-          prompt,
-          appId: scopedTaskOwner.appId,
-          agentId: target.targetAgentId,
-          chatJid: scopedTaskOwner.conversationId,
-          threadId: scopedTaskOwner.threadId ?? undefined,
-          workspaceFolder: group.folder,
-          parentTaskId: task.id,
-          persona: group.agentConfig?.persona,
-          thinking: group.agentConfig?.thinking,
-          toolPolicyRules: toolPolicy.toolPolicyRules,
-          runtimeAccess: toolPolicy.runtimeAccess,
-          attachedSkillSourceIds: selectedSkillContext.ids,
-          selectedSkillDisplays: selectedSkillContext.displays,
-          attachedMcpSourceIds,
-          semanticCapabilities,
-        },
-        (proc) => {
-          if (proc.pid) {
-            processHandlePersisted = Promise.resolve(
-              onProcessStarted?.({
-                pid: proc.pid,
-                processGroupId: proc.pid,
-                detached: true,
-                platform: process.platform,
-                ownerPid: process.pid,
-                startedAt: nowIso(),
-              }),
-            );
-            processHandlePersisted.catch(() => {
-              proc.kill('SIGTERM');
-            });
-          }
-        },
-        async (output: AgentOutput) => {
-          if (output.result) {
-            latestResult = output.result;
-            await onProgress?.(output.result);
-          }
-        },
-        {
-          timeoutMs: delegatedTimeoutMs ?? DEFAULT_DELEGATED_AGENT_TIMEOUT_MS,
-          signal,
-          credentialBroker: await context.deps.getCredentialBroker?.(),
-          skillRepository: context.deps.getSkillRepository?.(),
-          skillArtifactStore: context.deps.getSkillArtifactStore?.(),
-          skillContext: targetOwner,
-          mcpServerRepository: context.deps.getMcpServerRepository?.(),
-          capabilitySecretRepository:
-            context.deps.getCapabilitySecretRepository?.(),
-          mcpContext: targetOwner,
-          mcpHostnameLookup: context.deps.mcpHostnameLookup,
-          mcpDnsValidationCache: context.deps.getMcpDnsValidationCache?.(),
-          publishRuntimeEvent: context.deps.publishRuntimeEvent,
-          executionAdapter: context.deps.executionAdapter,
-          executionAdapters: context.deps.executionAdapters,
-          runnerSandboxProvider: context.deps.runnerSandboxProvider!,
-          asyncTaskRepositoryAvailable: Boolean(
-            context.deps.getAsyncTaskRepository?.(),
-          ),
-        },
-      );
-      if (processHandlePersisted) await processHandlePersisted;
-      if (output.status === 'error') {
-        return AsyncCommandTaskService.delegatedAgentFailureResult(
-          output,
-          latestResult,
-          task.summary ?? 'Complete delegated task.',
-        );
-      }
-      return {
-        outputSummary:
-          output.result ?? latestResult ?? 'delegated task completed',
-      };
-    },
+    runDelegatedAgent: await createInheritedDelegatedAgentRunner({
+      context,
+      owner: scopedTaskOwner,
+      target,
+    }),
   }).delegate_task({
     objective,
+    taskKey: toTrimmedString(payload.taskKey, { maxLen: 80 }) ?? undefined,
     ...(targetAgentId ? { targetAgentId } : {}),
     context: toTrimmedString(payload.context, { maxLen: 20_000 }) ?? undefined,
     expectedOutput:
@@ -690,10 +643,12 @@ const taskMessageHandler: TaskHandler = async (context) => {
 };
 export const agentTaskLifecycleHandlers: Record<string, TaskHandler> = {
   async_run_command: asyncRunCommandHandler,
+  caller_resolved_tool: callerResolvedToolHandler,
   delegate_task: delegateTaskHandler,
   task_cancel: taskCancelHandler,
   task_get: taskGetHandler,
   task_list: taskListHandler,
+  task_wait: taskWaitHandler,
   task_message: taskMessageHandler,
   todo_update: todoUpdateHandler,
 };

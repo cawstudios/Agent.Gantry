@@ -447,6 +447,7 @@ describe('ConversationMessageIngressModule', () => {
         },
       });
       return {
+        outcome: 'accepted' as const,
         event: { eventId: 77 },
         liveAdmissionResult: {
           outcome: 'enqueued',
@@ -499,6 +500,7 @@ describe('ConversationMessageIngressModule', () => {
         },
       });
       return {
+        outcome: 'accepted' as const,
         event: { eventId: 77 },
         liveAdmissionResult: {
           outcome: 'enqueued',

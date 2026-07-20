@@ -8,6 +8,7 @@ import {
   normalizeCapabilitySecretName,
 } from '../../domain/capability-secrets/capability-secrets.js';
 import { formatMissingGantrySecretsMessage } from '../../shared/user-visible-messages.js';
+import { sha256Hex } from '../../shared/stable-hash.js';
 
 export type CapabilitySecretStatus = 'ready' | 'needs_secret';
 type CapabilitySecretAuditPublisher = (
@@ -28,13 +29,27 @@ export class CapabilitySecretService {
     appId: AppId;
     name: string;
   }): Promise<CapabilitySecretStatus> {
+    return (await this.inspect(input)).status;
+  }
+
+  async inspect(input: { appId: AppId; name: string }) {
     const name = normalizeCapabilitySecretName(input.name);
     assertValidCapabilitySecretName(name);
     const secret = await this.secrets.getSecret({
       appId: input.appId,
       name,
     });
-    return secret?.value ? 'ready' : 'needs_secret';
+    return {
+      name,
+      status: (secret?.value
+        ? 'ready'
+        : 'needs_secret') as CapabilitySecretStatus,
+      fingerprint: secret?.value
+        ? `sha256:${sha256Hex(secret.value).slice(0, 16)}`
+        : null,
+      allowedCapabilityIds: secret?.allowedCapabilityIds ?? [],
+      updatedAt: secret?.updatedAt ?? null,
+    };
   }
 
   async set(input: {

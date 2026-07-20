@@ -115,11 +115,15 @@ export interface RuntimeApp {
     chatJid: string,
     options?: {
       queued?: boolean;
+      timeoutMs?: number;
+      executionDeadlineAtMs?: number;
       existingRunId?: string;
       existingRunLeaseToken?: string;
       existingRunLeaseWorkerInstanceId?: string;
       existingRunLeaseFencingVersion?: number;
-      onRunResult?: (result: 'success' | 'error' | 'stopped') => void;
+      onRunResult?: (
+        result: 'success' | 'error' | 'stopped' | 'timed_out',
+      ) => void;
       onFirstProgress?: (input: {
         jid: string;
         messageRef: string;
@@ -147,6 +151,7 @@ export interface RuntimeAppOptions {
   mcpHostnameLookup?: GroupProcessingDeps['getMcpHostnameLookup'];
   collectSessionMemory?: GroupProcessingDeps['collectSessionMemory'];
   publishRuntimeEvent?: GroupProcessingDeps['publishRuntimeEvent'];
+  activateTurnResponseRoute?: GroupProcessingDeps['activateTurnResponseRoute'];
   executionAdapter?: AgentExecutionAdapter;
   executionAdapters?: AgentExecutionAdapterRegistry;
   runnerSandboxProvider?: RunnerSandboxProvider;
@@ -585,6 +590,7 @@ export function createRuntimeApp(options: RuntimeAppOptions = {}): RuntimeApp {
       lastAgentTimestamp[chatJid] = timestamp;
     },
     saveState,
+    activateTurnResponseRoute: options.activateTurnResponseRoute,
     setGroupModelOverride,
     setGroupThinkingOverride,
     setGroupPermissionModeOverride,

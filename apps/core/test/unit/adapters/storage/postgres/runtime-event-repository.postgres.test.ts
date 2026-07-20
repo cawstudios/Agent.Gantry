@@ -10,6 +10,7 @@ class FakeDrizzleDb {
   insertedOutboxEvent: Record<string, unknown> | null = null;
   failOutboxInsert = false;
   failDeliveryInsert = false;
+  canonicalConversationId: string | null = null;
 
   async transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
     this.operations.push('transaction:begin');
@@ -41,7 +42,7 @@ class FakeDrizzleDb {
                   runId: null,
                   jobId: null,
                   triggerId: null,
-                  conversationId: null,
+                  conversationId: value.conversationId,
                   threadId: null,
                   eventType: value.eventType,
                   actor: value.actor,
@@ -87,6 +88,20 @@ class FakeDrizzleDb {
     const db = this;
     return {
       from(table: unknown) {
+        if (table === pgSchema.controlHttpSessionsPostgres) {
+          db.operations.push('select:control_session');
+          return {
+            where() {
+              return {
+                async limit() {
+                  return db.canonicalConversationId
+                    ? [{ conversationId: db.canonicalConversationId }]
+                    : [];
+                },
+              };
+            },
+          };
+        }
         if (table !== pgSchema.controlHttpWebhooksPostgres) {
           throw new Error('Unexpected select table');
         }
@@ -263,5 +278,53 @@ describe('PostgresRuntimeEventRepository', () => {
       'insert:event_bus_outbox',
       'transaction:commit',
     ]);
+  });
+
+  it('uses the canonical conversation mapped by an app session', async () => {
+    const db = new FakeDrizzleDb();
+    db.canonicalConversationId = 'control:app:test:conversation:analysis-1';
+    const repository = createRepository(db);
+
+    await repository.appendRuntimeEvent({
+      appId: 'app:test' as never,
+      sessionId: 'session:test' as never,
+      conversationId: 'conversation:app:test:analysis-1' as never,
+      eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
+      actor: 'agent',
+      payload: { text: 'done' },
+    });
+
+    expect(db.insertedRuntimeEvent).toEqual(
+      expect.objectContaining({
+        conversationId: 'control:app:test:conversation:analysis-1',
+      }),
+    );
+    expect(db.operations).toEqual([
+      'transaction:begin',
+      'select:control_session',
+      'insert:runtime_events',
+      'insert:event_bus_outbox',
+      'transaction:commit',
+    ]);
+  });
+
+  it('uses the app chat mapping when a runtime event has no session id', async () => {
+    const db = new FakeDrizzleDb();
+    db.canonicalConversationId = 'control:app:test:conversation:analysis-1';
+    const repository = createRepository(db);
+
+    await repository.appendRuntimeEvent({
+      appId: 'app:test' as never,
+      conversationId: 'conversation:app:test:analysis-1' as never,
+      eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_OUTBOUND,
+      actor: 'agent',
+      payload: { text: 'done' },
+    });
+
+    expect(db.insertedRuntimeEvent).toEqual(
+      expect.objectContaining({
+        conversationId: 'control:app:test:conversation:analysis-1',
+      }),
+    );
   });
 });

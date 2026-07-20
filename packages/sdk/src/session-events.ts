@@ -16,6 +16,23 @@ export function parseSessionSseEvent(input: {
       typeof envelope?.sessionId === 'string' || envelope?.sessionId === null
         ? envelope.sessionId
         : undefined,
+    jobId:
+      typeof envelope?.jobId === 'string' || envelope?.jobId === null
+        ? envelope.jobId
+        : undefined,
+    runId:
+      typeof envelope?.runId === 'string' || envelope?.runId === null
+        ? envelope.runId
+        : undefined,
+    triggerId:
+      typeof envelope?.triggerId === 'string' || envelope?.triggerId === null
+        ? envelope.triggerId
+        : undefined,
+    conversationId:
+      typeof envelope?.conversationId === 'string' ||
+      envelope?.conversationId === null
+        ? envelope.conversationId
+        : undefined,
     threadId:
       typeof envelope?.threadId === 'string' || envelope?.threadId === null
         ? envelope.threadId

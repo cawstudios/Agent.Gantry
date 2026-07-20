@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   type AgentFailureMetadata,
@@ -24,7 +24,7 @@ import {
 } from './async-command-task-service.js';
 import { asyncDelegatedPrivateCorrelation } from './async-task-execution-payload.js';
 import { createAdmittedAsyncTask } from './async-task-admission.js';
-import { notifyAsyncTaskChange } from './async-task-change-waiter.js';
+import { finishDelegatedAgentTask } from './async-delegated-task-completion.js';
 
 const ASYNC_TASK_HEARTBEAT_MS = 15_000;
 const ASYNC_TASK_WAKE_FALLBACK_MS = 15_000;
@@ -46,11 +46,15 @@ export interface StartDelegatedAgentTaskInput {
   providerAccountId?: string | null;
   threadId?: string | null;
   parentRunId?: string | null;
+  parentJobId?: string | null;
+  parentJobRunId?: string | null;
+  taskKey?: string;
   objective: string;
   context?: string | null;
   expectedOutput?: string | null;
   targetAgentId?: string;
   workspaceFolder: string;
+  onTerminal?: (task: AsyncTaskRecord) => Promise<void> | void;
   run(input: {
     task: AsyncTaskRecord;
     prompt: string;
@@ -99,7 +103,10 @@ export async function startDelegatedAgentTask(input: {
     return { ok: false, message: 'delegate_task requires an objective.' };
   }
   await input.recoverStaleTasks({ appId: input.taskInput.appId });
-  const taskId = `task_${randomUUID()}`;
+  const taskKey = input.taskInput.taskKey?.trim();
+  const taskId = taskKey
+    ? stableDelegatedTaskId(input.taskInput, taskKey)
+    : `task_${randomUUID()}`;
   const controller = new AbortController();
   const createInput: AsyncTaskCreateInput = {
     id: taskId,
@@ -108,10 +115,16 @@ export async function startDelegatedAgentTask(input: {
     conversationId: input.taskInput.conversationId,
     threadId: input.taskInput.threadId,
     parentRunId: input.taskInput.parentRunId,
+    parentJobId: input.taskInput.parentJobId,
+    parentJobRunId: input.taskInput.parentJobRunId,
     kind: 'delegated_agent',
     status: 'queued',
     admissionClass: 'task',
-    authoritySnapshotJson: { toolName: 'delegate_task', maxDepth: 1 },
+    authoritySnapshotJson: {
+      toolName: 'delegate_task',
+      maxDepth: 1,
+      ...(taskKey ? { taskKey } : {}),
+    },
     privateCorrelationJson: asyncDelegatedPrivateCorrelation({
       appId: input.taskInput.appId,
       taskId,
@@ -122,10 +135,18 @@ export async function startDelegatedAgentTask(input: {
     summary: commandSummary(objective),
     now: nowIso(),
   };
-  const created = await createAdmittedAsyncTask({
-    repository: input.repository,
-    task: createInput,
-  });
+  let created: Awaited<ReturnType<typeof createAdmittedAsyncTask>>;
+  try {
+    created = await createAdmittedAsyncTask({
+      repository: input.repository,
+      task: createInput,
+    });
+  } catch (error) {
+    if (!taskKey) throw error;
+    const existing = await input.repository.getTask(taskId);
+    if (!existing) throw error;
+    return { ok: true, task: toPublicAsyncTaskDto(existing) };
+  }
   if (!created.ok) return created;
   const task = created.task;
   input.queueTask({
@@ -141,6 +162,21 @@ export async function startDelegatedAgentTask(input: {
     },
   });
   return { ok: true, task: toPublicAsyncTaskDto(task) };
+}
+
+function stableDelegatedTaskId(
+  input: StartDelegatedAgentTaskInput,
+  taskKey: string,
+): string {
+  const scope =
+    input.parentJobRunId ??
+    input.parentRunId ??
+    `${input.conversationId}:${input.threadId ?? ''}`;
+  const digest = createHash('sha256')
+    .update(`${input.appId}\0${input.agentId}\0${scope}\0${taskKey}`)
+    .digest('hex')
+    .slice(0, 40);
+  return `task_${digest}`;
 }
 
 export async function sendDelegatedAgentTaskMessage(input: {
@@ -392,6 +428,7 @@ export async function executeDelegatedAgentTask(input: {
       subtasks: childResult.summary,
       needsAttention: 'none',
       terminalChildren: childResult.terminalChildren,
+      onTerminal: taskInput.onTerminal,
     });
   } catch (err) {
     const aborted = controller.signal.aborted;
@@ -421,6 +458,7 @@ export async function executeDelegatedAgentTask(input: {
         err instanceof DelegatedChildFailureError
           ? err.terminalChildren
           : undefined,
+      onTerminal: taskInput.onTerminal,
     });
   } finally {
     clearInterval(heartbeat);
@@ -428,48 +466,6 @@ export async function executeDelegatedAgentTask(input: {
   }
 }
 
-async function finishDelegatedAgentTask(
-  repository: AsyncTaskRepository,
-  task: AsyncTaskRecord,
-  input: {
-    status: 'completed' | 'cancelled' | 'timed_out' | 'failed';
-    output: string;
-    error: string;
-    subtasks: string;
-    needsAttention: string;
-    failure?: AgentFailureMetadata;
-    terminalChildren?: ReturnType<typeof toPublicAsyncTaskDto>[];
-  },
-) {
-  const now = nowIso();
-  const latest = await repository.getTask(task.id);
-  const updated = await repository.transitionTask({
-    taskId: task.id,
-    leaseToken: task.leaseToken,
-    fencingVersion: task.fencingVersion,
-    status: input.status,
-    now,
-    terminalAt: now,
-    privateCorrelationJson: {
-      ...(latest?.privateCorrelationJson ?? task.privateCorrelationJson),
-      ...(input.failure ? { failure: input.failure } : {}),
-      ...(input.terminalChildren
-        ? { terminalChildren: input.terminalChildren }
-        : {}),
-    },
-    outputSummary: truncate(input.output),
-    errorSummary: truncate(input.error),
-    receiptJson: {
-      completed: truncate(input.output),
-      used: 'Gantry agent run',
-      changed: 'none',
-      delegated: 'yes',
-      subtasks: input.subtasks,
-      needsAttention: input.needsAttention,
-    },
-  });
-  if (updated) notifyAsyncTaskChange(repository);
-}
 async function waitForLinkedChildTasks(
   repository: AsyncTaskRepository,
   parent: AsyncTaskRecord,

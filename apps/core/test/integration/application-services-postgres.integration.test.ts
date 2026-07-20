@@ -74,6 +74,20 @@ maybeDescribe('application services with Postgres repositories', () => {
       permissionPolicyIds: ['permission-policy:review'],
       skillIds: ['skill:approved'],
     });
+    await runtime.repositories.agents.saveAgent({
+      id: agentId,
+      appId,
+      name: 'Renamed Integration Agent',
+      status: 'active',
+      createdAt: now,
+      updatedAt: '2026-04-28T00:01:00.000Z',
+    });
+    await expect(
+      runtime.repositories.agents.getAgent(agentId),
+    ).resolves.toMatchObject({
+      name: 'Renamed Integration Agent',
+      currentConfigVersionId: configVersionId,
+    });
 
     await runtime.repositories.permissions.saveDecision({
       id: 'permission-decision:integration:allow' as never,

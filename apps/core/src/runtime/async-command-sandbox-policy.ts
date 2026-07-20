@@ -1,4 +1,5 @@
 import type { RunnerSandboxResourceLimits } from '../shared/runner-sandbox-provider.js';
+import type { CallerResolvedToolsConfig } from '../domain/types.js';
 
 export interface AsyncCommandSandboxPolicy {
   appId: string;
@@ -8,6 +9,7 @@ export interface AsyncCommandSandboxPolicy {
   threadId?: string | null;
   runId?: string;
   jobId?: string;
+  callerResolvedTools?: CallerResolvedToolsConfig;
   protectedReadPaths: readonly string[];
   protectedWritePaths: readonly string[];
   allowedNetworkHosts: readonly string[];
@@ -45,6 +47,7 @@ export function registerSpawnAsyncCommandSandboxPolicy(input: {
   threadId?: string | null;
   runId?: string;
   jobId?: string;
+  callerResolvedTools?: CallerResolvedToolsConfig;
   protectedReadPaths: readonly string[];
   protectedWritePaths: readonly string[];
   allowedNetworkHosts: readonly string[];
@@ -61,6 +64,7 @@ export function registerSpawnAsyncCommandSandboxPolicy(input: {
       threadId: input.threadId ?? null,
       runId: input.runId,
       jobId: input.jobId,
+      callerResolvedTools: input.callerResolvedTools,
       protectedReadPaths: input.protectedReadPaths,
       protectedWritePaths: input.protectedWritePaths,
       allowedNetworkHosts: input.allowedNetworkHosts,
@@ -80,6 +84,7 @@ export function configureSpawnAsyncCommandSandboxPolicy(input: {
   threadId?: string | null;
   runId?: string;
   jobId?: string;
+  callerResolvedTools?: CallerResolvedToolsConfig;
   protectedReadPaths: readonly string[];
   protectedWritePaths: readonly string[];
   gatewayAllowedNetworkHosts?: readonly string[];
@@ -103,6 +108,7 @@ export function configureSpawnAsyncCommandSandboxPolicy(input: {
     threadId: input.threadId,
     runId: input.runId,
     jobId: input.jobId,
+    callerResolvedTools: input.callerResolvedTools,
     protectedReadPaths: input.protectedReadPaths,
     protectedWritePaths: input.protectedWritePaths,
     allowedNetworkHosts,

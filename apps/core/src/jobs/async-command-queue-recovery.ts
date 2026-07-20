@@ -35,6 +35,7 @@ export async function recoverQueuedAsyncTasks(input: {
     task: AsyncTaskRecord,
     taskInput: Omit<StartDelegatedAgentTaskInput, 'run'>,
   ) => StartDelegatedAgentTaskInput['run'];
+  onDelegatedTaskTerminal?: (task: AsyncTaskRecord) => Promise<void> | void;
   cancelLinkedChildTasks: (parent: AsyncTaskRecord) => Promise<number>;
   waitForTaskChange?: (
     parent: AsyncTaskRecord,
@@ -47,6 +48,7 @@ export async function recoverQueuedAsyncTasks(input: {
     recovered += await recoverQueuedDelegatedAgentTasks({
       ...input,
       createRun: input.createDelegatedRun,
+      onDelegatedTaskTerminal: input.onDelegatedTaskTerminal,
     });
   }
   return recovered;
@@ -99,6 +101,7 @@ async function recoverQueuedDelegatedAgentTasks(input: {
     task: AsyncTaskRecord,
     taskInput: Omit<StartDelegatedAgentTaskInput, 'run'>,
   ) => StartDelegatedAgentTaskInput['run'];
+  onDelegatedTaskTerminal?: (task: AsyncTaskRecord) => Promise<void> | void;
   cancelLinkedChildTasks: (parent: AsyncTaskRecord) => Promise<number>;
   waitForTaskChange?: (
     parent: AsyncTaskRecord,
@@ -147,6 +150,7 @@ async function recoverQueuedDelegatedAgentTasks(input: {
       delegated: {
         taskInput: {
           ...taskInput,
+          onTerminal: input.onDelegatedTaskTerminal,
           run: input.createRun(task, taskInput),
         },
         cancelLinkedChildTasks: input.cancelLinkedChildTasks,

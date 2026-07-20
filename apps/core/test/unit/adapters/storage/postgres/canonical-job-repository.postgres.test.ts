@@ -258,6 +258,77 @@ describe('PostgresCanonicalJobRepository', () => {
     );
   });
 
+  it('uses the app-owned agent graph when inserting a named-agent job run', async () => {
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [
+              {
+                appId: 'app:manipal',
+                agentId: 'agent:manipal-analyst',
+                targetJson: '{}',
+              },
+            ]),
+          })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [
+              { currentConfigVersionId: 'config:manipal-analyst:7' },
+            ]),
+          })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [{ llmProfileId: 'llm:manipal' }]),
+          })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [{ nextShortId: 1 }]),
+          })),
+        })),
+      });
+    const returning = vi.fn(async () => [{ id: 'run-1' }]);
+    const values = vi.fn(() => ({ returning }));
+    const repository = new PostgresCanonicalJobRepository({
+      select,
+      insert: vi.fn(() => ({ values })),
+    } as never);
+
+    await expect(
+      repository.insertRun({
+        run_id: 'run-1',
+        job_id: 'app-owned-job',
+        scheduled_for: '2026-05-12T10:00:00.000Z',
+        started_at: '2026-05-12T10:00:00.000Z',
+        ended_at: null,
+        status: 'running',
+        result_summary: null,
+        error_summary: null,
+        retry_count: 0,
+        notified_at: null,
+      }),
+    ).resolves.toBe(true);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'app:manipal',
+        agentId: 'agent:manipal-analyst',
+        configVersionId: 'config:manipal-analyst:7',
+        llmProfileId: 'llm:manipal',
+      }),
+    );
+  });
+
   it('ensures job agents without overwriting the canonical agent display name', async () => {
     const db = makeInsertOnlyDb();
     const repository = new PostgresCanonicalJobRepository(db as never);
@@ -273,6 +344,7 @@ describe('PostgresCanonicalJobRepository', () => {
 
     await repository.upsertJob({
       id: 'system:dreaming:main_agent:tg-5759865942',
+      appId: 'default',
       agentId: 'agent:main_agent',
       name: 'Memory Dreaming (main_agent tg:5759865942)',
       prompt: 'Run memory dreaming',

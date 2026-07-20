@@ -221,6 +221,31 @@ function secretRepository(
 }
 
 describe('job readiness service', () => {
+  it('blocks an agent task until its exact named skill bundle is bound', async () => {
+    const result = await evaluateJobReadiness({
+      job: makeJob({
+        agent_task: {
+          requiredSkill: {
+            name: 'manipal-tender-deep-analysis',
+            contentHash: 'sha256:required',
+          },
+        } as never,
+      }),
+      appId: 'default',
+      agentId: 'agent:agent-one',
+      skillRepository: selectedLinkedInSkillRepository(),
+      clock: { now: () => '2026-05-14T00:00:00.000Z' },
+    });
+
+    expect(result.ready).toBe(false);
+    expect(result.setupState.blockers).toContainEqual(
+      expect.objectContaining({
+        requirementType: 'skill',
+        requirementId: 'manipal-tender-deep-analysis',
+      }),
+    );
+  });
+
   it('reports ready when declared requirements have durable bindings and browser state', async () => {
     const result = await evaluateJobReadiness({
       job: makeJob({

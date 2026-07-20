@@ -52,6 +52,7 @@ export const ASYNC_TASK_GANTRY_MCP_TOOL_NAMES = [
 
 export const DELEGATED_TASK_GANTRY_MCP_TOOL_NAMES = [
   'delegate_task',
+  'task_wait',
   'task_message',
 ] as const;
 

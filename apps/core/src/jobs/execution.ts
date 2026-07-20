@@ -76,6 +76,7 @@ import { isTrustedSystemJob } from '../shared/system-job-identity.js';
 import { completeFailedRunFailsafe } from './run-failsafe.js';
 import { createRunProviderMetadataUpdater } from './run-provider-metadata.js';
 import { hasAsyncTaskRepository } from './async-command-task-helpers.js';
+import { resolveExecutionSkillSelection } from './execution-required-skill.js';
 import type {
   JobTurnContext,
   SchedulerDependencies,
@@ -100,9 +101,11 @@ export async function runJob(
   const publishRuntimeEvent = createEventPublisher(getRuntimeEventExchange());
   const warn = (context: Record<string, unknown>, message: string): void =>
     logger.warn(context, message);
-  const groups = deps.conversationRoutes();
+  const eventControl = getRuntimeControlRepository();
+  await restoreAppSessionExecutionRoute(currentJob, deps, eventControl);
   const execution = await resolveExecutionContextOrDeadLetter({
-    resolve: () => resolveExecutionContext(currentJob, groups),
+    resolve: () =>
+      resolveExecutionContext(currentJob, deps.conversationRoutes()),
     currentJob,
     deps,
     runId,
@@ -111,7 +114,7 @@ export async function runJob(
     startedAtMs,
     dispatch,
     runtimeAppId,
-    control: getRuntimeControlRepository(),
+    control: eventControl,
     publishRuntimeEvent,
     logger,
   });
@@ -132,7 +135,6 @@ export async function runJob(
     getEffectiveModelConfig(undefined, jobModelUseKind, execution.group.folder),
     agentHarness,
   );
-  const eventControl = getRuntimeControlRepository();
   const preflightAppSession = await resolveAppSessionForJob(
     currentJob,
     eventControl,
@@ -224,6 +226,8 @@ export async function runJob(
       ...jobStartedModelPayload(resolvedModel),
     });
     let result: string | null = null;
+    const structured = Boolean(currentJob.agent_task?.responseSchema);
+    let structuredResult: string | null = null;
     let error: string | null =
       resolvedModel.routeResolution && !resolvedModel.routeResolution.ok
         ? resolvedModel.routeResolution.message
@@ -327,6 +331,7 @@ export async function runJob(
               agentId: executionAgentId,
               toolRepository: deps.getToolRepository?.(),
               skillRepository: deps.getSkillRepository?.(),
+              mcpServerRepository: deps.getMcpServerRepository?.(),
             }),
             resolveTurnSelectedSkillContext(deps, {
               appId: executionAppId,
@@ -346,6 +351,13 @@ export async function runJob(
             },
             toolPolicy.effectiveAllowedTools,
           );
+          const selectedSkills = await resolveExecutionSkillSelection({
+            requiredSkill: currentJob.agent_task?.requiredSkill,
+            appId: executionAppId,
+            agentId: executionAgentId,
+            repository: deps.getSkillRepository?.(),
+            selected: selectedSkillContext,
+          });
           const toolAccessRequirementPreflight =
             await assertToolAccessRequirementsReadyForRun({
               toolAccessRequirements: splitAccessRequirements(
@@ -469,10 +481,27 @@ export async function runJob(
                 toolAccessRequirements:
                   toolAccessRequirementPreflight.toolAccessRequirements,
                 runtimeAccess: toolPolicy.runtimeAccess,
-                attachedSkillSourceIds: selectedSkillContext.ids,
-                selectedSkillDisplays: selectedSkillContext.displays,
+                attachedSkillSourceIds: selectedSkills.ids,
+                selectedSkillDisplays: selectedSkills.displays,
                 attachedMcpSourceIds,
                 semanticCapabilities,
+                ...(currentJob.agent_task?.responseSchema
+                  ? { responseSchema: currentJob.agent_task.responseSchema }
+                  : {}),
+                ...(currentJob.agent_task?.callerResolvedTools &&
+                currentJob.session_id
+                  ? {
+                      callerResolvedTools: {
+                        sessionId: currentJob.session_id,
+                        ...currentJob.agent_task.callerResolvedTools,
+                      },
+                    }
+                  : {}),
+                effort: currentJob.agent_task?.modelControls?.effort,
+                configuredThinking:
+                  currentJob.agent_task?.modelControls?.thinking,
+                maxOutputTokens:
+                  currentJob.agent_task?.modelControls?.maxOutputTokens,
               },
               onProcess: (proc, runHandle) => {
                 void updateRunProviderMetadata({ providerRunId: runHandle });
@@ -516,6 +545,7 @@ export async function runJob(
                   context: { jobId: currentJob.id, runId },
                 });
                 if (streamedOutput.result) {
+                  if (structured) structuredResult = streamedOutput.result;
                   hasStreamedResult = true;
                   appendResultSummary(streamedOutput.result);
                   const chunkChars = streamedOutput.result.length;
@@ -546,6 +576,7 @@ export async function runJob(
                 if (!error) error = output.error || 'Unknown error';
                 await failRun();
               } else if (output.result && !hasStreamedResult) {
+                if (structured) structuredResult = output.result;
                 appendResultSummary(output.result);
               }
               if (!error) error = formatTerminalToolDenial(diagnostics) ?? null;
@@ -752,6 +783,7 @@ export async function runJob(
         pause_reason: pauseReason,
         notified,
         summary,
+        ...(structuredResult ? { result: structuredResult } : {}),
         ...jobCompletedModelPayload(resolvedModel, accumulatedUsage),
         diagnostics: terminalDiagnosticsPayload(diagnostics),
       },
@@ -763,6 +795,7 @@ export async function runJob(
       notified,
       startNotified,
       summary,
+      result: structuredResult,
       nextRun,
       state: eventState,
       runtimeAppId,
@@ -795,4 +828,49 @@ export async function runJob(
       });
     }
   }
+}
+
+async function restoreAppSessionExecutionRoute(
+  job: Job,
+  deps: SchedulerDependencies,
+  control: ReturnType<typeof getRuntimeControlRepository>,
+): Promise<void> {
+  if (
+    resolveExecutionContext(job, deps.conversationRoutes()) ||
+    !job.session_id ||
+    !deps.projectConversationRoute
+  ) {
+    return;
+  }
+  const session = await control.getAppSessionById(job.session_id);
+  const context = job.execution_context;
+  const appId = normalizeOptional(job.app_id);
+  const agentId = context
+    ? jobToolPolicy.agentIdForJobWorkspaceKey(context.workspaceKey)
+    : undefined;
+  if (
+    !session ||
+    !context ||
+    !appId ||
+    session.appId !== appId ||
+    normalizeOptional(context.sessionId) !== job.session_id ||
+    session.chatJid !== `app:${session.appId}:${session.conversationId}` ||
+    session.chatJid !== context.conversationJid ||
+    session.workspaceKey !== context.workspaceKey ||
+    session.agentId !== agentId
+  ) {
+    return;
+  }
+  await deps.projectConversationRoute(session.chatJid, {
+    name: `${session.appId}:${session.conversationId}`,
+    folder: session.workspaceKey,
+    trigger: '',
+    added_at: session.updatedAt,
+    requiresTrigger: false,
+  });
+}
+
+function normalizeOptional(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() || undefined;
 }

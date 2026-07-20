@@ -520,7 +520,9 @@ async function connectRemoteMcpTools(
               }
               return input.toolActivity.run(toolName, async () => {
                 const startedAt = Date.now();
+                const toolCallId = randomUUID();
                 await input.recordThirdPartyMcpToolActivity({
+                  toolCallId,
                   serverName: server.name,
                   toolName: remoteTool.name,
                   toolInput: args,
@@ -533,6 +535,7 @@ async function connectRemoteMcpTools(
                     config?.signal ? { signal: config.signal } : undefined,
                   );
                   const activity = {
+                    toolCallId,
                     serverName: server.name,
                     toolName: remoteTool.name,
                     toolInput: args,
@@ -546,6 +549,7 @@ async function connectRemoteMcpTools(
                     : JSON.stringify(result);
                 } catch (error) {
                   await input.recordThirdPartyMcpToolActivity({
+                    toolCallId,
                     serverName: server.name,
                     toolName: remoteTool.name,
                     toolInput: args,

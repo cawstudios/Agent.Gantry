@@ -91,6 +91,8 @@ export async function recoverStaleAsyncCommandTasks(
           {
             createRecoveredDelegatedAgentRun:
               createRecoveredDelegatedAgentRun(deps),
+            onDelegatedTaskTerminal: (task) =>
+              publishDelegatedTaskTerminal(deps, task),
             prepareRun: async ({ task, allowedNetworkHosts }) => {
               const gateway = await ensureEgressGateway({
                 key: `${task.appId}:${task.agentId}:${task.id}`,
@@ -160,6 +162,34 @@ export async function recoverStaleAsyncCommandTasks(
   } catch (err) {
     deps.logger.warn({ err }, 'Failed to recover stale async command tasks');
   }
+}
+
+async function publishDelegatedTaskTerminal(
+  deps: AsyncTaskRecoveryDeps,
+  task: AsyncTaskRecord,
+): Promise<void> {
+  if (!task.parentJobId || !deps.publishRuntimeEvent) return;
+  await deps.publishRuntimeEvent({
+    appId: task.appId as never,
+    agentId: task.agentId as never,
+    ...(task.conversationId
+      ? { conversationId: task.conversationId as never }
+      : {}),
+    ...(task.threadId ? { threadId: task.threadId as never } : {}),
+    ...(task.parentJobRunId ? { runId: task.parentJobRunId as never } : {}),
+    jobId: task.parentJobId as never,
+    eventType: RUNTIME_EVENT_TYPES.TASK_UPDATED,
+    actor: 'gantry-runtime',
+    payload: {
+      taskId: task.id,
+      taskKey:
+        typeof task.privateCorrelationJson.taskKey === 'string'
+          ? task.privateCorrelationJson.taskKey
+          : null,
+      kind: task.kind,
+      status: task.status,
+    },
+  } as RuntimeEventPublishInput);
 }
 
 export async function recoverStaleSessionCompactionTasks(

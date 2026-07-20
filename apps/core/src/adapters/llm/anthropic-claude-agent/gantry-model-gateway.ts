@@ -100,7 +100,6 @@ export class GantryModelGatewayBroker implements AgentCredentialBroker {
   // In-memory per-(app, provider) sliding-window rate limiter. The settings
   // getter is read live so a reload applies without rebuilding the broker.
   private readonly rateLimiter: GatewayRateLimiter;
-
   constructor(
     private readonly credentials: ModelCredentialRepository,
     options: {
@@ -657,7 +656,11 @@ function gatewayTokenScope(
       .filter(Boolean)
       .join(':')}`;
   }
-  if (binding.runId) return `run:${String(binding.runId)}`;
+  if (binding.runId) {
+    return `run:${String(binding.runId)}${
+      binding.apiRequestId ? `:request:${binding.apiRequestId}` : ''
+    }`;
+  }
   return 'unscoped';
 }
 

@@ -15,6 +15,206 @@ import {
 } from '@core/runtime/session-resume-runtime.js';
 
 describe('session-resume-runtime', () => {
+  it('recomputes one absolute execution deadline before a provider-session retry', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const accessFingerprint = buildProviderSessionAccessFingerprint({});
+    const expireProviderSession = vi.fn(async () => undefined);
+    const runAgent = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        now.mockReturnValue(1_500);
+        return {
+          status: 'error',
+          result: null,
+          error: 'No provider session found',
+        };
+      })
+      .mockResolvedValueOnce({ status: 'success', result: 'ok' });
+    const runner = createGroupAgentRunner({
+      deps: {
+        channelRuntime: {
+          hasChannel: () => true,
+          supportsStreaming: () => false,
+          supportsProgress: () => false,
+          sendMessage: async () => {},
+          sendStreamingChunk: async () => false,
+          resetStreaming: () => {},
+          setTyping: async () => {},
+          sendProgressUpdate: async () => {},
+        },
+        queue: {
+          enqueueMessageCheck: () => false,
+          closeStdin: () => {},
+          notifyIdle: () => {},
+          registerProcess: () => {},
+        },
+        getGroup: () => undefined,
+        clearSession: async () => {},
+        getCursor: () => '',
+        setCursor: () => {},
+        saveState: async () => {},
+        setGroupModelOverride: async () => {},
+        setGroupThinkingOverride: async () => {},
+        setGroupPermissionModeOverride: async () => {},
+        getAvailableGroups: () => [],
+        getRegisteredJids: () => new Set(),
+        runAgent: runAgent as never,
+        runnerSandboxProvider: { id: 'direct', enforcing: true } as never,
+        executionAdapter: {
+          id: ['anth', 'ropic:claude-agent-sdk'].join(''),
+          isMissingProviderSessionError: (error?: string) =>
+            error === 'No provider session found',
+        } as never,
+        getSelectedAgentHarness: () => 'auto',
+      },
+      ops: () =>
+        ({
+          getAgentTurnContext: vi.fn(async () => ({
+            appId: 'default',
+            agentId: 'agent:main_agent',
+            agentSessionId: 'agent-session:main',
+            providerSessionId: 'provider-session:1',
+            externalSessionId: 'provider-session:1',
+            providerSessionAccessFingerprint: accessFingerprint,
+          })),
+          expireProviderSession,
+        }) as never,
+    });
+
+    try {
+      await expect(
+        runner(
+          {
+            name: 'Main',
+            folder: 'main_agent',
+            added_at: new Date(0).toISOString(),
+          },
+          'hello',
+          'tg:chat',
+          'tg:chat',
+          undefined,
+          { executionDeadlineAtMs: 2_000 },
+        ),
+      ).resolves.toBe('success');
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(runAgent.mock.calls[0]?.[4]).toMatchObject({ timeoutMs: 1_000 });
+    expect(runAgent.mock.calls[1]?.[4]).toMatchObject({ timeoutMs: 500 });
+  });
+
+  it('uses bounded summaries without resuming or persisting a provider session', async () => {
+    const getAgentTurnContext = vi.fn(async () => ({
+      appId: 'app-one',
+      agentId: 'agent:main_agent',
+      agentSessionId: 'agent-session:main',
+      providerSessionId: 'provider-session:old',
+      externalSessionId: 'provider-session:old',
+    }));
+    const saveAgentSessionSummary = vi.fn(async () => undefined);
+    const setSession = vi.fn(async () => undefined);
+    const runAgent = vi.fn(async () => ({
+      status: 'success',
+      result: 'The accepted current answer.',
+      newSessionId: 'provider-session:new',
+    }));
+    const opsRepository = {
+      getAgentTurnContext,
+      getLatestAgentSessionSummary: vi.fn(async () => ({
+        id: 'agent-session-summary:agent-session:main',
+        appId: 'app-one',
+        agentSessionId: 'agent-session:main',
+        summary: 'Latest accepted answer:\nThe earlier answer.',
+        source: 'extractive',
+        messageCount: 2,
+        runCount: 2,
+        createdAt: new Date(0).toISOString(),
+      })),
+      saveAgentSessionSummary,
+      setSession,
+    };
+    const runner = createGroupAgentRunner({
+      deps: {
+        channelRuntime: {
+          hasChannel: () => true,
+          supportsStreaming: () => false,
+          supportsProgress: () => false,
+          sendMessage: async () => {},
+          sendStreamingChunk: async () => false,
+          resetStreaming: () => {},
+          setTyping: async () => {},
+          sendProgressUpdate: async () => {},
+        },
+        queue: {
+          enqueueMessageCheck: () => false,
+          closeStdin: () => {},
+          notifyIdle: () => {},
+          registerProcess: () => {},
+        },
+        getGroup: () => undefined,
+        clearSession: async () => {},
+        getCursor: () => '',
+        setCursor: () => {},
+        saveState: async () => {},
+        setGroupModelOverride: async () => {},
+        setGroupThinkingOverride: async () => {},
+        setGroupPermissionModeOverride: async () => {},
+        getAvailableGroups: () => [],
+        getRegisteredJids: () => new Set(),
+        runAgent: runAgent as never,
+        runnerSandboxProvider: { id: 'direct', enforcing: true } as never,
+        executionAdapter: {
+          id: ['anth', 'ropic:claude-agent-sdk'].join(''),
+        } as never,
+        getSelectedAgentHarness: () => 'auto',
+      },
+      ops: () => opsRepository as never,
+    });
+
+    await expect(
+      runner(
+        {
+          name: 'Main',
+          folder: 'main_agent',
+          added_at: new Date(0).toISOString(),
+        },
+        'current question',
+        'tg:chat',
+        'tg:chat',
+        undefined,
+        {
+          continuityMode: 'bounded',
+          turnMessages: [
+            {
+              canonicalMessageId: 'message:current',
+              content: 'current question',
+            },
+          ],
+        },
+      ),
+    ).resolves.toBe('success');
+
+    expect(getAgentTurnContext).toHaveBeenCalledWith(
+      expect.objectContaining({ hydrateMemory: false }),
+    );
+    expect(runAgent.mock.calls[0]?.[1]).not.toHaveProperty('sessionId');
+    expect(runAgent.mock.calls[0]?.[1].memoryContextBlock).toContain(
+      '<bounded_session_summary',
+    );
+    expect(setSession).not.toHaveBeenCalled();
+    expect(saveAgentSessionSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'agent-session-summary:agent-session:main',
+        summary: expect.stringContaining('The accepted current answer.'),
+        messageCount: 3,
+        runCount: 3,
+        toMessageId: 'message:current',
+      }),
+    );
+  });
+
   it('publishes one durable usage event per live-turn usage event id', async () => {
     const usage = {
       model: 'sonnet',

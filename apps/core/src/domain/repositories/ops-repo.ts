@@ -7,17 +7,26 @@ import type {
   ConversationRoute,
 } from './domain-types.js';
 import type { RuntimeEventType } from '../events/runtime-event-types.js';
-import type { ExecutionProviderId } from '../sessions/sessions.js';
+import type {
+  AgentSessionSummary,
+  ExecutionProviderId,
+} from '../sessions/sessions.js';
 import type { RunLease } from '../ports/worker-coordination.js';
 import type { LiveAdmissionWorkItemEnqueueResult } from '../ports/live-turns.js';
+import type { AppMessageResponseRoute } from '../types.js';
 
 export interface JobUpsertInput {
   id: string;
+  app_id?: string;
   name: string;
   prompt: string;
   model?: string | null;
   schedule_type: Job['schedule_type'];
   schedule_value: string;
+  schedule_timezone?: Job['schedule_timezone'];
+  misfire_policy?: Job['misfire_policy'];
+  overlap_policy?: Job['overlap_policy'];
+  schedule_metadata?: Job['schedule_metadata'];
   status?: Job['status'];
   session_id?: string | null;
   thread_id?: string | null;
@@ -43,6 +52,7 @@ export interface JobUpsertInput {
   setup_state?: Job['setup_state'];
   recovery_intent?: Job['recovery_intent'];
   required_capabilities?: Job['required_capabilities'];
+  agent_task?: Job['agent_task'];
 }
 
 export interface JobListFilters {
@@ -121,7 +131,10 @@ export interface RuntimeChatMetadataRepository {
     name?: string,
     channel?: string,
     isGroup?: boolean,
-    options?: { providerAccountId?: string | null },
+    options?: {
+      providerAccountId?: string | null;
+      externalRef?: Record<string, unknown>;
+    },
   ): Promise<void>;
   getAllChats(): Promise<ChatInfo[]>;
 }
@@ -301,6 +314,10 @@ export interface RuntimeRouterStateRepository {
 }
 
 export interface RuntimeAgentSessionRepository {
+  getLatestAgentSessionSummary?(
+    agentSessionId: string,
+  ): Promise<AgentSessionSummary | null>;
+  saveAgentSessionSummary?(summary: AgentSessionSummary): Promise<void>;
   getAgentTurnContext?(input: {
     appId?: string;
     agentFolder: string;
@@ -384,6 +401,8 @@ export interface RuntimeAgentSessionRepository {
     agentSessionId: string;
     executionProviderId: ExecutionProviderId;
     providerSessionId?: string | null;
+    messageId?: string;
+    appResponseRoute?: AppMessageResponseRoute;
     cause: 'message' | 'job' | 'control' | 'manual';
   }): Promise<string | undefined>;
   updateAgentRunProviderMetadata?(input: {
@@ -399,6 +418,7 @@ export interface RuntimeAgentSessionRepository {
   completeSessionAgentRun?(input: {
     runId: string;
     status: 'completed' | 'failed' | 'canceled';
+    appResponseRoute?: AppMessageResponseRoute;
     resultSummary?: string | null;
     errorSummary?: string | null;
   }): Promise<void>;

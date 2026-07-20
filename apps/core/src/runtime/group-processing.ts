@@ -108,6 +108,9 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     });
     const { messages: missedMessages } = replay;
     if (missedMessages.length === 0) return true;
+    if (replay.appResponseRoute) {
+      await deps.activateTurnResponseRoute?.(replay.appResponseRoute);
+    }
     const latestMessage = missedMessages[missedMessages.length - 1];
     const latestMessageReactionRef =
       latestMessage.external_message_id &&
@@ -131,9 +134,12 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
     };
     let streamGeneration = (streamingGenerationCounter += 1);
     let progressGeneration = streamGeneration;
+    let activeRunId = options.existingRunId;
     const turnOptions = createGroupTurnOptionBuilders({
       activeThreadId,
       providerAccountId: group.providerAccountId,
+      runId: () => activeRunId,
+      appResponseRoute: replay.appResponseRoute,
       streamGeneration: () => streamGeneration,
       progressGeneration: () => progressGeneration,
     });
@@ -332,14 +338,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
         latestMessage,
         currentMessages: missedMessages,
         timezone: config.TIMEZONE,
+        continuityMode: replay.continuityMode,
       });
     const previousCursor = (await deps.getCursor(queueJid)) || '';
-    deps.setCursor(
-      queueJid,
-      encodeGroupMessageCursor(
-        toGroupMessageCursor(missedMessages[missedMessages.length - 1]),
-      ),
+    const processedCursor = encodeGroupMessageCursor(
+      toGroupMessageCursor(missedMessages[missedMessages.length - 1]),
     );
+    deps.setCursor(queueJid, processedCursor);
     await deps.saveState();
     resetGroupStreamingForTurn({
       chatJid,
@@ -735,9 +740,16 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
             options.existingRunLeaseWorkerInstanceId,
           existingRunLeaseFencingVersion:
             options.existingRunLeaseFencingVersion,
+          onRunCreated: (runId) => {
+            activeRunId = runId;
+          },
           liveStopActionToken: turnOptions.liveStopActionToken,
           responseSchema: replay.responseSchema,
           agentControls: replay.agentControls,
+          callerResolvedTools: replay.callerResolvedTools,
+          continuityMode: replay.continuityMode,
+          timeoutMs: options.timeoutMs,
+          executionDeadlineAtMs: options.executionDeadlineAtMs,
         },
       );
     } finally {
@@ -762,12 +774,13 @@ export function createGroupProcessor(deps: GroupProcessingDeps) {
       if (idleTimer) clearTimeout(idleTimer);
     }
     let resultOk = true;
-    if (output === 'error' || hadError) {
+    if (output === 'error' || output === 'timed_out' || hadError) {
       resultOk = await handleFailure({
         outputSentToUser,
         groupName: group.name,
         queueJid,
         previousCursor,
+        processedCursor,
         deps,
         acknowledgeFailedTurn:
           options.finalRetry === true && !deps.queue.isShuttingDown?.(),

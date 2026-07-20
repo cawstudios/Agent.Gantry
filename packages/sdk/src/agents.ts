@@ -1,3 +1,5 @@
+import type * as OpenApi from './openapi-types.js';
+
 type TransportLike = {
   request<T>(options: {
     method: string;
@@ -51,8 +53,34 @@ export type AgentProfileFileContentResponse = {
   content: string;
 };
 
+export type AgentAccessSelection = { id: string; version: string };
+
+export type AgentAccessDocument = {
+  agentId: string;
+  sources: {
+    skills: unknown[];
+    mcpServers: unknown[];
+    tools: unknown[];
+  };
+  selections: AgentAccessSelection[];
+  toolAccess?: unknown;
+  summary?: unknown;
+  updatedAt?: string;
+};
+
 export function createAgentAdminClient(transport: TransportLike) {
   return {
+    list: () =>
+      transport.request<OpenApi.ListAgentsResponse>({
+        method: 'GET',
+        path: '/v1/agents',
+      }),
+    create: (body: OpenApi.CreateAgentRequest) =>
+      transport.request<OpenApi.CreateAgentResponse>({
+        method: 'POST',
+        path: '/v1/agents',
+        body,
+      }),
     getAdmin: (agentId: string) =>
       transport.request<AgentAdminResponse>({
         method: 'GET',
@@ -78,5 +106,21 @@ export function createAgentAdminClient(transport: TransportLike) {
         path: `/v1/agents/${encodeURIComponent(agentId)}/profile-files/${kind}`,
         body,
       }),
+    access: {
+      get: (agentId: string) =>
+        transport.request<AgentAccessDocument>({
+          method: 'GET',
+          path: `/v1/agents/${encodeURIComponent(agentId)}/access`,
+        }),
+      replace: (
+        agentId: string,
+        body: Pick<AgentAccessDocument, 'sources' | 'selections'>,
+      ) =>
+        transport.request<AgentAccessDocument>({
+          method: 'PUT',
+          path: `/v1/agents/${encodeURIComponent(agentId)}/access`,
+          body,
+        }),
+    },
   };
 }

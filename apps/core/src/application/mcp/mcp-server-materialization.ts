@@ -94,6 +94,14 @@ export function materializeMcpRecord(
     ...(config.env ?? {}),
     ...credentialValues.env,
   };
+  const command =
+    config.templateId === 'installed-package'
+      ? config.args?.[0]
+      : template.command;
+  const args =
+    config.templateId === 'installed-package'
+      ? template.args
+      : [...template.args, ...(config.args ?? [])];
   return {
     name: record.definition.name,
     serverId: record.definition.id,
@@ -101,8 +109,8 @@ export function materializeMcpRecord(
     sourceRevision: mcpSourceRevision(record),
     config: {
       type: 'stdio',
-      command: template.command,
-      args: [...template.args, ...(config.args ?? [])],
+      command: command!,
+      args,
       ...(Object.keys(env).length > 0 ? { env } : {}),
     },
     allowedToolPatterns,

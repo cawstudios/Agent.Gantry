@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { exportCurrentDesiredState } from '@core/config/settings/desired-state-current-export.js';
+import {
+  exportCurrentDesiredState,
+  routeBelongsToApp,
+} from '@core/config/settings/desired-state-current-export.js';
 import { SettingsDesiredStateService } from '@core/config/settings/desired-state-service.js';
 import {
   createDefaultRuntimeSettings,
@@ -9,7 +12,43 @@ import {
 import { renderRuntimeSettingsYaml } from '@core/config/settings/runtime-settings-renderer.js';
 
 describe('exportCurrentDesiredState', () => {
-  it('does not export internal app/control approval routes to settings', async () => {
+  it('keeps conversation routes inside the requested app scope', () => {
+    const providerAccountIds = new Set(['account:manipal']);
+
+    expect(
+      routeBelongsToApp({
+        appId: 'manipal-tender-copilot',
+        jid: 'app:manipal-tender-copilot:thread-1',
+        providerAccountId: 'account:manipal',
+        providerAccountIds,
+      }),
+    ).toBe(true);
+    expect(
+      routeBelongsToApp({
+        appId: 'manipal-tender-copilot',
+        jid: 'app:manipal-tender-copilot:thread-1',
+        providerAccountId: 'account:default',
+        providerAccountIds,
+      }),
+    ).toBe(false);
+    expect(
+      routeBelongsToApp({
+        appId: 'manipal-tender-copilot',
+        jid: 'app:default:thread-1',
+        providerAccountIds,
+      }),
+    ).toBe(false);
+    expect(
+      routeBelongsToApp({
+        appId: 'manipal-tender-copilot',
+        jid: 'sl:C123',
+        providerAccountId: 'account:manipal',
+        providerAccountIds,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not export internal routes or unbound event-only conversations to settings', async () => {
     const settings = {
       providers: {},
       providerAccounts: {},
@@ -70,6 +109,15 @@ describe('exportCurrentDesiredState', () => {
               config: {},
               runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
             },
+            {
+              id: 'teams-default',
+              agentId: 'main_agent',
+              providerId: 'teams',
+              label: 'Teams',
+              status: 'active',
+              config: { inbound_mode: 'event_only' },
+              runtimeSecretRefs: { client_id: 'env:TEAMS_CLIENT_ID' },
+            },
           ]),
           listConversationInstalls: vi.fn(async () => []),
         },
@@ -91,6 +139,14 @@ describe('exportCurrentDesiredState', () => {
               title: 'Engineering',
               status: 'active',
             },
+            {
+              id: 'conversation:teams',
+              providerAccountId: 'teams-default',
+              externalRef: { value: '19:runtime-discovered@thread.tacv2' },
+              kind: 'channel',
+              title: 'Runtime-discovered Teams channel',
+              status: 'active',
+            },
           ]),
           listConversationApproversForConversations: vi.fn(async () => []),
         },
@@ -105,6 +161,7 @@ describe('exportCurrentDesiredState', () => {
 
     expect(exported.providers).toEqual({
       slack: { enabled: true },
+      teams: { enabled: true },
     });
     expect(exported.providerAccounts).toEqual({
       'slack-default': {
@@ -115,6 +172,15 @@ describe('exportCurrentDesiredState', () => {
         runtimeSecretRefs: { bot_token: 'env:SLACK_BOT_TOKEN' },
         externalIdentityRef: undefined,
         config: {},
+      },
+      'teams-default': {
+        agentId: 'main_agent',
+        provider: 'teams',
+        label: 'Teams',
+        status: 'active',
+        runtimeSecretRefs: { client_id: 'env:TEAMS_CLIENT_ID' },
+        externalIdentityRef: undefined,
+        config: { inbound_mode: 'event_only' },
       },
     });
     expect(Object.values(exported.conversations)).toEqual([
@@ -441,7 +507,18 @@ permissions:
         },
         mcpServers: { listAgentBindingsForAgents: vi.fn(async () => []) },
         providerAccounts: {
-          listProviderAccounts: vi.fn(async () => []),
+          listProviderAccounts: vi.fn(async () => [
+            {
+              id: 'slack_other',
+              appId: 'app-one',
+              agentId: 'agent:main_agent',
+              providerId: 'slack',
+              label: 'Other Slack',
+              status: 'active',
+              config: {},
+              runtimeSecretRefs: {},
+            },
+          ]),
           listConversationInstalls: vi.fn(async () => []),
         },
         conversations: {

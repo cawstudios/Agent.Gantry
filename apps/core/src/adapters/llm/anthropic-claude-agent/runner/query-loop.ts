@@ -2,7 +2,6 @@ import {
   query,
   type EffortLevel,
   type HookInput,
-  type PostToolUseHookInput,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
@@ -61,7 +60,8 @@ import { logUsage } from './usage-logging.js';
 import { readContextUsage } from './context-usage.js';
 import {
   hasTopLevelAssistantContent,
-  sdkResultFailureMessage,
+  sdkResultText,
+  sdkStructuredOutputOptions,
   shouldPrefixVisibleBoundary,
   topLevelAssistantText,
 } from './sdk-message-output.js';
@@ -79,39 +79,16 @@ import {
 } from '../../../../runner/tool-gate-core.js';
 import { canonicalGantryToolRuleName } from '../../../../shared/gantry-tool-facades.js';
 import { emitJobToolActivity } from './tool-permission-events.js';
+import {
+  createExternalMcpAuditHook,
+  flushExternalMcpAudit,
+  prepareExternalMcpStdioAudit,
+} from './mcp-stdio-audit.js';
+import { recordSuccessfulToolUse } from './tool-success-ledger.js';
 
 interface RunQueryOptions {
   enableIpcFollowups?: boolean;
   persistSdkSession?: boolean;
-}
-
-function toolResponseIsError(response: unknown): boolean {
-  if (Array.isArray(response)) return response.some(toolResponseIsError);
-  if (!response || typeof response !== 'object') return false;
-  const value = response as {
-    is_error?: unknown;
-    isError?: unknown;
-    status?: unknown;
-    error?: unknown;
-    content?: unknown;
-  };
-  return (
-    value.is_error === true ||
-    value.isError === true ||
-    value.status === 'error' ||
-    Boolean(value.error) ||
-    toolResponseIsError(value.content)
-  );
-}
-
-export function recordSuccessfulToolUse(
-  hookInput: Pick<PostToolUseHookInput, 'tool_name' | 'tool_response'>,
-  toolSuccessLedger: RunScopedToolSuccessLedger,
-): void {
-  if (toolResponseIsError(hookInput.tool_response)) return;
-  toolSuccessLedger.recordSuccess(
-    canonicalGantryToolRuleName(hookInput.tool_name),
-  );
 }
 
 function localCliCredentialDirectoriesFromRuntimeAccess(
@@ -341,18 +318,25 @@ export async function runQuery(
     externalMcpAllowedTools: readExternalMcpAllowedTools(),
     externalMcpAlwaysAllowedTools: readExternalMcpAlwaysAllowedTools(),
     isScheduledJob: agentInput.isScheduledJob,
+    callerResolvedTools: agentInput.callerResolvedTools,
+  });
+  const auditedMcp = prepareExternalMcpStdioAudit({
+    mcpServers: capabilities.mcpServers,
+    workspaceDir: WORKSPACE_GROUP_DIR,
+    runId: queryRunId,
   });
   const sdkQueryPreparedMs = elapsedMs();
   log(
     `SDK query prepared in ${sdkQueryPreparedMs}ms ` +
-      `(tools=${capabilities.availableTools.length} mcpServers=${Object.keys(capabilities.mcpServers ?? {}).length})`,
+      `(tools=${capabilities.availableTools.length} mcpServers=${Object.keys(auditedMcp.mcpServers).length})`,
   );
   const toolSearchDecision = decideClaudeSdkToolSearch({
     sdkEnv: isolatedSdkEnv,
     availableTools: capabilities.availableTools,
     allowedTools: capabilities.allowedTools,
     disallowedTools: capabilities.disallowedTools,
-    mcpServers: capabilities.mcpServers,
+    mcpServers: auditedMcp.mcpServers,
+    requireEagerTools: Boolean(agentInput.callerResolvedTools),
   });
   isolatedSdkEnv.ENABLE_TOOL_SEARCH = toolSearchDecision.enableToolSearch;
   log(
@@ -364,6 +348,7 @@ export async function runQuery(
     prompt: stream,
     options: {
       model: configuredModel,
+      ...sdkStructuredOutputOptions(agentInput.responseSchema),
       thinking: queryThinking,
       effort: queryEffort,
       cwd: WORKSPACE_GROUP_DIR,
@@ -399,6 +384,7 @@ export async function runQuery(
         PreToolUse: [
           {
             hooks: [
+              createExternalMcpAuditHook(auditedMcp, 'PreToolUse'),
               createSafetyPreToolUseHook(
                 memoryBlock,
                 agentInput.toolNetworkEnv ?? {},
@@ -408,22 +394,30 @@ export async function runQuery(
             timeout: 5,
           },
         ],
-        ...(toolSuccessLedger
-          ? {
-              PostToolUse: [
-                {
-                  hooks: [
+        PostToolUse: [
+          {
+            hooks: [
+              createExternalMcpAuditHook(auditedMcp, 'PostToolUse'),
+              ...(toolSuccessLedger
+                ? [
                     async (hookInput: HookInput) => {
                       if (hookInput.hook_event_name === 'PostToolUse') {
                         recordSuccessfulToolUse(hookInput, toolSuccessLedger);
                       }
                       return { continue: true as const };
                     },
-                  ],
-                },
-              ],
-            }
-          : {}),
+                  ]
+                : []),
+            ],
+          },
+        ],
+        PostToolUseFailure: [
+          {
+            hooks: [
+              createExternalMcpAuditHook(auditedMcp, 'PostToolUseFailure'),
+            ],
+          },
+        ],
       },
       canUseTool: createCanUseToolCallback({
         agentInput,
@@ -439,7 +433,7 @@ export async function runQuery(
           heartbeat.recordToolActivity(toolName),
       }),
       settingSources: [],
-      mcpServers: capabilities.mcpServers,
+      mcpServers: auditedMcp.mcpServers,
       strictMcpConfig: true,
       includePartialMessages: true,
     },
@@ -486,6 +480,7 @@ export async function runQuery(
     for await (const message of sdkQuery) {
       messageCount++;
       heartbeat.markActivity();
+      flushExternalMcpAudit(auditedMcp, agentInput);
       const msgType =
         message.type === 'system'
           ? `system/${(message as { subtype?: string }).subtype}`
@@ -500,6 +495,7 @@ export async function runQuery(
         lastAssistantUuid = (message as { uuid: string }).uuid;
       }
       if (message.type === 'assistant') {
+        if (agentInput.responseSchema) continue;
         if (hasTopLevelAssistantContent(message)) {
           sawAssistantContentSinceLastResult = true;
         }
@@ -574,6 +570,7 @@ export async function runQuery(
         });
       }
       if (message.type === 'stream_event') {
+        if (agentInput.responseSchema) continue;
         const event = (message as { event?: unknown }).event as
           | {
               type?: string;
@@ -615,22 +612,17 @@ export async function runQuery(
           firstResultMs = elapsedMs();
           log(`First SDK result after ${firstResultMs}ms`);
         }
-        const textResult =
-          'result' in message ? (message as { result?: string }).result : null;
+        const textResult = sdkResultText(message, agentInput.responseSchema);
         const emittedVisibleText =
           sawPartialTextSinceLastResult || sawStructuredTextSinceLastResult;
         const canUseResultFallback =
           !emittedVisibleText && !sawAssistantContentSinceLastResult;
-        const resultFailure = sdkResultFailureMessage(message);
-        if (resultFailure) {
-          throw new Error(resultFailure);
-        }
         if (canUseResultFallback && textResult) {
           firstVisibleOutputMs ??= firstResultMs;
         }
         const loggedResultText = canUseResultFallback ? textResult : null;
         log(
-          `Result #${resultCount}: subtype=${message.subtype}${loggedResultText ? ` text=${loggedResultText.slice(0, 200)}` : ''}`,
+          `Result #${resultCount}: subtype=${message.subtype} resultTextLength=${loggedResultText?.length ?? 0}`,
         );
         logUsage(message);
         const usage = normalizeModelUsage({
@@ -659,15 +651,31 @@ export async function runQuery(
             : {}),
         });
         emitStartupTimingDiagnostic();
+        if (enableIpcFollowups && textResult && canUseResultFallback) {
+          writeOutput({
+            status: 'success',
+            result: null,
+            newSessionId,
+            ...(continuedByFollowup ? { continuedByFollowup: true } : {}),
+          });
+        }
         sawPartialTextSinceLastResult = false;
         sawAssistantContentSinceLastResult = false;
         sawStructuredTextSinceLastResult = false;
         visibleTextSinceLastResult = '';
         pendingStructuredToPartialBoundary = false;
-        steeringGate.markTurnBoundary();
+        if (continuedByFollowup) {
+          steeringGate.markTurnBoundary();
+        } else if (enableIpcFollowups) {
+          ipcPolling = false;
+          steeringGate.close();
+          stream.end();
+        }
       }
     }
   } finally {
+    flushExternalMcpAudit(auditedMcp, agentInput);
+    auditedMcp.cleanup();
     ipcPolling = false;
     runtimeSignalPump.stop();
     heartbeat.stop();

@@ -31,6 +31,7 @@ export type PendingAsyncTaskExecution =
   | PendingDelegatedAgentExecution;
 
 export interface AsyncCommandTaskServiceOptions {
+  onDelegatedTaskTerminal?: (task: AsyncTaskRecord) => Promise<void> | void;
   terminateProcess?: (handle: AsyncCommandProcessHandle) => boolean;
   createRecoveredDelegatedAgentRun?: (
     task: AsyncTaskRecord,

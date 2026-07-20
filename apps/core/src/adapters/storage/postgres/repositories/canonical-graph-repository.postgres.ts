@@ -210,6 +210,7 @@ export class PostgresCanonicalGraphRepository {
       isGroup?: boolean | null;
       timestamp?: string | null;
       providerAccountId?: string | null;
+      externalRef?: Record<string, unknown>;
     } = {},
     executor: CanonicalExecutor = this.db,
   ): Promise<string> {
@@ -232,6 +233,7 @@ export class PostgresCanonicalGraphRepository {
       externalConversationId,
       providerAccountId,
       ...(hasKnownKind ? { isGroup: Boolean(input.isGroup) } : {}),
+      ...(input.externalRef ?? {}),
     });
     await executor
       .insert(pgSchema.providersPostgres)
@@ -270,7 +272,10 @@ export class PostgresCanonicalGraphRepository {
         set: {
           ...(input.name ? { title } : {}),
           ...(hasKnownKind ? { kind: input.isGroup ? 'group' : 'direct' } : {}),
-          externalRefJson,
+          externalRefJson: sql`(
+            COALESCE(${pgSchema.conversationsPostgres.externalRefJson}::jsonb, '{}'::jsonb)
+            || ${externalRefJson}::jsonb
+          )::text`,
           updatedAt: sql`GREATEST(${pgSchema.conversationsPostgres.updatedAt}, ${now})`,
         },
       });

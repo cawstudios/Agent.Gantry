@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type {
+  LiveAdmissionWorkItem,
   LiveAdmissionWakeupSource,
   LiveTurn,
   LiveTurnScope,
@@ -14,7 +15,11 @@ import type { GroupProcessOptions } from '../../runtime/group-processing-types.j
 import type { RunLease } from '../../domain/ports/worker-coordination.js';
 import type { RuntimeLease } from '../../domain/ports/runtime-lease.js';
 import type { ExecutionProviderId } from '../../domain/sessions/sessions.js';
-import type { ConversationRoute, NewMessage } from '../../domain/types.js';
+import type {
+  AppMessageResponseRoute,
+  ConversationRoute,
+  NewMessage,
+} from '../../domain/types.js';
 import type { ProcessRole } from './roles/process-role.js';
 import {
   findConversationRouteForQueue,
@@ -38,6 +43,7 @@ import {
   startLiveAdmissionWorkLoop as defaultStartLiveAdmissionWorkLoop,
   type LiveAdmissionWorkLoopHandle,
 } from '../../runtime/live-admission-work-loop.js';
+import { collectPendingMessagesSince } from '../../runtime/pending-message-replay.js';
 import { markPendingContinuationCommandsApplied } from './live-turn-continuation.js';
 import { routeScopeActiveLiveTurnAdmissionFromCursor } from './live-recovery-coordinator.js';
 import { type LiveTurnBrowserFinalizer } from './live-turn-browser-finalizer.js';
@@ -46,6 +52,25 @@ import { type SessionCommand } from '../../session/session-commands.js';
 import { createActiveCompactRouteHandlers } from './runtime-services-active-compact.js';
 type WarnLog = (context: Record<string, unknown>, message: string) => void;
 type InfoLog = (obj: string | Record<string, unknown>, msg?: string) => void;
+
+function remainingSdkExecutionMs(
+  item: LiveAdmissionWorkItem | null,
+): number | undefined {
+  const deadlineAtMs = sdkExecutionDeadlineAtMs(item);
+  return deadlineAtMs === undefined
+    ? undefined
+    : Math.max(0, deadlineAtMs - Date.now());
+}
+
+function sdkExecutionDeadlineAtMs(
+  item: LiveAdmissionWorkItem | null,
+): number | undefined {
+  if (item?.turnState !== 'running' || !item.executionDeadlineAt) {
+    return undefined;
+  }
+  const deadlineAtMs = Date.parse(item.executionDeadlineAt);
+  return Number.isFinite(deadlineAtMs) ? deadlineAtMs : undefined;
+}
 export type ActiveControlRoute = {
   folder: string;
   trigger?: string;
@@ -82,6 +107,8 @@ interface AdmissionOpsRepository {
     agentSessionId: string;
     executionProviderId: ExecutionProviderId;
     providerSessionId?: string | null;
+    messageId?: string;
+    appResponseRoute?: AppMessageResponseRoute;
     cause: 'message';
   }) => Promise<string | undefined>;
   completeSessionAgentRun?: (input: {
@@ -119,6 +146,7 @@ export function buildLiveAdmissionProcessor(input: {
   opsRepository: AdmissionOpsRepository;
   executionAdapter: { id: ExecutionProviderId };
   messageFetchPageSize: number;
+  maxMessagesPerPrompt?: number;
   timezone: string;
   enqueueMessageCheck: (queueJid: string) => void;
   warn: WarnLog;
@@ -198,6 +226,26 @@ export function buildLiveAdmissionProcessor(input: {
     const { chatJid, threadId, providerAccountId } =
       parseAgentThreadQueueKey(queueJid);
     const account = providerAccountId ? { providerAccountId } : undefined;
+    const consumeCurrentMessage = async (): Promise<void> => {
+      if (!opsRepository.getMessagesSince) return;
+      const cursor = await app.getOrRecoverCursor(queueJid);
+      const replay = await collectPendingMessagesSince({
+        getMessagesSince: opsRepository.getMessagesSince.bind(opsRepository),
+        chatJid,
+        sinceCursor: cursor,
+        pageSize: messageFetchPageSize,
+        maxMessages: input.maxMessagesPerPrompt ?? messageFetchPageSize,
+        options: {
+          threadId: threadId ?? null,
+          ...(providerAccountId ? { providerAccountId } : {}),
+        },
+      });
+      if (replay.cursorAfter) {
+        app.setAgentCursor(queueJid, replay.cursorAfter);
+        await app.saveState();
+      }
+      input.enqueueMessageCheck(queueJid);
+    };
     const finalizeTodo = (
       status: AgentTodoCardStatus,
       message: string,
@@ -211,6 +259,44 @@ export function buildLiveAdmissionProcessor(input: {
         : Promise.resolve(false);
     let liveRunId = liveTurnAuthority.ownedRunId(queueJid) ?? undefined;
     let liveRunFence = liveTurnAuthority.ownedFence(queueJid);
+    let sdkExecutionTimeoutMs: number | undefined;
+    let sdkExecutionDeadlineAt: number | undefined;
+    let controlledSdkMessageId: string | undefined;
+    if (liveTurnAuthority.ownsQueue(queueJid)) {
+      const pendingMessage =
+        liveTurnAuthority.ownedPendingMessage?.(queueJid) ?? null;
+      const pendingMessageId =
+        typeof pendingMessage?.messageId === 'string'
+          ? pendingMessage.messageId.trim()
+          : '';
+      if (pendingMessageId) {
+        controlledSdkMessageId = pendingMessageId;
+        const sdkTurn =
+          (await liveTurnAuthority.beginSdkSessionTurn?.(pendingMessageId)) ??
+          null;
+        if (
+          sdkTurn?.turnState &&
+          !['waiting', 'running'].includes(sdkTurn.turnState)
+        ) {
+          await liveTurnAuthority.finalize(queueJid, 'failed', {
+            status: 'failed',
+            errorSummary: 'SDK session turn was already terminal.',
+          });
+          await consumeCurrentMessage();
+          return true;
+        }
+        sdkExecutionTimeoutMs = remainingSdkExecutionMs(sdkTurn);
+        sdkExecutionDeadlineAt = sdkExecutionDeadlineAtMs(sdkTurn);
+        if (sdkTurn?.turnState === 'running' && sdkExecutionTimeoutMs === 0) {
+          await liveTurnAuthority.finalize(queueJid, 'timed_out', {
+            status: 'failed',
+            errorSummary: 'Live turn exceeded its execution deadline.',
+          });
+          await consumeCurrentMessage();
+          return true;
+        }
+      }
+    }
     if (!liveTurnAuthority.ownsQueue(queueJid)) {
       const route = findConversationRouteForQueue(
         app.getConversationRoutes(),
@@ -253,10 +339,48 @@ export function buildLiveAdmissionProcessor(input: {
           route,
         );
       }
+      const pendingReplay = opsRepository.getMessagesSince
+        ? await collectPendingMessagesSince({
+            getMessagesSince:
+              opsRepository.getMessagesSince.bind(opsRepository),
+            chatJid,
+            sinceCursor: replayCursor,
+            pageSize: messageFetchPageSize,
+            maxMessages:
+              input.maxMessagesPerPrompt ?? input.messageFetchPageSize,
+            options: {
+              threadId: threadId ?? null,
+              providerAccountId: providerAccountId ?? null,
+            },
+          })
+        : undefined;
+      const turnMessage = pendingReplay?.messages.at(-1);
+      const appResponseRoute = turnMessage?.appResponseRoute;
+      const canonicalMessageId = turnMessage?.canonicalMessageId?.trim();
+      if (canonicalMessageId) {
+        controlledSdkMessageId = canonicalMessageId;
+        const prepared =
+          (await liveTurnAuthority.prepareSdkSessionTurn?.(
+            canonicalMessageId,
+          )) ?? null;
+        if (
+          prepared?.turnState &&
+          !['waiting', 'running'].includes(prepared.turnState)
+        ) {
+          await consumeCurrentMessage();
+          return true;
+        }
+      }
       liveRunId = await opsRepository.createSessionAgentRun?.({
         agentSessionId: turnContext.agentSessionId,
         executionProviderId,
         providerSessionId: turnContext.providerSessionId,
+        ...(appResponseRoute
+          ? {
+              ...(canonicalMessageId ? { messageId: canonicalMessageId } : {}),
+              appResponseRoute,
+            }
+          : {}),
         cause: 'message',
       });
       if (!liveRunId) return false;
@@ -269,6 +393,8 @@ export function buildLiveAdmissionProcessor(input: {
           kind: 'message_cursor',
           queueJid,
           cursorBefore: replayCursor,
+          ...(canonicalMessageId ? { messageId: canonicalMessageId } : {}),
+          ...(appResponseRoute ? { appResponseRoute } : {}),
         },
       });
       if (admission.outcome !== 'claimed') {
@@ -298,12 +424,49 @@ export function buildLiveAdmissionProcessor(input: {
         return false;
       }
       liveRunFence = admission.fence;
+      if (canonicalMessageId) {
+        const sdkTurn =
+          (await liveTurnAuthority.beginSdkSessionTurn?.(canonicalMessageId)) ??
+          null;
+        if (
+          sdkTurn?.turnState &&
+          !['waiting', 'running'].includes(sdkTurn.turnState)
+        ) {
+          await liveTurnAuthority.finalize(queueJid, 'failed', {
+            status: 'failed',
+            errorSummary: 'SDK session turn expired before execution.',
+          });
+          await consumeCurrentMessage();
+          return true;
+        }
+        sdkExecutionTimeoutMs = remainingSdkExecutionMs(sdkTurn);
+        sdkExecutionDeadlineAt = sdkExecutionDeadlineAtMs(sdkTurn);
+        if (sdkTurn?.turnState === 'running' && sdkExecutionTimeoutMs === 0) {
+          await liveTurnAuthority.finalize(queueJid, 'timed_out', {
+            status: 'failed',
+            errorSummary: 'Live turn exceeded its execution deadline.',
+          });
+          await consumeCurrentMessage();
+          return true;
+        }
+      }
     }
     try {
-      let liveRunResult: 'success' | 'error' | 'stopped' | null = null;
+      let liveRunResult: 'success' | 'error' | 'stopped' | 'timed_out' | null =
+        null;
       const success = await app.processGroupMessages(queueJid, {
         queued: true,
-        finalRetry: context?.finalRetry === true,
+        ...(sdkExecutionTimeoutMs !== undefined
+          ? { timeoutMs: Math.max(1, sdkExecutionTimeoutMs) }
+          : {}),
+        ...(sdkExecutionDeadlineAt !== undefined
+          ? { executionDeadlineAtMs: sdkExecutionDeadlineAt }
+          : {}),
+        // An accepted SDK turn is terminally acknowledged exactly once. Its
+        // cursor must be durable before terminal settlement so a failed turn
+        // cannot replay and block the next serialized message.
+        finalRetry:
+          controlledSdkMessageId !== undefined || context?.finalRetry === true,
         existingRunId: liveRunId,
         ...(liveRunFence
           ? {
@@ -325,8 +488,11 @@ export function buildLiveAdmissionProcessor(input: {
       });
       const terminalSuccess =
         success && (liveRunResult === 'success' || liveRunResult === null);
+      const terminalTimedOut = liveRunResult === 'timed_out';
       const terminalHandled =
-        terminalSuccess || (success && liveRunResult === 'stopped');
+        terminalSuccess ||
+        terminalTimedOut ||
+        (success && liveRunResult === 'stopped');
       const todoStatus = terminalSuccess
         ? 'done'
         : liveRunResult === 'stopped'
@@ -341,7 +507,11 @@ export function buildLiveAdmissionProcessor(input: {
       });
       const finalized = await liveTurnAuthority.finalize(
         queueJid,
-        terminalHandled ? 'completed' : 'failed',
+        terminalTimedOut
+          ? 'timed_out'
+          : terminalHandled
+            ? 'completed'
+            : 'failed',
         {
           status: terminalSuccess
             ? 'completed'
@@ -352,9 +522,13 @@ export function buildLiveAdmissionProcessor(input: {
             ? { resultSummary: 'Live turn completed.' }
             : liveRunResult === 'stopped'
               ? { errorSummary: 'Live turn stopped by request.' }
-              : {
-                  errorSummary: 'Live turn failed.',
-                }),
+              : terminalTimedOut
+                ? {
+                    errorSummary: 'Live turn exceeded its execution deadline.',
+                  }
+                : {
+                    errorSummary: 'Live turn failed.',
+                  }),
         },
       );
       if (finalized) {
@@ -363,7 +537,7 @@ export function buildLiveAdmissionProcessor(input: {
           'Failed to finalize live-turn todo card',
         );
       }
-      return terminalHandled && finalized;
+      return (success || terminalTimedOut) && finalized;
     } catch (err) {
       // Snapshot on failure too: the browser may have persisted new cookies/
       // logins before the turn errored. Best-effort; never mask the original err.

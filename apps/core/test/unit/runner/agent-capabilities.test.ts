@@ -725,6 +725,12 @@ describe('agent capability composition', () => {
       parentTaskId: 'task_parent',
       configuredAllowedTools: ['AgentDelegation'],
       asyncTaskToolsEnabled: true,
+      callerResolvedTools: {
+        sessionId: 'session:test',
+        tools: [],
+        maxInteractions: 4,
+        interactionTimeoutMs: 90_000,
+      },
     });
     for (const toolName of DELEGATED_TASK_GANTRY_MCP_TOOL_NAMES) {
       expect(delegatedProfile.allowedTools).toContain(
@@ -733,6 +739,12 @@ describe('agent capability composition', () => {
     }
     expect(delegatedProfile.mcpServers.gantry?.env?.GANTRY_PARENT_TASK_ID).toBe(
       'task_parent',
+    );
+    expect(delegatedProfile.availableTools).toEqual(
+      expect.arrayContaining([
+        gantryMcpFullToolName('delegate_task'),
+        gantryMcpFullToolName('task_wait'),
+      ]),
     );
   });
 

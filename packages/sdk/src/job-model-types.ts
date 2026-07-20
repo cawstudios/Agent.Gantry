@@ -149,7 +149,14 @@ export interface JobRecord {
   schedule:
     | null
     | { type: 'once'; runAt: string }
-    | { type: 'cron' | 'interval'; value: string };
+    | {
+        type: 'cron' | 'interval';
+        value: string;
+        timezone?: string;
+        misfirePolicy?: 'coalesce';
+        overlapPolicy?: 'skip';
+        metadata?: { scheduleId: string; generation: number };
+      };
   executionContext: JobExecutionContext;
   notificationRoutes: JobNotificationRoute[];
   ownerLabel?: string;
@@ -377,9 +384,41 @@ export interface CreateJobInput {
   accessRequirements?: JobAccessRequirement[];
   kind?: JobKind;
   runAt?: string;
-  schedule?: { type: 'cron' | 'interval'; value: string };
+  schedule?: {
+    type: 'cron' | 'interval';
+    value: string;
+    timezone?: string;
+    misfirePolicy?: 'coalesce';
+    overlapPolicy?: 'skip';
+    metadata?: { scheduleId: string; generation: number };
+  };
   modelAlias?: string;
+  agentTask?: JobAgentTask;
   dryRun?: boolean;
+}
+
+export interface JobAgentTask {
+  responseSchema?: { type: 'object' } & Record<string, unknown>;
+  callerResolvedTools?: {
+    tools: Array<{
+      name: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+    }>;
+    maxInteractions: number;
+    interactionTimeoutMs: number;
+  };
+  executionPolicy: { totalTimeoutMs: number };
+  modelControls?: {
+    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    thinking?: { mode: 'off' } | { mode: 'on'; budgetTokens?: number };
+    maxOutputTokens?: number;
+  };
+  requiredSkill?: { name: string; contentHash: string };
+  interactionBudget?: {
+    maxTotal: number;
+    scopes: Record<string, number>;
+  };
 }
 
 export interface UpdateJobInput {

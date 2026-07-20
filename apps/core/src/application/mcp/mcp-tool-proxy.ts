@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { randomUUID } from 'node:crypto';
 
 import type { AgentId } from '../../domain/agent/agent.js';
 import type { AppId } from '../../domain/app/app.js';
@@ -53,6 +54,8 @@ import {
 } from './mcp-tool-inventory.js';
 import {
   classifyMcpToolAuditError,
+  hashMcpAuditValue,
+  projectMcpEvidence,
   type McpToolAuditResultClass,
   summarizeMcpToolArguments,
   summarizeMcpToolError,
@@ -299,6 +302,7 @@ export class McpToolProxy {
 
   async callTool(input: McpToolCallInput): Promise<unknown> {
     const startedAt = Date.now();
+    const toolCallId = randomUUID();
     const timeoutMs = input.timeoutMs ?? MCP_PROXY_TIMEOUT_MS;
     const argumentSummary = summarizeMcpToolArguments(input.arguments ?? {});
     await this.publishMcpToolActivity({
@@ -306,6 +310,7 @@ export class McpToolProxy {
       resultClass: 'attempt',
       latencyMs: 0,
       argumentSummary,
+      toolCallId,
     });
     let finalized = false;
     let selectedToolRule: string | undefined;
@@ -326,6 +331,7 @@ export class McpToolProxy {
         argumentSummary,
         selectedToolRule,
         selectedCapability,
+        toolCallId,
         ...extra,
       });
       finalized = true;
@@ -367,7 +373,7 @@ export class McpToolProxy {
         try {
           await finalize(
             validationAudit.toolResultError ? 'failure' : 'success',
-            validationAudit,
+            { ...validationAudit, result },
           );
         } catch {
           // A remote MCP tool already returned. Do not make completed external
@@ -466,8 +472,16 @@ export class McpToolProxy {
     outputSchemaPresent?: boolean;
     structuredResultValidated?: boolean;
     toolResultError?: boolean;
+    toolCallId?: string;
+    result?: unknown;
   }): Promise<void> {
+    const inputHash = hashMcpAuditValue(input.argumentSummary);
+    const resultHash =
+      input.result === undefined ? undefined : hashMcpAuditValue(input.result);
+    const evidenceProjection =
+      input.result === undefined ? [] : projectMcpEvidence(input.result);
     const payload = {
+      toolCallId: input.toolCallId ?? randomUUID(),
       serverName: input.input.serverName,
       toolName: input.input.toolName,
       requestedToolRule: `mcp__${input.input.serverName}__${input.input.toolName}`,
@@ -489,6 +503,9 @@ export class McpToolProxy {
       resultClass: input.resultClass,
       latencyMs: input.latencyMs,
       argumentSummary: input.argumentSummary,
+      inputHash,
+      ...(resultHash ? { resultHash } : {}),
+      ...(evidenceProjection.length > 0 ? { evidenceProjection } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
       ...(input.error ? { error: input.error } : {}),
       ...(typeof input.outputSchemaPresent === 'boolean'

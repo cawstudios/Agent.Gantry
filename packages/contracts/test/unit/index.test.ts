@@ -992,6 +992,20 @@ describe('contracts package', () => {
         }),
       ],
     });
+    const agentTask = {
+      responseSchema: { type: 'object' as const, properties: {} },
+      executionPolicy: { totalTimeoutMs: 30_000 },
+    };
+    expect(
+      CreateJobRequestSchema.parse({ ...sdkCreatePayload, agentTask }),
+    ).toMatchObject({ agentTask });
+    expectInvalid(CreateJobRequestSchema, {
+      ...sdkCreatePayload,
+      agentTask: {
+        responseSchema: { oneOf: [{ type: 'object' }] },
+        executionPolicy: { totalTimeoutMs: 30_000 },
+      },
+    });
     expectInvalid(CreateJobRequestSchema, {
       name: '',
       prompt: 'Summarize open work',

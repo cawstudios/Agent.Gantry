@@ -7,6 +7,7 @@ import { reviewedMcpReadBindingsForRuntimeAccess } from '../../application/agent
 import { synthesizeHostPermissionSuggestions } from '../../application/permissions/permission-suggestion-synthesis.js';
 import {
   classifyMcpToolAuditError,
+  mcpToolAuditHashes,
   summarizeMcpToolArgumentPayload,
   summarizeMcpToolError,
   type McpToolAuditResultClass,
@@ -100,6 +101,7 @@ type InlineCoreToolSupport = Pick<
 > & { schemaFactory: Parameters<typeof createCoreToolSchemas>[0] };
 
 type ThirdPartyMcpToolActivity = {
+  toolCallId?: string;
   serverName: string;
   toolName: string;
   toolInput: unknown;
@@ -223,12 +225,14 @@ export function createInlineCoreTools(
         ? classifyMcpToolAuditError(activity.error)
         : activity.outcome);
     const payload = {
+      toolCallId: activity.toolCallId ?? randomUUID(),
       serverName: activity.serverName,
       toolName: activity.toolName,
       requestedToolRule: `mcp__${activity.serverName}__${activity.toolName}`,
       resultClass,
       latencyMs: activity.latencyMs,
       argumentSummary: summarizeMcpToolArgumentPayload(activity.toolInput),
+      ...mcpToolAuditHashes(activity.toolInput, activity.result),
       ...(activity.structuredError
         ? { error: activity.structuredError }
         : activity.error

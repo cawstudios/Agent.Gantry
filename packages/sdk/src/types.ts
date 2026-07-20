@@ -14,17 +14,37 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
-export type SessionEventEnvelope = {
+export type RuntimeEventEnvelope = {
   eventId: number;
   eventType: string;
   sessionId?: string | null;
+  jobId?: string | null;
+  runId?: string | null;
+  triggerId?: string | null;
+  conversationId?: string | null;
   threadId?: string | null;
   correlationId?: string | null;
   createdAt?: string;
   payload: unknown;
 };
 
-export type SseEvent = SessionEventEnvelope;
+export type SessionEventEnvelope = RuntimeEventEnvelope;
+export type SseEvent = RuntimeEventEnvelope;
+
+export type RuntimeEventQuery = {
+  afterEventId?: number;
+  limit?: number;
+  sessionId?: string;
+  jobId?: string;
+  runId?: string;
+  eventType?: string | string[];
+};
+
+export type RuntimeEventStreamOptions = RuntimeEventQuery & {
+  signal?: AbortSignal;
+};
+
+export type RuntimeEventListResponse = { events: RuntimeEventEnvelope[] };
 
 export type MemoryContext = {
   appId?: string;

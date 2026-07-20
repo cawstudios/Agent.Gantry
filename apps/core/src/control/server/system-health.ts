@@ -327,7 +327,7 @@ export async function renderMetrics(deps: MetricsDeps): Promise<string> {
   try {
     const rows = await deps.query<QueueDepthRow>(
       `SELECT state, count(*)::int AS count
-       FROM pgboss.job
+       FROM gantry_pgboss.job
        WHERE state IN ('created', 'retry', 'active')
        GROUP BY state`,
     );

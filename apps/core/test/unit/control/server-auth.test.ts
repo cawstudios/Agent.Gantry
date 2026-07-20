@@ -1009,8 +1009,8 @@ describe('control server auth key parsing', () => {
     expect(first.folder).not.toBe(second.folder);
     expect(first.folder).toMatch(/^app_[a-f0-9]{12}_/);
     expect(second.folder).toMatch(/^app_[a-f0-9]{12}_/);
-    expect(first.folder.length).toBeLessThanOrEqual(96);
-    expect(second.folder.length).toBeLessThanOrEqual(96);
+    expect(first.folder.length).toBeLessThanOrEqual(64);
+    expect(second.folder.length).toBeLessThanOrEqual(64);
   });
 });
 
@@ -3051,6 +3051,16 @@ describe('control server runtime hardening', () => {
       tokenScopes: ['conversations:read'],
     },
     {
+      name: 'messages:send',
+      path: '/v1/conversations/conversation-1/messages',
+      tokenScopes: ['messages:read'],
+      init: {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idempotencyKey: 'notice-1', text: 'hello' }),
+      },
+    },
+    {
       name: 'conversations:read for install list',
       path: '/v1/agents/agent-1/conversation-installs',
       tokenScopes: ['agents:admin'],
@@ -3159,6 +3169,82 @@ describe('control server runtime hardening', () => {
         messages: [
           { id: 'message-1', parts: [{ payload: { text: 'hello' } }] },
         ],
+      });
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('durably sends a conversation message with messages:send scope', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'messages-send-token',
+        scopes: ['messages:send'],
+        appId: 'app-one',
+      },
+    ]);
+    domainRepositories.conversations.getConversation.mockResolvedValue({
+      id: 'conversation-1',
+      appId: 'app-one',
+      providerAccountId: 'providerAccount-1',
+      kind: 'channel',
+      title: 'engineering',
+      status: 'active',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+    const sendConversationMessage = vi.fn().mockResolvedValue({
+      messageId: 'outbound:api:one',
+      providerMessageId: 'teams-message-1',
+    });
+    const handle = startControlServer({
+      app: {
+        registerGroup: vi.fn(),
+        queue: { enqueueMessageCheck: vi.fn() },
+      } as any,
+      sendConversationMessage,
+    });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/conversations/conversation-1/messages`,
+        'messages-send-token',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            idempotencyKey: 'notice-1',
+            text: 'First notice',
+            threadId: 'thread-1',
+            adaptiveCard: {
+              type: 'AdaptiveCard',
+              version: '1.5',
+              body: [{ type: 'TextBlock', text: 'First notice' }],
+            },
+          }),
+        },
+      );
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({
+        accepted: true,
+        messageId: 'outbound:api:one',
+        providerMessageId: 'teams-message-1',
+        idempotencyKey: 'notice-1',
+      });
+      expect(sendConversationMessage).toHaveBeenCalledWith({
+        appId: 'app-one',
+        conversationId: 'conversation-1',
+        idempotencyKey: 'notice-1',
+        text: 'First notice',
+        threadId: 'thread-1',
+        adaptiveCard: {
+          type: 'AdaptiveCard',
+          version: '1.5',
+          body: [{ type: 'TextBlock', text: 'First notice' }],
+        },
       });
     } finally {
       await handle.close();
@@ -3331,6 +3417,68 @@ describe('control server runtime hardening', () => {
       expect(memoryService.patch).not.toHaveBeenCalled();
       expect(memoryService.delete).not.toHaveBeenCalled();
       expect(memoryService.triggerDreaming).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('returns canonical context for an app-owned named agent', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-named-agent',
+        scopes: ['sessions:write'],
+        appId: 'app-one',
+      },
+    ]);
+    domainRepositories.agents.listAgents.mockResolvedValue([
+      {
+        id: 'agent:tender-folder',
+        appId: 'app-one',
+        name: 'Tender Agent',
+        status: 'active',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+    ] as never);
+    const app = {
+      registerGroup: vi.fn(),
+      queue: { enqueueMessageCheck: vi.fn() },
+    };
+    const handle = startControlServer({ app: app as any });
+
+    try {
+      const response = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/sessions/ensure`,
+        'token-named-agent',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            conversationId: 'conv-named-agent',
+            agentName: 'Tender Agent',
+          }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        sessionId: 'session-1',
+        executionContext: {
+          conversationJid: 'app:app-one:conv-named-agent',
+          threadId: null,
+          workspaceKey: 'tender-folder',
+          sessionId: 'session-1',
+        },
+      });
+      expect(controlRepo.ensureAppSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentId: 'agent:tender-folder',
+          workspaceFolder: 'tender-folder',
+        }),
+      );
     } finally {
       await handle.close();
     }
@@ -3512,6 +3660,69 @@ describe('control server runtime hardening', () => {
     }
   });
 
+  it('requires session message idempotency and validates queue policy', async () => {
+    const port = await reservePort();
+    process.env.GANTRY_CONTROL_PORT = String(port);
+    process.env.GANTRY_CONTROL_API_KEYS_JSON = JSON.stringify([
+      {
+        kid: 'k',
+        token: 'token-message-admission-contract',
+        scopes: ['sessions:write'],
+        appId: 'app-one',
+      },
+    ]);
+    const handle = startControlServer({
+      app: { registerGroup: vi.fn(), queue: { enqueueMessageCheck: vi.fn() } },
+    } as any);
+
+    try {
+      const missingKey = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/sessions/session-1/messages`,
+        'token-message-admission-contract',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: 'hello' }),
+        },
+      );
+      expect(missingKey.status).toBe(400);
+      await expect(missingKey.json()).resolves.toMatchObject({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'idempotencyKey must contain 1 to 200 characters',
+        },
+      });
+
+      const invalidPolicy = await requestWithRetry(
+        `http://127.0.0.1:${port}/v1/sessions/session-1/messages`,
+        'token-message-admission-contract',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            message: 'hello',
+            idempotencyKey: 'activity-1',
+            queuePolicy: {
+              maxWaitingMessages: 3,
+              maxQueueWaitMs: 999,
+              executionTimeoutMs: 90_000,
+            },
+          }),
+        },
+      );
+      expect(invalidPolicy.status).toBe(400);
+      await expect(invalidPolicy.json()).resolves.toMatchObject({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: expect.stringContaining('queuePolicy.maxQueueWaitMs'),
+        },
+      });
+      expect(controlRepo.getAppSessionById).not.toHaveBeenCalled();
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('rejects session messages when webhook id is not owned by the app', async () => {
     const port = await reservePort();
     process.env.GANTRY_CONTROL_PORT = String(port);
@@ -3549,6 +3760,7 @@ describe('control server runtime hardening', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             message: 'hello',
+            idempotencyKey: 'webhook-ownership-check',
             webhookId: 'foreign-webhook',
           }),
         },
@@ -3592,6 +3804,7 @@ describe('control server runtime hardening', () => {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               message: 'hello',
+              idempotencyKey: `schema-object-${Object.keys(responseSchema).join('-') || 'empty'}`,
               response_schema: responseSchema,
             }),
           },
@@ -3923,6 +4136,12 @@ describe('control server runtime hardening', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             message: 'hello from sdk',
+            idempotencyKey: 'teams-activity-corr-1',
+            queuePolicy: {
+              maxWaitingMessages: 3,
+              maxQueueWaitMs: 90_000,
+              executionTimeoutMs: 90_000,
+            },
             threadId: 'thread-1',
             correlationId: 'corr-1',
             responseMode: 'sse',
@@ -3941,6 +4160,7 @@ describe('control server runtime hardening', () => {
       expect(body).toEqual(
         expect.objectContaining({
           accepted: true,
+          replayed: false,
           messageId: expect.any(String),
           acceptedEventId: 1001,
         }),
@@ -3968,18 +4188,19 @@ describe('control server runtime hardening', () => {
             thinking: { mode: 'on', budgetTokens: 2048 },
             maxOutputTokens: 4096,
           },
+          appResponseRoute: {
+            sessionId: 'session-1',
+            threadId: 'thread-1',
+            responseMode: 'sse',
+            webhookId: null,
+            correlationId: 'corr-1',
+          },
         }),
       );
       expect(mockedGetConfiguredAgentRuntime).toHaveBeenCalledWith(
         'app_app_one_conv_1',
       );
-      expect(controlRepo.upsertAppResponseRoute).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        threadId: 'thread-1',
-        responseMode: 'sse',
-        webhookId: null,
-        correlationId: 'corr-1',
-      });
+      expect(controlRepo.upsertAppResponseRoute).not.toHaveBeenCalled();
       expect(runtimeEvents.publish).toHaveBeenCalledWith(
         expect.objectContaining({
           eventType: 'session.message.inbound',
@@ -4023,6 +4244,8 @@ describe('control server runtime hardening', () => {
         eventId: 21,
         appId: 'app-one',
         sessionId: 'session-1',
+        runId: 'run-21',
+        conversationId: 'conversation-1',
         threadId: 'thread-1',
         correlationId: 'corr-1',
         eventType: 'session.message.outbound',
@@ -4047,6 +4270,8 @@ describe('control server runtime hardening', () => {
             eventId: 21,
             eventType: 'session.message.outbound',
             sessionId: 'session-1',
+            runId: 'run-21',
+            conversationId: 'conversation-1',
             threadId: 'thread-1',
             correlationId: 'corr-1',
             createdAt: '2026-05-08T00:00:02.000Z',
@@ -4085,6 +4310,8 @@ describe('control server runtime hardening', () => {
         eventId: 22,
         appId: 'app-one',
         sessionId: 'session-1',
+        runId: 'run-22',
+        conversationId: 'conversation-1',
         threadId: 'thread-1',
         correlationId: 'corr-sse',
         eventType: 'session.message.outbound',
@@ -4131,6 +4358,8 @@ describe('control server runtime hardening', () => {
         eventId: 22,
         eventType: 'session.message.outbound',
         sessionId: 'session-1',
+        runId: 'run-22',
+        conversationId: 'conversation-1',
         threadId: 'thread-1',
         correlationId: 'corr-sse',
         createdAt: '2026-05-08T00:00:03.000Z',

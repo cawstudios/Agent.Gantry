@@ -37,6 +37,7 @@ import type {
   ConversationContextHydrationResult,
 } from '../../channels/channel-provider.js';
 import type { BrainChannelHarvestTap } from '../../brain/brain-channel-harvest.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export type ChannelWiringRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository;
@@ -60,6 +61,26 @@ export type RetryTailRecoveryEnqueue = (
 
 export type ChannelAccountOptions = { providerAccountId?: string };
 
+export interface ChannelTransportHealth {
+  providerId: string;
+  configured: boolean;
+  connected: boolean;
+  configuredAccountCount: number;
+  connectedAccountCount: number;
+  authenticatedConversationRegistrationCount: number;
+  authenticatedConversationRegistrationAvailable: boolean;
+}
+
+export interface EventOnlyConversationInput {
+  appId: AppId;
+  conversationId: string;
+  providerAccountId: string;
+  externalConversationId: string;
+  threadId?: string;
+  providerExternalRef?: Record<string, unknown>;
+  timestamp: string;
+}
+
 export interface DurableOutboundAttemptInput {
   appId: AppId;
   chatJid: string;
@@ -68,9 +89,12 @@ export interface DurableOutboundAttemptInput {
   sourceMessageId: string;
   provider: string;
   canonicalText: string;
+  providerPayload?: unknown;
 }
 
 export interface DurableOutboundAttempt {
+  /** Exact replay of an already-enqueued source message; do not send again. */
+  skipProviderSend?: boolean;
   settleSent: (input: {
     sentAt: string;
     providerMessageId?: string;
@@ -100,6 +124,9 @@ export interface RecoveryDispatchPermitInput {
   itemId: string;
   destinationJid: string;
   canonicalText: string;
+  sourceMessageId?: string;
+  attemptCount?: number;
+  terminalFailure?: boolean;
   threadId?: string;
 }
 
@@ -120,6 +147,9 @@ export interface ChannelWiringDeps {
   logger: Pick<typeof logger, 'info' | 'warn' | 'debug' | 'error'>;
   runtimeSecrets: RuntimeSecretProvider;
   publishRuntimeEvent?: (event: RuntimeEventPublishInput) => Promise<unknown>;
+  ensureEventOnlyConversation?: (
+    input: EventOnlyConversationInput,
+  ) => Promise<void>;
   brainHarvestTap?: BrainChannelHarvestTap;
 }
 
@@ -135,7 +165,14 @@ export interface ChannelWiring {
     options?: { providerInbound?: boolean },
   ) => Promise<void>;
   hasConnectedChannels: () => boolean;
+  getChannelTransportHealth: () => ChannelTransportHealth[];
   hasChannel: (jid: string, options?: ChannelAccountOptions) => boolean;
+  handleProviderHttpIngress: (
+    providerId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: Record<string, unknown>,
+  ) => Promise<boolean>;
   supportsStreaming: (
     jid: string,
     options?: { providerAccountId?: string },
@@ -150,9 +187,20 @@ export interface ChannelWiring {
     options: {
       durability: 'required' | 'best_effort';
       throwOnMissing?: boolean;
+      sourceMessageId?: string;
       messageOptions?: MessageSendOptions;
     },
   ) => Promise<void>;
+  sendMessageWithReceipt: (
+    jid: string,
+    rawText: string,
+    options: {
+      durability: 'required' | 'best_effort';
+      throwOnMissing?: boolean;
+      sourceMessageId?: string;
+      messageOptions?: MessageSendOptions;
+    },
+  ) => Promise<MessageDeliveryResult | undefined>;
   sendProviderMessage: (
     jid: string,
     rawText: string,

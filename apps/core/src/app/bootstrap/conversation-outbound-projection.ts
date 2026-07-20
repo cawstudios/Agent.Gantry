@@ -25,6 +25,8 @@ export function createConversationOutboundProjection(input: {
   conversationJid: string;
   threadId?: string;
   appId: AppId;
+  messageId?: string;
+  attemptCount?: number;
   publishRuntimeEvent?: (event: RuntimeEventPublishInput) => Promise<unknown>;
   logger: ConversationOutboundEventLogger;
 }):
@@ -37,6 +39,7 @@ export function createConversationOutboundProjection(input: {
         deliveryStatus: ConversationOutboundDeliveryStatus;
         externalMessageId?: string;
         error?: string;
+        terminal?: boolean;
       }): Promise<void>;
     }
   | undefined {
@@ -44,7 +47,7 @@ export function createConversationOutboundProjection(input: {
   if (!formatted) return undefined;
 
   const now = nowIso();
-  const messageId = `outbound:${randomUUID()}`;
+  const messageId = input.messageId?.trim() || `outbound:${randomUUID()}`;
   const baseMessage: NewMessage = {
     id: messageId,
     chat_jid: input.conversationJid,
@@ -67,27 +70,37 @@ export function createConversationOutboundProjection(input: {
     publishEvent: async (eventInput) => {
       if (!input.publishRuntimeEvent) return;
       try {
+        const conversationId = canonicalConversationIdForJid(
+          input.conversationJid,
+          input.providerAccountId,
+        );
+        const threadId = canonicalThreadIdFor({
+          jid: input.conversationJid,
+          threadId: input.threadId,
+          providerAccountId: input.providerAccountId,
+        });
         await input.publishRuntimeEvent({
           appId: input.appId,
-          conversationId: input.conversationJid as never,
-          ...(input.threadId ? { threadId: input.threadId as never } : {}),
+          conversationId: conversationId as never,
+          ...(threadId ? { threadId: threadId as never } : {}),
           eventType: RUNTIME_EVENT_TYPES.CONVERSATION_MESSAGE_OUTBOUND,
           actor: 'agent',
           responseMode: 'none',
           payload: {
             messageId,
-            conversationId: canonicalConversationIdForJid(
-              input.conversationJid,
-              input.providerAccountId,
+            conversationId,
+            threadId: threadId ?? null,
+            providerId: input.providerId,
+            providerAccountId: input.providerAccountId ?? null,
+            externalConversationId: input.conversationJid.replace(
+              /^[^:]+:/u,
+              '',
             ),
-            threadId:
-              canonicalThreadIdFor({
-                jid: input.conversationJid,
-                threadId: input.threadId,
-                providerAccountId: input.providerAccountId,
-              }) ?? null,
             direction: 'outbound',
             deliveryStatus: eventInput.deliveryStatus,
+            attemptCount: input.attemptCount ?? 1,
+            terminal:
+              eventInput.terminal ?? eventInput.deliveryStatus === 'sent',
             sender: {
               id: baseMessage.sender,
               name: baseMessage.sender_name,

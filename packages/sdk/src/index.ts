@@ -17,8 +17,12 @@ import type {
   MemorySaveInput,
   MemorySearchInput,
   RequestOptions,
+  RuntimeEventListResponse,
+  RuntimeEventQuery,
+  RuntimeEventStreamOptions,
   SseEvent,
 } from './types.js';
+import { runtimeEventQuery } from './runtime-event-query.js';
 import type * as OpenApi from './openapi-types.js';
 import { parseSessionSseEvent } from './session-events.js';
 import { createIngressesClient } from './ingresses.js';
@@ -39,6 +43,8 @@ import type {
 export type {
   AgentAdminBoundConversation,
   AgentAdminResponse,
+  AgentAccessDocument,
+  AgentAccessSelection,
 } from './agents.js';
 export type {
   CreateJobInput,
@@ -46,6 +52,7 @@ export type {
   JobEventRecord,
   JobHealth,
   JobHealthState,
+  JobAgentTask,
   JobKind,
   JobRecord,
   JobSetup,
@@ -301,6 +308,40 @@ export class GantryClient {
         path: `/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
         body,
       }),
+    resolveInteraction: (
+      sessionId: string,
+      interactionId: string,
+      body: OpenApi.ResolveSessionInteractionRequest,
+    ) =>
+      this.transport.request<OpenApi.SessionInteractionSettlementResponse>({
+        method: 'POST',
+        path: `/v1/sessions/${encodeURIComponent(sessionId)}/interactions/${encodeURIComponent(interactionId)}/resolve`,
+        body,
+      }),
+    rejectInteraction: (
+      sessionId: string,
+      interactionId: string,
+      body: OpenApi.RejectSessionInteractionRequest,
+    ) =>
+      this.transport.request<OpenApi.SessionInteractionSettlementResponse>({
+        method: 'POST',
+        path: `/v1/sessions/${encodeURIComponent(sessionId)}/interactions/${encodeURIComponent(interactionId)}/reject`,
+        body,
+      }),
+    cancelTurn: (
+      sessionId: string,
+      body: OpenApi.CancelSessionTurnRequest = {},
+    ) =>
+      this.transport.request<OpenApi.CancelSessionTurnResponse>({
+        method: 'POST',
+        path: `/v1/sessions/${encodeURIComponent(sessionId)}/turns/current/cancel`,
+        body,
+      }),
+    archive: (sessionId: string) =>
+      this.transport.request<OpenApi.ArchiveSessionResponse>({
+        method: 'POST',
+        path: `/v1/sessions/${encodeURIComponent(sessionId)}/archive`,
+      }),
     listEvents: (
       sessionId: string,
       afterEventId?: OpenApi.ListSessionEventsQuery['afterEventId'],
@@ -322,6 +363,19 @@ export class GantryClient {
         method: 'GET',
         path: `/v1/sessions/${encodeURIComponent(sessionId)}/wait?afterEventId=${input.afterEventId || 0}&timeoutMs=${input.timeoutMs || 60_000}`,
       }),
+  };
+
+  readonly runtimeEvents = {
+    list: (input: RuntimeEventQuery = {}) =>
+      this.transport.request<RuntimeEventListResponse>({
+        method: 'GET',
+        path: `/v1/runtime-events${runtimeEventQuery(input)}`,
+      }),
+    stream: (input: RuntimeEventStreamOptions = {}) =>
+      this.transport.stream(
+        `/v1/runtime-events${runtimeEventQuery(input)}`,
+        input.signal,
+      ),
   };
 
   readonly jobs = {
@@ -491,6 +545,15 @@ export class GantryClient {
         method: 'GET',
         path: `/v1/conversations/${encodeURIComponent(conversationId)}/messages${querySuffix(input)}`,
       }),
+    send: (
+      conversationId: string,
+      input: OpenApi.SendConversationMessageRequest,
+    ) =>
+      this.transport.request<OpenApi.SendConversationMessageResponse>({
+        method: 'POST',
+        path: `/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
+        body: input,
+      }),
   };
 
   readonly agents = {
@@ -632,6 +695,12 @@ export type {
   JobTriggerIngressTarget,
   SessionMessageIngressTarget,
 } from './ingresses.js';
+export type {
+  RuntimeEventEnvelope,
+  RuntimeEventListResponse,
+  RuntimeEventQuery,
+  RuntimeEventStreamOptions,
+} from './types.js';
 export { conversationMessageTarget } from './ingresses.js';
 export {
   buildIngressSignaturePayload,

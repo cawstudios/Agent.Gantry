@@ -156,4 +156,37 @@ describe('FilesystemRunnerControlPort', () => {
     });
     expect(fs.existsSync(path.join(inputDir, '_close'))).toBe(true);
   });
+
+  it('recovers a persistent IPC lock when a new process reuses its pid', () => {
+    const ipcBaseDir = makeRoot();
+    const port = new FilesystemRunnerControlPort(ipcBaseDir);
+    port.ensureRoot();
+    const lockPath = path.join(ipcBaseDir, '.lock');
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: '2000-01-01T00:00:00.000Z',
+      }),
+    );
+
+    expect(port.recoverRootLock(lockPath)).toMatchObject({
+      recovered: true,
+      recoveryReason: 'pid_reused',
+    });
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('keeps the IPC lock owned by the current process', () => {
+    const ipcBaseDir = makeRoot();
+    const port = new FilesystemRunnerControlPort(ipcBaseDir);
+    port.ensureRoot();
+    const lockPath = port.acquireRootLock();
+
+    expect(port.recoverRootLock(lockPath)).toMatchObject({
+      recovered: false,
+      recoveryReason: 'same_process',
+    });
+    expect(fs.existsSync(lockPath)).toBe(true);
+  });
 });

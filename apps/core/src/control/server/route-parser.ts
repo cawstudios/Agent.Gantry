@@ -1,6 +1,6 @@
 export type SessionRoute = {
   sessionId: string;
-  action: 'get' | 'messages' | 'events' | 'wait' | 'runs';
+  action: 'get' | 'messages' | 'events' | 'wait' | 'runs' | 'archive';
 };
 
 export type JobRoute =
@@ -33,9 +33,8 @@ export function parseSessionRoute(pathname: string): SessionRoute | null {
   if (baseMatch) {
     return { sessionId: decodeURIComponent(baseMatch[1]!), action: 'get' };
   }
-  const match = /^\/v1\/sessions\/([^/]+)\/(messages|events|wait)$/.exec(
-    pathname,
-  );
+  const match =
+    /^\/v1\/sessions\/([^/]+)\/(messages|events|wait|archive)$/.exec(pathname);
   const runsMatch = /^\/v1\/sessions\/([^/]+)\/runs$/.exec(pathname);
   if (runsMatch) {
     return {

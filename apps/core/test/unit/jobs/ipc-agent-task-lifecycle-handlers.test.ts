@@ -218,6 +218,7 @@ function contextFor(input: {
   liveStopActionToken?: string;
   deps?: Record<string, unknown>;
   conversationBindings?: Record<string, unknown>;
+  sourceAgentFolderJids?: string[];
 }) {
   return {
     data: {
@@ -234,7 +235,7 @@ function contextFor(input: {
       ...(input.deps ?? {}),
     },
     conversationBindings: input.conversationBindings ?? {},
-    sourceAgentFolderJids: ['sl:C123'],
+    sourceAgentFolderJids: input.sourceAgentFolderJids ?? ['sl:C123'],
   } as never;
 }
 
@@ -379,6 +380,103 @@ describe('agent task lifecycle IPC handlers', () => {
       code: 'invalid_request',
       error:
         'todo_update requires 1-50 unique items with id, title, and status.',
+    });
+  });
+
+  it('resolves a declared caller tool for a live session run', async () => {
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-task-ipc-'),
+    );
+    runtimeHomes.push(runtimeHome);
+    const {
+      agentTaskLifecycleHandlers,
+      taskData,
+      registerAsyncCommandSandboxPolicy,
+    } = await loadTaskLifecycleHandlers(runtimeHome);
+    const publishRuntimeEvent = vi.fn(async () => undefined);
+    registerAsyncCommandSandboxPolicy({
+      sourceAgentFolder: 'main_agent',
+      runHandle: 'run-1',
+      policy: {
+        appId: 'app:test',
+        agentId: 'agent:main_agent',
+        conversationId: 'sl:C123',
+        threadId: 'thread-1',
+        runId: 'run-id-1',
+        callerResolvedTools: {
+          sessionId: 'session-1',
+          maxInteractions: 4,
+          interactionTimeoutMs: 5_000,
+          tools: [
+            {
+              name: 'get_tender_metadata',
+              description: 'Read tender metadata.',
+              inputSchema: { type: 'object' },
+            },
+          ],
+        },
+        protectedReadPaths: [],
+        protectedWritePaths: [],
+        allowedNetworkHosts: [],
+        resourceLimits: {
+          cpuSeconds: 300,
+          memoryMb: 1024,
+          maxProcesses: 64,
+        },
+      },
+    });
+
+    const handled = agentTaskLifecycleHandlers.caller_resolved_tool(
+      contextFor({
+        data: taskData('caller-live', 'caller_resolved_tool', {
+          toolName: 'get_tender_metadata',
+          toolInput: { tenderId: 'tender-1' },
+        }),
+        deps: {
+          publishRuntimeEvent,
+        },
+        sourceAgentFolderJids: ['app:session-1:agent:main_agent'],
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(publishRuntimeEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          runId: 'run-id-1',
+          eventType: 'interaction.pending',
+          payload: expect.objectContaining({
+            interactionType: 'caller_resolved_tool',
+            toolName: 'get_tender_metadata',
+            input: { tenderId: 'tender-1' },
+          }),
+        }),
+      );
+    });
+    const requiredEvent = publishRuntimeEvent.mock.calls.find(
+      ([event]) => event.eventType === 'interaction.pending',
+    )?.[0];
+    const interactionId = requiredEvent?.payload.interactionId;
+    expect(interactionId).toEqual(expect.any(String));
+    const { settleCallerResolvedTool } =
+      await import('@core/application/interactions/caller-resolved-tool-coordinator.js');
+    await expect(
+      settleCallerResolvedTool({
+        appId: 'app:test',
+        sessionId: 'session-1',
+        interactionId,
+        idempotencyKey: 'caller-live-resolution',
+        resolution: {
+          status: 'resolved',
+          result: { emd: 'INR 62,00,000' },
+        },
+      }),
+    ).resolves.toBe('resolved');
+    await handled;
+
+    expect(readResponse(runtimeHome, 'caller-live')).toMatchObject({
+      ok: true,
+      message: 'Caller-resolved tool completed.',
+      data: { emd: 'INR 62,00,000' },
     });
   });
 
@@ -871,12 +969,16 @@ describe('agent task lifecycle IPC handlers', () => {
           status: 'success',
           result: 'halfway',
         });
+        await onOutput?.({
+          status: 'success',
+          result: ' done',
+        });
         expect(input.prompt).toContain('Objective: Research lead sources');
         expect(group.folder).toBe('reviewer');
         expect(input.agentId).toBe('agent:reviewer');
         expect(input.workspaceFolder).toBe('reviewer');
         expect(options?.asyncTaskRepositoryAvailable).toBe(true);
-        return { status: 'success', result: 'delegated done' };
+        return { status: 'success', result: null };
       },
     );
     const deps = {
@@ -894,6 +996,7 @@ describe('agent task lifecycle IPC handlers', () => {
         }) as never,
       runnerSandboxProvider: fakeEnforcingSandboxProvider(),
       runAgent,
+      opsRepository: { getJobById: async () => null } as never,
     };
     registerAsyncCommandSandboxPolicy({
       sourceAgentFolder: 'main_agent',
@@ -961,6 +1064,7 @@ describe('agent task lifecycle IPC handlers', () => {
             targetAgentId: 'agent:reviewer',
           }),
           providerAccountId: 'slack-one',
+          jobId: 'job-1',
         },
         deps,
         conversationBindings,
@@ -976,12 +1080,18 @@ describe('agent task lifecycle IPC handlers', () => {
     expect(repository.tasks.get(taskId!)?.privateCorrelationJson).toMatchObject(
       { targetAgentId: 'agent:reviewer', workspaceFolder: 'reviewer' },
     );
+    expect(repository.tasks.get(taskId!)).toMatchObject({
+      parentRunId: null,
+      parentJobId: 'job-1',
+      parentJobRunId: 'run-id-1',
+    });
     expect(
       readEncryptedAsyncTaskPayload<{ providerAccountId?: string }>(
         repository.tasks.get(taskId!)!,
       ),
     ).toMatchObject({ providerAccountId: 'slack-one' });
     await waitForStatus(repository, 'completed');
+    expect(repository.tasks.get(taskId!)?.outputSummary).toBe('halfway done');
 
     runAgent.mockImplementationOnce(
       async (_group, _input, _onProcess, onOutput) => {

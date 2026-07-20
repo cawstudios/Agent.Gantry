@@ -63,6 +63,7 @@ export interface AsyncTaskRecord {
 
 export interface PublicAsyncTaskDto {
   id: string;
+  taskKey?: string;
   kind: AsyncTaskKind;
   status: AsyncTaskStatus;
   summary?: string | null;
@@ -216,6 +217,9 @@ export function toPublicAsyncTaskDto(
   );
   return {
     id: task.id,
+    ...(typeof task.privateCorrelationJson.taskKey === 'string'
+      ? { taskKey: task.privateCorrelationJson.taskKey }
+      : {}),
     kind: task.kind,
     status: task.status,
     summary: task.summary,

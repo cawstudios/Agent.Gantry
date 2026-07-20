@@ -1,5 +1,5 @@
 import { logger } from '../infrastructure/logging/logger.js';
-import type { NewMessage } from '../domain/types.js';
+import type { NewMessage, SessionContinuityMode } from '../domain/types.js';
 import type {
   GroupProcessingDeps,
   GroupProcessingRepository,
@@ -17,6 +17,7 @@ export async function buildGroupProcessingConversationContext(input: {
   latestMessage: NewMessage;
   currentMessages: NewMessage[];
   timezone: string;
+  continuityMode?: SessionContinuityMode;
 }) {
   const { prompt, recallQuery, logContext } =
     await buildGroupTurnConversationContext({
@@ -29,6 +30,7 @@ export async function buildGroupProcessingConversationContext(input: {
       latestMessage: input.latestMessage,
       currentMessages: input.currentMessages,
       timezone: input.timezone,
+      continuityMode: input.continuityMode,
     });
   logger.info(
     {

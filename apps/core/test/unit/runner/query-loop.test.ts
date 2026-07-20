@@ -1,4 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const sdk = vi.hoisted(() => ({
+  query: vi.fn(),
+}));
+const runnerOutputs = vi.hoisted(() => [] as Record<string, unknown>[]);
+const claudeSdkPackage = vi.hoisted(() =>
+  ['@anthropic-ai', 'claude-agent-sdk'].join('/'),
+);
 
 vi.hoisted(() => {
   process.env.GANTRY_WORKSPACE_GROUP_DIR ??= '/tmp';
@@ -7,10 +15,79 @@ vi.hoisted(() => {
   process.env.GANTRY_IPC_INPUT_DIR ??= '/tmp';
 });
 
+vi.mock(claudeSdkPackage, () => ({
+  SYSTEM_PROMPT_DYNAMIC_BOUNDARY: 'dynamic-boundary',
+  query: sdk.query,
+}));
+vi.mock('@core/adapters/llm/anthropic-claude-agent/runner/output.js', () => ({
+  writeOutput: (output: Record<string, unknown>) => runnerOutputs.push(output),
+}));
+
 import { usageEventIdForMessage } from '@core/adapters/llm/anthropic-claude-agent/runner/query-usage-event-id.js';
-import { recordSuccessfulToolUse } from '@core/adapters/llm/anthropic-claude-agent/runner/query-loop.js';
+import { runQuery } from '@core/adapters/llm/anthropic-claude-agent/runner/query-loop.js';
+import { recordSuccessfulToolUse } from '@core/adapters/llm/anthropic-claude-agent/runner/tool-success-ledger.js';
+import type { AgentRunnerInput } from '@core/adapters/llm/anthropic-claude-agent/runner/types.js';
 import { canonicalGantryToolRuleName } from '@core/shared/gantry-tool-facades.js';
 import { RunScopedToolSuccessLedger } from '@core/runner/tool-gate-core.js';
+
+function runnerInput(
+  overrides: Partial<AgentRunnerInput> = {},
+): AgentRunnerInput {
+  return {
+    prompt: 'ignored',
+    workspaceFolder: 'workspace',
+    chatJid: 'app:test',
+    permissionMode: 'deny',
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  runnerOutputs.length = 0;
+});
+
+describe('Claude query loop live structured completion', () => {
+  it('emits a turn-complete marker after a structured result', async () => {
+    sdk.query.mockImplementation(({ prompt }) => ({
+      async *[Symbol.asyncIterator]() {
+        const messages = prompt[Symbol.asyncIterator]();
+        await messages.next();
+        yield {
+          type: 'result',
+          subtype: 'success',
+          structured_output: { answer: 'INR 62,00,000' },
+        };
+        expect(await messages.next()).toEqual({ done: true, value: undefined });
+      },
+    }));
+
+    await runQuery(
+      'prompt',
+      '/tmp/gantry-mcp-server.js',
+      runnerInput({ responseSchema: { type: 'object' } }),
+      {},
+      'claude-test',
+      undefined,
+      undefined,
+      { enableIpcFollowups: true, persistSdkSession: true },
+    );
+
+    const resultIndex = runnerOutputs.findIndex(
+      (output) => output.result === '{"answer":"INR 62,00,000"}',
+    );
+    expect(resultIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      runnerOutputs
+        .slice(resultIndex + 1)
+        .some(
+          (output) =>
+            output.status === 'success' &&
+            output.result === null &&
+            !output.runtimeEventOnly,
+        ),
+    ).toBe(true);
+  });
+});
 
 describe('Claude query loop usage event IDs', () => {
   it('uses stable provider IDs when present', () => {
@@ -25,6 +102,61 @@ describe('Claude query loop usage event IDs', () => {
     );
     expect(usageEventIdForMessage({}, 'session-1', 1, 'run-b')).toBe(
       'session-1:run:run-b:result:1',
+    );
+  });
+});
+
+describe('Claude query loop SDK result failures', () => {
+  it('reports SDK result failures before missing structured output', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'error_max_structured_output_retries',
+          errors: ['Structured output did not match the schema.'],
+        };
+      },
+    });
+
+    await expect(
+      runQuery(
+        'prompt',
+        '/tmp/gantry-mcp-server.js',
+        runnerInput({ responseSchema: { type: 'object' } }),
+        {},
+        'claude-test',
+        undefined,
+        undefined,
+        { enableIpcFollowups: false, persistSdkSession: false },
+      ),
+    ).rejects.toThrow('Structured output did not match the schema.');
+  });
+
+  it('reports SDK success-subtyped error results before missing structured output', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          result: 'Provider failed before structured output was produced.',
+        };
+      },
+    });
+
+    await expect(
+      runQuery(
+        'prompt',
+        '/tmp/gantry-mcp-server.js',
+        runnerInput({ responseSchema: { type: 'object' } }),
+        {},
+        'claude-test',
+        undefined,
+        undefined,
+        { enableIpcFollowups: false, persistSdkSession: false },
+      ),
+    ).rejects.toThrow(
+      'Claude SDK returned error result: Provider failed before structured output was produced.',
     );
   });
 });

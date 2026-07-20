@@ -61,6 +61,17 @@ export type SendSessionMessageResponse = JsonResponse<
 export type SendSessionMessageInput = SendSessionMessageRequest & {
   sessionId: string;
 };
+export type ResolveSessionInteractionRequest =
+  JsonRequest<'resolveSessionInteraction'>;
+export type RejectSessionInteractionRequest =
+  JsonRequest<'rejectSessionInteraction'>;
+export type SessionInteractionSettlementResponse = JsonResponse<
+  'resolveSessionInteraction',
+  200
+>;
+export type CancelSessionTurnRequest = JsonRequest<'cancelSessionTurn'>;
+export type CancelSessionTurnResponse = JsonResponse<'cancelSessionTurn', 200>;
+export type ArchiveSessionResponse = JsonResponse<'archiveSession', 200>;
 export type ListSessionEventsQuery = Query<'listOrStreamSessionEvents'>;
 export type ListSessionEventsResponse = JsonResponse<
   'listOrStreamSessionEvents',
@@ -83,6 +94,20 @@ export type PauseJobResponse = JsonResponse<'pauseJob', 200>;
 export type ResumeJobResponse = JsonResponse<'resumeJob', 200>;
 export type TriggerJobResponse = JsonResponse<'triggerJob', 202>;
 
+export type ListModelCredentialsResponse = JsonResponse<
+  'listModelCredentials',
+  200
+>;
+export type PutModelCredentialRequest = JsonRequest<'putModelCredential'>;
+export type ModelCredentialMutationResponse = JsonResponse<
+  'putModelCredential',
+  200
+>;
+export type DisableModelCredentialResponse = JsonResponse<
+  'disableModelCredential',
+  200
+>;
+
 export type ListRunsQuery = Query<'listRuns'>;
 export type ListRunsResponse = JsonResponse<'listRuns', 200>;
 export type GetRunResponse = JsonResponse<'getRun', 200>;
@@ -91,6 +116,9 @@ export type QueryUsageQuery = Query<'queryUsage'>;
 export type QueryUsageResponse = JsonResponse<'queryUsage', 200>;
 
 export type ListProvidersResponse = JsonResponse<'listProviders', 200>;
+export type ListAgentsResponse = JsonResponse<'listAgents', 200>;
+export type CreateAgentRequest = JsonRequest<'createAgent'>;
+export type CreateAgentResponse = JsonResponse<'createAgent', 201>;
 export type CreateProviderAccountResponse = JsonResponse<
   'createProviderAccount',
   201
@@ -133,6 +161,12 @@ export type ListConversationMessagesQuery = Query<'listConversationMessages'>;
 export type ListConversationMessagesResponse = JsonResponse<
   'listConversationMessages',
   200
+>;
+export type SendConversationMessageRequest =
+  JsonRequest<'sendConversationMessage'>;
+export type SendConversationMessageResponse = JsonResponse<
+  'sendConversationMessage',
+  202
 >;
 
 export type ListConversationInstallsResponse = JsonResponse<

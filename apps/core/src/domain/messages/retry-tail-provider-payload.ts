@@ -21,6 +21,7 @@ export interface RetryTailProviderPayload {
   totalParts?: number;
   warnings?: string[];
   fallbackArtifactId?: string;
+  adaptiveCard?: Record<string, unknown>;
 }
 
 export function sanitizeRetryTailProviderPayload(
@@ -72,12 +73,26 @@ export function sanitizeRetryTailProviderPayload(
     maxLength: MAX_ID_LENGTH,
   });
   if (fallbackArtifactId) sanitized.fallbackArtifactId = fallbackArtifactId;
+  const adaptiveCard = readAdaptiveCard(source.adaptiveCard);
+  if (adaptiveCard) sanitized.adaptiveCard = adaptiveCard;
   const deliveredParts = readInt(source.deliveredParts);
   if (deliveredParts !== undefined) sanitized.deliveredParts = deliveredParts;
   const totalParts = readInt(source.totalParts);
   if (totalParts !== undefined) sanitized.totalParts = totalParts;
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function readAdaptiveCard(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const card = value as Record<string, unknown>;
+  if (card.type !== 'AdaptiveCard' || typeof card.version !== 'string')
+    return undefined;
+  if (!Array.isArray(card.body)) return undefined;
+  const serialized = JSON.stringify(card);
+  if (Buffer.byteLength(serialized, 'utf8') > 128 * 1024) return undefined;
+  return JSON.parse(serialized) as Record<string, unknown>;
 }
 
 function readString(

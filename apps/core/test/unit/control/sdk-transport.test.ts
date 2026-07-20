@@ -195,6 +195,92 @@ describe('@gantry/sdk transport', () => {
     ).resolves.toEqual({ sessionId: 'session-1' });
   });
 
+  it('sends idempotency and bounded queue policy for a session message', async () => {
+    const port = await listen((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        expect(req.method).toBe('POST');
+        expect(req.url).toBe('/v1/sessions/session%2F1/messages');
+        expect(JSON.parse(Buffer.concat(chunks).toString('utf8'))).toEqual({
+          message: 'What is the EMD?',
+          idempotencyKey: 'teams-activity-1',
+          queuePolicy: {
+            maxWaitingMessages: 3,
+            maxQueueWaitMs: 90_000,
+            executionTimeoutMs: 90_000,
+          },
+        });
+        res.writeHead(202, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            accepted: true,
+            replayed: false,
+            messageId: 'message-1',
+            acceptedEventId: 42,
+          }),
+        );
+      });
+    });
+    const client = new GantryClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    await expect(
+      client.sessions.sendMessage({
+        sessionId: 'session/1',
+        message: 'What is the EMD?',
+        idempotencyKey: 'teams-activity-1',
+        queuePolicy: {
+          maxWaitingMessages: 3,
+          maxQueueWaitMs: 90_000,
+          executionTimeoutMs: 90_000,
+        },
+      }),
+    ).resolves.toEqual({
+      accepted: true,
+      replayed: false,
+      messageId: 'message-1',
+      acceptedEventId: 42,
+    });
+  });
+
+  it('lists and creates agents through the typed SDK surface', async () => {
+    const requests: string[] = [];
+    const agent = {
+      id: 'agent:tender',
+      appId: 'manipal-tender-copilot',
+      name: 'Manipal Tender Agent',
+      status: 'active',
+      agentHarness: 'claude_agent_sdk',
+      createdAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    };
+    const port = await listen((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.writeHead(req.method === 'POST' ? 201 : 200, {
+        'content-type': 'application/json',
+      });
+      res.end(
+        JSON.stringify(req.method === 'POST' ? agent : { agents: [agent] }),
+      );
+    });
+    const client = new GantryClient({
+      apiKey: 'test-key',
+      baseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    await expect(client.agents.list()).resolves.toEqual({ agents: [agent] });
+    await expect(
+      client.agents.create({
+        appId: 'manipal-tender-copilot',
+        name: 'Manipal Tender Agent',
+      }),
+    ).resolves.toEqual(agent);
+    expect(requests).toEqual(['GET /v1/agents', 'POST /v1/agents']);
+  });
+
   it('builds the usage query from every typed filter', async () => {
     const client = new GantryClient({
       apiKey: 'test-key',
@@ -224,6 +310,47 @@ describe('@gantry/sdk transport', () => {
       method: 'GET',
       path: '/v1/usage?from=2026-07-01T00%3A00%3A00.000Z&to=2026-07-02T00%3A00%3A00.000Z&agentId=agent%2F1&apiKeyId=key%2F1&runId=run%2F1&jobId=job%2F1&model=opus%2F4&group_by=api_key',
     });
+  });
+
+  it('builds model credential administration requests', async () => {
+    const client = new GantryClient({
+      apiKey: 'test-key',
+      baseUrl: 'http://127.0.0.1:3939',
+    });
+    const request = vi
+      .spyOn(
+        (client as unknown as { transport: { request: () => unknown } })
+          .transport,
+        'request',
+      )
+      .mockResolvedValue({ providers: [] });
+
+    await client.models.credentials.list();
+    await client.models.credentials.set('anthropic/primary', {
+      authMode: 'api_key',
+      payload: { apiKey: 'secret' },
+    });
+    await client.models.credentials.disable('anthropic/primary');
+
+    expect(request.mock.calls).toEqual([
+      [{ method: 'GET', path: '/v1/credentials/models' }],
+      [
+        {
+          method: 'PUT',
+          path: '/v1/credentials/models/anthropic%2Fprimary',
+          body: {
+            authMode: 'api_key',
+            payload: { apiKey: 'secret' },
+          },
+        },
+      ],
+      [
+        {
+          method: 'DELETE',
+          path: '/v1/credentials/models/anthropic%2Fprimary',
+        },
+      ],
+    ]);
   });
 
   it('builds ingress management requests', async () => {
@@ -364,6 +491,11 @@ describe('@gantry/sdk transport', () => {
       after: 'message/0',
       limit: 5,
     });
+    await client.conversations.send('conversation/1', {
+      idempotencyKey: 'notice/1',
+      text: 'First notice',
+      threadId: 'thread/1',
+    });
     await client.agents.conversationInstalls.list('agent/1');
     await client.agents.conversationInstalls.enable(
       'agent/1',
@@ -449,6 +581,15 @@ describe('@gantry/sdk transport', () => {
         method: 'GET',
         url: '/v1/conversations/conversation%2F1/messages?threadId=thread%2F1&after=message%2F0&limit=5',
         body: null,
+      },
+      {
+        method: 'POST',
+        url: '/v1/conversations/conversation%2F1/messages',
+        body: {
+          idempotencyKey: 'notice/1',
+          text: 'First notice',
+          threadId: 'thread/1',
+        },
       },
       {
         method: 'GET',

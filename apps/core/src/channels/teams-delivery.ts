@@ -125,6 +125,13 @@ export async function sendTeamsTextMessage(
         conversationId,
         text: part,
         ...(options.threadId ? { threadId: options.threadId } : {}),
+        ...(options.providerData?.microsoftConversationReference &&
+        typeof options.providerData.microsoftConversationReference === 'object'
+          ? {
+              conversationReference: options.providerData
+                .microsoftConversationReference as Record<string, unknown>,
+            }
+          : {}),
       });
       if (sent.externalMessageId) {
         externalMessageIds.push(sent.externalMessageId);

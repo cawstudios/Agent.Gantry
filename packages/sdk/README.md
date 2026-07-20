@@ -61,7 +61,8 @@ endpoints on the running runtime:
 - `client.jobs` — `create`, `list`, `get`, `update`, `events`, `delete`, `pause`, `resume`, `trigger`, `wait`
 - `client.runs` — `list`, `get`
 - `client.usage` — `query`
-- `client.models` — `list`, `defaults.get`, `defaults.update`, `preview`
+- `client.models` — `list`, `defaults.get`, `defaults.update`, `preview`, and
+  scoped-admin `credentials.list`, `credentials.set`, `credentials.disable`
 - `client.agents` — admin read and profile-file read/write plus `skills`, `mcpServers`, `conversationInstalls`
 - `client.skills` — install and list skills
 - `client.mcpServers` — catalog of MCP servers

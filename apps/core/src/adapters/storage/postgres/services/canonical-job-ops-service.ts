@@ -29,6 +29,10 @@ import {
   parseRequiredCapabilities,
   parseSetupState,
 } from './canonical-job-target-state.js';
+import {
+  canonicalJobScheduleValue,
+  parseCanonicalJobSchedule,
+} from './canonical-job-schedule.js';
 
 type JobRecordSource = Omit<JobUpsertInput, 'id'> | JobUpsertInput | Job;
 type CanonicalExecutionContext = NonNullable<Job['execution_context']>;
@@ -49,10 +53,15 @@ export class CanonicalJobOpsService {
     await this.repository.upsertJob(
       this.toRecordInput(job.id, agentIdForFolder(job.workspace_key), {
         name: job.name,
+        app_id: job.app_id,
         prompt: job.prompt,
         model: job.model,
         schedule_type: job.schedule_type,
         schedule_value: job.schedule_value,
+        schedule_timezone: job.schedule_timezone,
+        misfire_policy: job.misfire_policy,
+        overlap_policy: job.overlap_policy,
+        schedule_metadata: job.schedule_metadata,
         status,
         session_id: job.session_id,
         thread_id: job.thread_id,
@@ -75,6 +84,7 @@ export class CanonicalJobOpsService {
         access_requirements: job.access_requirements,
         setup_state: job.setup_state,
         recovery_intent: job.recovery_intent,
+        agent_task: job.agent_task,
         created_at: job.created_at || now,
         updated_at: job.updated_at || now,
       }),
@@ -403,10 +413,7 @@ export class CanonicalJobOpsService {
   }
 
   private rowToJob(row: CanonicalJobRecord): Job {
-    const schedule = parseJson<{ type?: string; value?: string }>(
-      row.scheduleJson,
-      {},
-    );
+    const schedule = parseCanonicalJobSchedule(row.scheduleJson);
     const target = parseJson<Record<string, unknown>>(row.targetJson, {});
     const executionContext = parseExecutionContext(target.executionContext) ?? {
       conversationJid: '',
@@ -428,11 +435,16 @@ export class CanonicalJobOpsService {
     );
     return {
       id: row.id,
+      app_id: row.appId,
       name: row.name,
       prompt: row.prompt,
       model: row.model,
       schedule_type: (schedule.type as Job['schedule_type']) || 'manual',
       schedule_value: schedule.value || '',
+      schedule_timezone: schedule.timezone,
+      misfire_policy: schedule.misfirePolicy,
+      overlap_policy: schedule.overlapPolicy,
+      schedule_metadata: schedule.metadata,
       status: row.status as Job['status'],
       session_id: executionContext.sessionId ?? null,
       thread_id: executionContext.threadId ?? null,
@@ -458,6 +470,12 @@ export class CanonicalJobOpsService {
       setup_state: setupState,
       recovery_intent: recoveryIntent,
       required_capabilities: requiredCapabilities,
+      agent_task:
+        target.agentTask &&
+        typeof target.agentTask === 'object' &&
+        !Array.isArray(target.agentTask)
+          ? (target.agentTask as Job['agent_task'])
+          : undefined,
     };
   }
 
@@ -474,14 +492,12 @@ export class CanonicalJobOpsService {
     const notificationRoutes = resolveNotificationRoutes(job, executionContext);
     return {
       id,
+      appId: String(job.app_id ?? CANONICAL_APP_ID),
       agentId,
       name: job.name,
       prompt: job.prompt,
       model: job.model || null,
-      scheduleJson: json({
-        type: job.schedule_type,
-        value: job.schedule_value,
-      }),
+      scheduleJson: json(canonicalJobScheduleValue(job)),
       status: job.status || 'active',
       targetJson: json({
         executionContext,
@@ -497,6 +513,7 @@ export class CanonicalJobOpsService {
         requiredCapabilities: parseRequiredCapabilities(
           job.required_capabilities,
         ),
+        agentTask: job.agent_task,
       }),
       silent: Boolean(job.silent),
       timeoutMs: job.timeout_ms ?? 300000,

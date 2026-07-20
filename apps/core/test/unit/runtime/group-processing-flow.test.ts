@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { handleFailure } from '@core/runtime/group-processing-flow.js';
+import {
+  handleFailure,
+  resolveGroupTurnFinalProgressState,
+} from '@core/runtime/group-processing-flow.js';
 
 function makeInput(
   overrides: Partial<Parameters<typeof handleFailure>[0]> = {},
@@ -10,6 +13,7 @@ function makeInput(
     groupName: 'Main Agent',
     queueJid: 'sl:C1234567890',
     previousCursor: 'prev-cursor',
+    processedCursor: 'processed-cursor',
     deps: {
       setCursor: vi.fn(),
       saveState: vi.fn(),
@@ -41,7 +45,10 @@ describe('handleFailure', () => {
 
     await expect(handleFailure(input)).resolves.toBe(true);
 
-    expect(input.deps.setCursor).not.toHaveBeenCalled();
+    expect(input.deps.setCursor).toHaveBeenCalledWith(
+      'sl:C1234567890',
+      'processed-cursor',
+    );
     expect(input.deps.saveState).toHaveBeenCalledTimes(1);
     expect(input.logger.warn).toHaveBeenCalledWith(
       { group: 'Main Agent' },
@@ -97,5 +104,19 @@ describe('handleFailure', () => {
       'prev-thread-cursor',
     );
     expect(input.deps.saveState).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resolveGroupTurnFinalProgressState', () => {
+  it('renders a typed execution timeout as failed progress', () => {
+    expect(
+      resolveGroupTurnFinalProgressState({
+        output: 'timed_out',
+        hadError: false,
+        sawDeliveryIncomplete: false,
+        sawTerminalDeliveryFailure: false,
+        outputSentToUser: false,
+      }),
+    ).toBe('failed');
   });
 });

@@ -8,6 +8,7 @@ import type {
   UserQuestionResponse,
 } from '../domain/types.js';
 import type { TeamsAdaptiveCardPayload } from './teams-cards.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export const TEAMS_JID_PREFIX = 'teams:';
 
@@ -37,6 +38,8 @@ export interface TeamsInboundMessage {
   conversationName?: string;
   conversationType?: string;
   attachments?: TeamsMessageAttachment[];
+  conversationReference?: Record<string, unknown>;
+  providerData?: Record<string, unknown>;
 }
 
 export interface TeamsMessageAttachment {
@@ -75,19 +78,21 @@ export interface TeamsSdkOutboundMessage {
   conversationId: string;
   text: string;
   threadId?: string;
+  conversationReference?: Record<string, unknown>;
 }
 
 export interface TeamsSdkAdaptiveCardMessage {
   conversationId: string;
-  card: TeamsAdaptiveCardPayload;
+  card: TeamsAdaptiveCardPayload | Record<string, unknown>;
   threadId?: string;
   streamType?: 'informative' | 'streaming';
+  conversationReference?: Record<string, unknown>;
 }
 
 export interface TeamsSdkAdaptiveCardUpdate {
   conversationId: string;
   messageId: string;
-  card: TeamsAdaptiveCardPayload;
+  card: TeamsAdaptiveCardPayload | Record<string, unknown>;
   threadId?: string;
   streamType?: 'informative' | 'streaming';
 }
@@ -111,6 +116,12 @@ export interface TeamsSdkClient {
   updateAdaptiveCard?(
     input: TeamsSdkAdaptiveCardUpdate,
   ): Promise<TeamsSdkSendResult>;
+  handleHttpIngress?(
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: Record<string, unknown>,
+  ): Promise<void>;
+  getAuthenticatedConversationRegistrationCount?(): number;
 }
 
 export interface TeamsChannelDependencies {

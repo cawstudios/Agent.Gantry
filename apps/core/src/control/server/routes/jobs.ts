@@ -159,6 +159,8 @@ export function createJobManagementService(ctx?: ControlRouteContext) {
     toolRepository: getRuntimeToolRepositoryIfReady(),
     skillRepository: getRuntimeStorage().repositories.skills,
     mcpServerRepository: getRuntimeStorage().repositories.mcpServers,
+    capabilitySecretRepository:
+      getRuntimeStorage().repositories.capabilitySecrets,
     getCredentialBroker:
       ctx && typeof ctx.app.getCredentialBroker === 'function'
         ? () => ctx.app.getCredentialBroker()
@@ -319,7 +321,7 @@ export async function handleJobRoutes(
         accessRequirements: body.accessRequirements,
         kind,
         runAt: typeof body.runAt === 'string' ? body.runAt : undefined,
-        schedule: (body.schedule || {}) as { type?: unknown; value?: unknown },
+        schedule: body.schedule || {},
         modelAlias: resolvedModel.explicit
           ? resolvedModel.modelAlias
           : undefined,
@@ -327,6 +329,7 @@ export async function handleJobRoutes(
         agentHarness: ctx.getSelectedAgentHarness(
           executionContext.workspaceKey,
         ),
+        agentTask: body.agentTask,
         dryRun: body.dryRun,
       });
       const runtimePreviewExecutionContext = {

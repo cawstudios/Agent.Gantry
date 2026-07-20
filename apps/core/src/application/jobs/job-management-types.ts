@@ -113,6 +113,7 @@ export interface JobSchedulePlan {
 }
 
 export interface JobSchedulePlanner {
+  readonly defaultTimezone: string;
   createManualJobId(): string;
   createJobId(input: {
     name: string;
@@ -124,7 +125,14 @@ export interface JobSchedulePlanner {
   planAppSchedule(input: {
     kind: JobKind;
     runAt: unknown;
-    schedule?: { type?: unknown; value?: unknown };
+    schedule?: {
+      type?: unknown;
+      value?: unknown;
+      timezone?: unknown;
+      misfirePolicy?: unknown;
+      overlapPolicy?: unknown;
+      metadata?: unknown;
+    };
   }): JobSchedulePlan;
   planInitial(input: {
     scheduleType: Exclude<JobScheduleType, 'manual'>;
@@ -161,10 +169,18 @@ export interface CreateManagedJobInput {
   accessRequirements?: JobAccessRequirement[];
   kind?: JobKind;
   runAt?: string;
-  schedule?: { type?: unknown; value?: unknown };
+  schedule?: {
+    type?: unknown;
+    value?: unknown;
+    timezone?: unknown;
+    misfirePolicy?: unknown;
+    overlapPolicy?: unknown;
+    metadata?: unknown;
+  };
   modelAlias?: unknown;
   effectiveModelAlias?: string | null;
   agentHarness?: AgentHarness;
+  agentTask?: Job['agent_task'];
   dryRun?: unknown;
 }
 

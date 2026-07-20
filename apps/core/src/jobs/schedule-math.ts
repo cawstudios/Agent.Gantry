@@ -9,7 +9,9 @@ import {
 } from '../shared/time/datetime.js';
 
 export function computeNextJobRun(
-  job: Pick<Job, 'schedule_value'> & { schedule_type: string },
+  job: Pick<Job, 'schedule_value' | 'schedule_timezone'> & {
+    schedule_type: string;
+  },
   scheduledFor: string | null,
 ): string | null {
   if (job.schedule_type === 'manual') {
@@ -22,7 +24,7 @@ export function computeNextJobRun(
 
   if (job.schedule_type === 'cron') {
     const interval = CronExpressionParser.parse(job.schedule_value, {
-      tz: TIMEZONE,
+      tz: job.schedule_timezone ?? TIMEZONE,
       currentDate: scheduledFor || currentIso(),
     });
     return interval.next().toISOString();

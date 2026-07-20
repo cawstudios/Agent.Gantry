@@ -40,22 +40,26 @@ export function createSessionCommandAgentRunners(input: {
   });
   return {
     runAgent: (prompt, onOutput, options) =>
-      input.runAgent(
-        input.group,
-        prompt,
-        input.chatJid,
-        input.queueJid,
-        onOutput,
-        commandOptions(options),
-      ),
+      input
+        .runAgent(
+          input.group,
+          prompt,
+          input.chatJid,
+          input.queueJid,
+          onOutput,
+          commandOptions(options),
+        )
+        .then((result) => (result === 'timed_out' ? 'error' : result)),
     runSessionCompaction: (onOutput, options) =>
-      input.runAgent(
-        input.group,
-        '',
-        input.chatJid,
-        input.queueJid,
-        onOutput,
-        commandOptions({ ...options, maintenanceCompaction: true }),
-      ),
+      input
+        .runAgent(
+          input.group,
+          '',
+          input.chatJid,
+          input.queueJid,
+          onOutput,
+          commandOptions({ ...options, maintenanceCompaction: true }),
+        )
+        .then((result) => (result === 'timed_out' ? 'error' : result)),
   };
 }

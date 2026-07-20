@@ -19,6 +19,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversationId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List conversation messages
+         * @description Lists durable messages, optionally scoped to a thread.
+         */
+        get: operations["listConversationMessages"];
+        put?: never;
+        /**
+         * Send conversation message
+         * @description Durably sends one idempotent message to a normalized conversation or thread.
+         */
+        post: operations["sendConversationMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/health": {
         parameters: {
             query?: never;
@@ -28,7 +52,7 @@ export interface paths {
         };
         /**
          * Check control server health
-         * @description Returns runtime transport details and enabled feature flags.
+         * @description Returns runtime transport details, enabled feature flags, and redacted channel transport health.
          */
         get: operations["getHealth"];
         put?: never;
@@ -209,6 +233,34 @@ export interface paths {
          * @description Partially updates fields for the existing provider credential auth mode and returns redacted status.
          */
         patch: operations["patchModelCredential"];
+        trace?: never;
+    };
+    "/v1/credentials/capabilities/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get capability credential status
+         * @description Returns redacted readiness and fingerprint metadata for one app-scoped capability credential.
+         */
+        get: operations["getCapabilityCredential"];
+        /**
+         * Set capability credential
+         * @description Stores one app-scoped capability credential encrypted and returns only redacted metadata.
+         */
+        put: operations["putCapabilityCredential"];
+        post?: never;
+        /**
+         * Delete capability credential
+         * @description Removes one app-scoped capability credential and returns redacted status.
+         */
+        delete: operations["deleteCapabilityCredential"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/settings": {
@@ -495,6 +547,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{sessionId}/interactions/{interactionId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a caller tool interaction
+         * @description Durably supplies an opaque tool result to the same active session turn.
+         */
+        post: operations["resolveSessionInteraction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionId}/interactions/{interactionId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a caller tool interaction
+         * @description Durably rejects an opaque caller-resolved tool interaction.
+         */
+        post: operations["rejectSessionInteraction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionId}/turns/current/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel the current session turn
+         * @description Stops the current session turn and cancels its pending caller interactions.
+         */
+        post: operations["cancelSessionTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionId}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a session
+         * @description Idempotently archives the app-scoped session, expires provider continuity, and cancels active work.
+         */
+        post: operations["archiveSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runtime-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List or stream app runtime events
+         * @description Returns durable app-scoped runtime events as JSON or Server-Sent Events. The cursor supports replay after reconnect.
+         */
+        get: operations["listOrStreamRuntimeEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionId}/events": {
         parameters: {
             query?: never;
@@ -723,26 +875,6 @@ export interface paths {
          * @description Lists normalized threads or topics.
          */
         get: operations["listConversationThreads"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/conversations/{conversationId}/messages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List conversation messages
-         * @description Lists durable messages, optionally scoped to a thread.
-         */
-        get: operations["listConversationMessages"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1832,6 +1964,20 @@ export interface components {
         CapabilityListResponse: {
             capabilities: components["schemas"]["CapabilityManifest"][];
         };
+        CapabilityCredentialWriteRequest: {
+            value: string;
+            allowedCapabilityIds?: string[];
+        };
+        CapabilityCredentialResponse: {
+            credential: {
+                name: string;
+                /** @enum {string} */
+                status: "ready" | "needs_secret";
+                fingerprint: string | null;
+                allowedCapabilityIds: string[];
+                updatedAt: string | null;
+            };
+        };
         ModelCredentialStatus: {
             /** @example provider-id */
             providerId: string;
@@ -2186,6 +2332,10 @@ export interface components {
         SessionEnsureRequest: {
             /** @description Optional API key app assertion. */
             appId?: string;
+            /** @description Optional app-owned agent id. */
+            agentId?: string;
+            /** @description Optional exact app-owned agent name. */
+            agentName?: string;
             conversationId: string;
             title?: string;
             /** @enum {string} */
@@ -2197,9 +2347,27 @@ export interface components {
             appId: string;
             conversationId: string;
             chatJid: string;
+            executionContext: {
+                conversationJid: string;
+                threadId: string | null;
+                workspaceKey: string;
+                sessionId: string;
+            };
         };
         SendSessionMessageRequest: {
             message: string;
+            idempotencyKey: string;
+            queuePolicy?: {
+                maxWaitingMessages: number;
+                maxQueueWaitMs: number;
+                executionTimeoutMs: number;
+            };
+            /**
+             * @description Provider resumes the model session; bounded reconstructs continuity from a rolling summary and recent messages.
+             * @default provider
+             * @enum {string}
+             */
+            continuityMode: "provider" | "bounded";
             /** @default sdk */
             senderId: string;
             /** @default SDK */
@@ -2209,8 +2377,10 @@ export interface components {
             /** @enum {string} */
             responseMode?: "sse" | "webhook" | "both" | "none";
             webhookId?: string;
-            /** @description JSON Schema object requesting strict structured output for this inline turn. */
+            /** @description JSON Schema object requesting strict structured output for this turn when supported by the selected agent engine. */
             response_schema?: Record<string, never>;
+            /** @description Explicit model alias supplied by the caller for this turn. */
+            model_alias?: string;
             /** @enum {string} */
             effort?: "low" | "medium" | "high" | "xhigh" | "max";
             thinking?: ("off" | "on") | {
@@ -2222,11 +2392,49 @@ export interface components {
                 budget_tokens?: number;
             };
             max_output_tokens?: number;
+            /** @description Domain-neutral native tools whose results are resolved by the SDK caller. */
+            caller_resolved_tools?: {
+                name: string;
+                description: string;
+                input_schema: Record<string, never>;
+            }[];
+            /** @default 4 */
+            max_tool_interactions: number;
+            /** @default 90000 */
+            interaction_timeout_ms: number;
         };
         SendSessionMessageResponse: {
             accepted: boolean;
+            replayed: boolean;
             messageId: string;
             acceptedEventId: number;
+        };
+        ResolveSessionInteractionRequest: {
+            idempotencyKey: string;
+            result: {
+                [key: string]: unknown;
+            };
+            resolvedBy?: string;
+        };
+        RejectSessionInteractionRequest: {
+            idempotencyKey: string;
+            reason?: string;
+            resolvedBy?: string;
+        };
+        SessionInteractionSettlementResponse: {
+            accepted: boolean;
+            idempotent: boolean;
+        };
+        CancelSessionTurnRequest: {
+            threadId?: string;
+        };
+        CancelSessionTurnResponse: {
+            cancelled: boolean;
+        };
+        ArchiveSessionResponse: {
+            archived: boolean;
+            alreadyArchived: boolean;
+            cancelled: boolean;
         };
         RuntimeEvent: {
             eventId: number;
@@ -2239,6 +2447,25 @@ export interface components {
         };
         RuntimeEventListResponse: {
             events: components["schemas"]["RuntimeEvent"][];
+        };
+        AppRuntimeEvent: {
+            eventId: number;
+            eventType: string;
+            sessionId?: string | null;
+            jobId?: string | null;
+            runId?: string | null;
+            triggerId?: string | null;
+            conversationId?: string | null;
+            threadId?: string | null;
+            correlationId?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        AppRuntimeEventListResponse: {
+            events: components["schemas"]["AppRuntimeEvent"][];
         };
         Run: {
             run_id: string;
@@ -2366,6 +2593,27 @@ export interface components {
                 /** Format: date-time */
                 createdAt: string;
             }[];
+        };
+        ConversationMessageSendRequest: {
+            idempotencyKey: string;
+            text: string;
+            threadId?: string;
+            adaptiveCard?: {
+                /** @enum {string} */
+                type: "AdaptiveCard";
+                version: string;
+                body: Record<string, never>[];
+                actions?: Record<string, never>[];
+            } & {
+                [key: string]: unknown;
+            };
+        };
+        ConversationMessageSendResponse: {
+            /** @enum {boolean} */
+            accepted: true;
+            messageId: string;
+            idempotencyKey: string;
+            providerMessageId?: string;
         };
         ConversationApproversResponse: {
             approvers: string[];
@@ -2656,7 +2904,7 @@ export interface components {
             /** Format: uri */
             url: string;
             enabled: boolean;
-            eventTypes: ("session.message.inbound" | "session.message.outbound" | "session.message.streaming" | "session.typing" | "session.progress" | "session.compaction.queued" | "session.compaction.running" | "session.compaction.ready" | "session.compaction.degraded" | "session.compaction.failed" | "session.compaction.timeout" | "conversation.message.inbound" | "conversation.message.outbound" | "job.triggered" | "job.run.started" | "job.started" | "job.streaming" | "job.heartbeat" | "job.setup_required" | "job.tool_denied" | "job.tool_activity" | "task.started" | "task.progress" | "task.updated" | "task.notification" | "job.completed" | "job.failed" | "job.run.completed" | "job.run.failed" | "permission.requested" | "permission.allowed" | "permission.denied" | "permission.cancelled" | "permission.persisted" | "permission.resumed" | "permission.final_outcome" | "permission.yolo_denylist_hit" | "permission.classifier_decision" | "interaction.pending" | "credential.capability.updated" | "credential.capability.removed" | "credential.model.updated" | "credential.model.disabled" | "credential.model.used" | "profile.file.read" | "profile.file.updated" | "egress.connect" | "mcp.tool_activity" | "sandbox.blocked" | "model.usage" | "run.started" | "run.startup_diagnostic" | "run.failover" | "run.canceled" | "run.completed" | "run.failed" | "run.timeout" | "run.dead_lettered" | "proactive.surfacing.outcome" | "webhook.test")[] | null;
+            eventTypes: ("session.message.inbound" | "session.message.outbound" | "session.message.streaming" | "session.message.rejected" | "session.typing" | "session.progress" | "session.compaction.queued" | "session.compaction.running" | "session.compaction.ready" | "session.compaction.degraded" | "session.compaction.failed" | "session.compaction.timeout" | "conversation.message.inbound" | "conversation.message.outbound" | "job.triggered" | "job.run.started" | "job.started" | "job.streaming" | "job.heartbeat" | "job.setup_required" | "job.tool_denied" | "job.tool_activity" | "task.started" | "task.progress" | "task.updated" | "task.notification" | "job.completed" | "job.failed" | "job.run.completed" | "job.run.failed" | "permission.requested" | "permission.allowed" | "permission.denied" | "permission.cancelled" | "permission.persisted" | "permission.resumed" | "permission.final_outcome" | "permission.yolo_denylist_hit" | "permission.classifier_decision" | "interaction.pending" | "credential.capability.updated" | "credential.capability.removed" | "credential.model.updated" | "credential.model.disabled" | "credential.model.used" | "profile.file.read" | "profile.file.updated" | "egress.connect" | "mcp.tool_activity" | "sandbox.blocked" | "model.usage" | "run.started" | "run.startup_diagnostic" | "run.failover" | "run.canceled" | "run.completed" | "run.failed" | "run.timeout" | "run.dead_lettered" | "proactive.surfacing.outcome" | "webhook.test")[] | null;
             agentId: string | null;
             sessionId: string | null;
             jobId: string | null;
@@ -2674,7 +2922,7 @@ export interface components {
             url: string;
             secret?: string;
             enabled?: boolean;
-            eventTypes?: ("session.message.inbound" | "session.message.outbound" | "session.message.streaming" | "session.typing" | "session.progress" | "session.compaction.queued" | "session.compaction.running" | "session.compaction.ready" | "session.compaction.degraded" | "session.compaction.failed" | "session.compaction.timeout" | "conversation.message.inbound" | "conversation.message.outbound" | "job.triggered" | "job.run.started" | "job.started" | "job.streaming" | "job.heartbeat" | "job.setup_required" | "job.tool_denied" | "job.tool_activity" | "task.started" | "task.progress" | "task.updated" | "task.notification" | "job.completed" | "job.failed" | "job.run.completed" | "job.run.failed" | "permission.requested" | "permission.allowed" | "permission.denied" | "permission.cancelled" | "permission.persisted" | "permission.resumed" | "permission.final_outcome" | "permission.yolo_denylist_hit" | "permission.classifier_decision" | "interaction.pending" | "credential.capability.updated" | "credential.capability.removed" | "credential.model.updated" | "credential.model.disabled" | "credential.model.used" | "profile.file.read" | "profile.file.updated" | "egress.connect" | "mcp.tool_activity" | "sandbox.blocked" | "model.usage" | "run.started" | "run.startup_diagnostic" | "run.failover" | "run.canceled" | "run.completed" | "run.failed" | "run.timeout" | "run.dead_lettered" | "proactive.surfacing.outcome" | "webhook.test")[] | null;
+            eventTypes?: ("session.message.inbound" | "session.message.outbound" | "session.message.streaming" | "session.message.rejected" | "session.typing" | "session.progress" | "session.compaction.queued" | "session.compaction.running" | "session.compaction.ready" | "session.compaction.degraded" | "session.compaction.failed" | "session.compaction.timeout" | "conversation.message.inbound" | "conversation.message.outbound" | "job.triggered" | "job.run.started" | "job.started" | "job.streaming" | "job.heartbeat" | "job.setup_required" | "job.tool_denied" | "job.tool_activity" | "task.started" | "task.progress" | "task.updated" | "task.notification" | "job.completed" | "job.failed" | "job.run.completed" | "job.run.failed" | "permission.requested" | "permission.allowed" | "permission.denied" | "permission.cancelled" | "permission.persisted" | "permission.resumed" | "permission.final_outcome" | "permission.yolo_denylist_hit" | "permission.classifier_decision" | "interaction.pending" | "credential.capability.updated" | "credential.capability.removed" | "credential.model.updated" | "credential.model.disabled" | "credential.model.used" | "profile.file.read" | "profile.file.updated" | "egress.connect" | "mcp.tool_activity" | "sandbox.blocked" | "model.usage" | "run.started" | "run.startup_diagnostic" | "run.failover" | "run.canceled" | "run.completed" | "run.failed" | "run.timeout" | "run.dead_lettered" | "proactive.surfacing.outcome" | "webhook.test")[] | null;
             agentId?: string | null;
             sessionId?: string | null;
             jobId?: string | null;
@@ -2685,7 +2933,7 @@ export interface components {
             url?: string;
             secret?: string;
             enabled?: boolean;
-            eventTypes?: ("session.message.inbound" | "session.message.outbound" | "session.message.streaming" | "session.typing" | "session.progress" | "session.compaction.queued" | "session.compaction.running" | "session.compaction.ready" | "session.compaction.degraded" | "session.compaction.failed" | "session.compaction.timeout" | "conversation.message.inbound" | "conversation.message.outbound" | "job.triggered" | "job.run.started" | "job.started" | "job.streaming" | "job.heartbeat" | "job.setup_required" | "job.tool_denied" | "job.tool_activity" | "task.started" | "task.progress" | "task.updated" | "task.notification" | "job.completed" | "job.failed" | "job.run.completed" | "job.run.failed" | "permission.requested" | "permission.allowed" | "permission.denied" | "permission.cancelled" | "permission.persisted" | "permission.resumed" | "permission.final_outcome" | "permission.yolo_denylist_hit" | "permission.classifier_decision" | "interaction.pending" | "credential.capability.updated" | "credential.capability.removed" | "credential.model.updated" | "credential.model.disabled" | "credential.model.used" | "profile.file.read" | "profile.file.updated" | "egress.connect" | "mcp.tool_activity" | "sandbox.blocked" | "model.usage" | "run.started" | "run.startup_diagnostic" | "run.failover" | "run.canceled" | "run.completed" | "run.failed" | "run.timeout" | "run.dead_lettered" | "proactive.surfacing.outcome" | "webhook.test")[] | null;
+            eventTypes?: ("session.message.inbound" | "session.message.outbound" | "session.message.streaming" | "session.message.rejected" | "session.typing" | "session.progress" | "session.compaction.queued" | "session.compaction.running" | "session.compaction.ready" | "session.compaction.degraded" | "session.compaction.failed" | "session.compaction.timeout" | "conversation.message.inbound" | "conversation.message.outbound" | "job.triggered" | "job.run.started" | "job.started" | "job.streaming" | "job.heartbeat" | "job.setup_required" | "job.tool_denied" | "job.tool_activity" | "task.started" | "task.progress" | "task.updated" | "task.notification" | "job.completed" | "job.failed" | "job.run.completed" | "job.run.failed" | "permission.requested" | "permission.allowed" | "permission.denied" | "permission.cancelled" | "permission.persisted" | "permission.resumed" | "permission.final_outcome" | "permission.yolo_denylist_hit" | "permission.classifier_decision" | "interaction.pending" | "credential.capability.updated" | "credential.capability.removed" | "credential.model.updated" | "credential.model.disabled" | "credential.model.used" | "profile.file.read" | "profile.file.updated" | "egress.connect" | "mcp.tool_activity" | "sandbox.blocked" | "model.usage" | "run.started" | "run.startup_diagnostic" | "run.failover" | "run.canceled" | "run.completed" | "run.failed" | "run.timeout" | "run.dead_lettered" | "proactive.surfacing.outcome" | "webhook.test")[] | null;
             agentId?: string | null;
             sessionId?: string | null;
             jobId?: string | null;
@@ -3421,6 +3669,8 @@ export interface components {
             eventId: number;
             eventType: string;
             sessionId: string | null;
+            runId: string | null;
+            conversationId: string | null;
             threadId: string | null;
             correlationId: string | null;
             /** Format: date-time */
@@ -3434,6 +3684,8 @@ export interface components {
             eventId: number;
             eventType: string;
             sessionId: string | null;
+            runId: string | null;
+            conversationId: string | null;
             threadId: string | null;
             correlationId: string | null;
             /** Format: date-time */
@@ -3565,6 +3817,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ControlStatusResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listConversationMessages: {
+        parameters: {
+            query?: {
+                /** @description Thread or topic id. */
+                threadId?: string;
+                /** @description Cursor or timestamp. */
+                after?: string;
+                /** @description Maximum number of messages. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Conversation id. */
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationMessageListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    sendConversationMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Conversation id. */
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON request payload. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationMessageSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Request accepted for asynchronous processing. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationMessageSendResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -3904,6 +4224,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelCredentialMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getCapabilityCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Capability credential environment name. */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityCredentialResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    putCapabilityCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Capability credential environment name. */
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON request payload. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityCredentialWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityCredentialResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteCapabilityCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Capability credential environment name. */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityCredentialResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -4466,6 +4875,175 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    resolveSessionInteraction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id. */
+                sessionId: string;
+                /** @description Pending interaction id. */
+                interactionId: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON request payload. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveSessionInteractionRequest"];
+            };
+        };
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInteractionSettlementResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    rejectSessionInteraction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id. */
+                sessionId: string;
+                /** @description Pending interaction id. */
+                interactionId: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON request payload. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectSessionInteractionRequest"];
+            };
+        };
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInteractionSettlementResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    cancelSessionTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON request payload. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelSessionTurnRequest"];
+            };
+        };
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelSessionTurnResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    archiveSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveSessionResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listOrStreamRuntimeEvents: {
+        parameters: {
+            query?: {
+                /** @description Exclusive event cursor. */
+                afterEventId?: number;
+                /** @description Maximum events per read. */
+                limit?: number;
+                /** @description Optional session filter. */
+                sessionId?: string;
+                /** @description Optional job filter. */
+                jobId?: string;
+                /** @description Optional run filter. */
+                runId?: string;
+                /** @description Optional repeatable or comma-separated event type filter. */
+                eventType?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppRuntimeEventListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listOrStreamSessionEvents: {
         parameters: {
             query?: {
@@ -4899,41 +5477,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationThreadListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    listConversationMessages: {
-        parameters: {
-            query?: {
-                /** @description Thread or topic id. */
-                threadId?: string;
-                /** @description Cursor or timestamp. */
-                after?: string;
-                /** @description Maximum number of messages. */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Conversation id. */
-                conversationId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Request succeeded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConversationMessageListResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

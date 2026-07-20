@@ -45,8 +45,22 @@ export async function exportCurrentDesiredState(input: {
   const conversations: Record<string, RuntimeConfiguredConversation> = {};
   const bindings: Record<string, RuntimeConfiguredBinding> = {};
 
-  const groupEntries = Object.entries(groups);
   const storedAgents = await deps.repositories.agents.listAgents(appId);
+  const storedProviderAccounts = deps.repositories.providerAccounts
+    ?.listProviderAccounts
+    ? await deps.repositories.providerAccounts.listProviderAccounts(appId)
+    : [];
+  const providerAccountIds = new Set(
+    storedProviderAccounts.map((account) => String(account.id)),
+  );
+  const groupEntries = Object.entries(groups).filter(([jid, group]) =>
+    routeBelongsToApp({
+      appId,
+      jid,
+      providerAccountId: group.providerAccountId,
+      providerAccountIds,
+    }),
+  );
   const activeStoredAgents = storedAgents.filter(
     (agent) => agent.status === 'active',
   );
@@ -63,7 +77,6 @@ export async function exportCurrentDesiredState(input: {
     mcpBindingRows,
     toolCatalogRows,
     skillCatalogRows,
-    storedProviderAccounts,
     storedConversationBindings,
     storedConversations,
   ] = await Promise.all([
@@ -94,9 +107,6 @@ export async function exportCurrentDesiredState(input: {
       appId,
       statuses: ['installed'],
     }),
-    deps.repositories.providerAccounts?.listProviderAccounts
-      ? deps.repositories.providerAccounts.listProviderAccounts(appId)
-      : Promise.resolve([]),
     deps.repositories.providerAccounts?.listConversationInstalls
       ? deps.repositories.providerAccounts.listConversationInstalls(appId)
       : Promise.resolve([]),
@@ -143,6 +153,11 @@ export async function exportCurrentDesiredState(input: {
           storedConversations.map((conversation) => conversation.id),
         )
       : [],
+  );
+  const installedConversationIds = new Set(
+    storedConversationBindings
+      .filter((binding) => binding.status === 'active')
+      .map((binding) => binding.conversationId),
   );
 
   for (const connection of storedProviderAccounts.filter(
@@ -195,6 +210,14 @@ export async function exportCurrentDesiredState(input: {
     const storedApprovers = (
       storedApproversByConversation.get(conversation.id) ?? []
     ).map((approver) => approver.externalUserId);
+    if (
+      connection.config?.inbound_mode === 'event_only' &&
+      !existingConversation &&
+      storedApprovers.length === 0 &&
+      !installedConversationIds.has(conversation.id)
+    ) {
+      continue;
+    }
     conversations[conversationId] = {
       providerConnection: providerAccountId,
       providerAccount: providerAccountId,
@@ -549,6 +572,24 @@ export async function exportCurrentDesiredState(input: {
     bindings,
     agents,
   };
+}
+
+export function routeBelongsToApp(input: {
+  appId: string;
+  jid: string;
+  providerAccountId?: string;
+  providerAccountIds: ReadonlySet<string>;
+}): boolean {
+  if (input.jid.startsWith('app:')) {
+    if (!input.jid.startsWith(`app:${input.appId}:`)) return false;
+    return input.providerAccountId
+      ? input.providerAccountIds.has(input.providerAccountId)
+      : true;
+  }
+  if (input.providerAccountId) {
+    return input.providerAccountIds.has(input.providerAccountId);
+  }
+  return input.appId === 'default';
 }
 
 function isInternalAppControlProviderAccount(

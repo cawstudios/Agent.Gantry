@@ -2,6 +2,7 @@ import {
   installGlobalErrorHandlers,
   logger,
 } from '../infrastructure/logging/logger.js';
+import { createHash } from 'node:crypto';
 import { createChannelWiring } from './bootstrap/channel-wiring.js';
 import { createRuntimeBrainChannelHarvestTap } from '../brain/brain-runtime.js';
 import { getDefaultRuntimeApp } from './bootstrap/runtime-app.js';
@@ -56,6 +57,8 @@ import { getOldestWaitingLiveAdmissionSeconds } from './bootstrap/runtime-servic
 import type { HostnameLookup } from '../domain/network/public-address-policy.js';
 import { defaultHostnameLookup } from '../infrastructure/network/hostname-lookup.js';
 import { createRepositoryRuntimeSecretProvider } from '../adapters/credentials/repository-runtime-secret-provider.js';
+import { ApplicationError } from '../application/common/application-error.js';
+import { canonicalConversationThreadId } from '../domain/conversation/conversation.js';
 
 export { escapeXml, formatMessages } from '../messaging/router.js';
 export {
@@ -72,6 +75,8 @@ export async function startGantryRuntime(
   options: StartGantryRuntimeOptions = {},
 ): Promise<void> {
   const mcpHostnameLookup = options.mcpHostnameLookup ?? defaultHostnameLookup;
+  const runtimeAppId = (process.env.GANTRY_APP_ID?.trim() ||
+    'default') as AppId;
 
   // Resolve the deployment-owned process role before preflight. Fleet workers
   // may start from an empty runtime home and must fetch settings_revisions from
@@ -91,9 +96,58 @@ export async function startGantryRuntime(
     publishRuntimeEvent: async (event) => {
       await getRuntimeEventExchange().publish(event);
     },
+    activateTurnResponseRoute: async (route) => {
+      await getRuntimeControlRepository().upsertAppResponseRoute(route);
+    },
   });
   const channelWiring = createChannelWiring(app, {
+    appId: runtimeAppId,
     brainHarvestTap: createRuntimeBrainChannelHarvestTap(),
+    ensureEventOnlyConversation: async (input) => {
+      const conversations = getRuntimeStorage().repositories.conversations;
+      const existing = await conversations.getConversation(
+        input.conversationId as never,
+      );
+      const conversation = {
+        id: input.conversationId as never,
+        appId: input.appId,
+        providerAccountId: input.providerAccountId as never,
+        externalRef: {
+          ...(existing?.externalRef ?? {}),
+          ...(input.providerExternalRef ?? {}),
+          kind: 'conversation',
+          value: existing?.externalRef?.value ?? input.externalConversationId,
+        } as never,
+        kind: existing?.kind ?? 'channel',
+        title: existing?.title ?? input.externalConversationId,
+        status: 'active',
+        createdAt: existing?.createdAt ?? (input.timestamp as never),
+        updatedAt: input.timestamp as never,
+      } as const;
+      await conversations.saveConversation(conversation);
+      const threadId = canonicalConversationThreadId({
+        conversation,
+        threadId: input.threadId,
+      });
+      if (threadId && input.threadId) {
+        const existingThread = await conversations.getThread(threadId);
+        await conversations.saveThread({
+          id: threadId,
+          appId: input.appId,
+          conversationId: conversation.id,
+          externalRef:
+            existingThread?.externalRef ??
+            ({
+              kind: 'conversation_thread',
+              value: input.threadId,
+            } as never),
+          title: existingThread?.title ?? input.threadId,
+          status: 'active',
+          createdAt: existingThread?.createdAt ?? (input.timestamp as never),
+          updatedAt: input.timestamp as never,
+        });
+      }
+    },
     publishRuntimeEvent: async (event) => {
       await getRuntimeEventExchange().publish(event);
     },
@@ -122,6 +176,7 @@ export async function startGantryRuntime(
   });
 
   let { runtimeSettings } = await runStartup(app, {
+    appId: runtimeAppId,
     settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
     validateSettingsImportPreflight: options.skipPreflight
       ? () => ({ ok: true })
@@ -130,7 +185,7 @@ export async function startGantryRuntime(
   const storage = getRuntimeStorage();
   channelWiring.setRuntimeSecrets(
     createRepositoryRuntimeSecretProvider({
-      appId: 'default' as AppId,
+      appId: runtimeAppId,
       repository: storage.repositories.capabilitySecrets,
     }),
   );
@@ -145,7 +200,7 @@ export async function startGantryRuntime(
   let fleetSettingsLoaded = true;
   if (isFleet) {
     const prepared = await prepareFleetSettings({
-      appId: 'default' as AppId,
+      appId: runtimeAppId,
       runtimeHome: GANTRY_HOME,
       app,
     });
@@ -173,7 +228,7 @@ export async function startGantryRuntime(
         app,
         ops: storage.ops,
         repositories: storage.repositories,
-        appId: 'default' as AppId,
+        appId: runtimeAppId,
         settingsRevisions: storage.repositories.settingsRevisions,
         settingsRevisionPool: storage.service.pool,
       });
@@ -342,7 +397,7 @@ export async function startGantryRuntime(
     if (isFleet) {
       fleetSubsystems = await startFleetSubsystems({
         app,
-        appId: 'default' as AppId,
+        appId: runtimeAppId,
         runtimeHome: GANTRY_HOME,
         pool: storage.service.pool,
         bakeExecution: roleCaps.bakeExecution,
@@ -388,6 +443,7 @@ export async function startGantryRuntime(
       isSchedulerReady,
       oldestWaitingLiveAdmissionSeconds: getOldestWaitingLiveAdmissionSeconds,
       liveCapacityLimit: () => app.queue.getPolicy().maxMessageRuns,
+      getChannelTransportHealth: channelWiring.getChannelTransportHealth,
       sendConversationIngressProjection: async (input) => {
         await channelWiring.sendMessage(input.conversationJid, input.text, {
           durability: 'required',
@@ -400,6 +456,69 @@ export async function startGantryRuntime(
             : { providerAccountId: input.providerAccountId },
         });
       },
+      sendConversationMessage: async (input) => {
+        const conversations = getRuntimeStorage().repositories.conversations;
+        const conversation = await conversations.getConversation(
+          input.conversationId as never,
+        );
+        const threadId = conversation
+          ? canonicalConversationThreadId({
+              conversation,
+              threadId: input.threadId,
+            })
+          : undefined;
+        const destination =
+          await getRuntimeStorage().repositories.outboundDeliveries.resolveDeliveryDestination(
+            {
+              appId: input.appId as never,
+              conversationId: input.conversationId as never,
+              ...(threadId ? { threadId } : {}),
+            },
+          );
+        if (!destination) {
+          throw new ApplicationError(
+            'NOT_FOUND',
+            'Conversation delivery destination is not registered.',
+          );
+        }
+        const messageId = `outbound:api:${createHash('sha256')
+          .update(`${input.appId}\n${input.idempotencyKey}`, 'utf8')
+          .digest('hex')}`;
+        const delivery = await channelWiring.sendMessageWithReceipt(
+          destination.conversationJid,
+          input.text,
+          {
+            durability: 'required',
+            throwOnMissing: true,
+            sourceMessageId: messageId,
+            messageOptions: {
+              providerAccountId: destination.providerAccountId,
+              ...(destination.providerData
+                ? { providerData: destination.providerData }
+                : {}),
+              ...(input.adaptiveCard
+                ? { adaptiveCard: input.adaptiveCard }
+                : {}),
+              ...(destination.threadId
+                ? { threadId: destination.threadId }
+                : {}),
+            },
+          },
+        );
+        return {
+          messageId,
+          ...(delivery?.externalMessageId
+            ? { providerMessageId: delivery.externalMessageId }
+            : {}),
+        };
+      },
+      handleProviderHttpIngress: (providerId, request, response, body) =>
+        channelWiring.handleProviderHttpIngress(
+          providerId,
+          request,
+          response,
+          body,
+        ),
       addMessageReaction: (jid, messageRef, emoji, options) =>
         channelWiring.addReaction(jid, messageRef, emoji, options),
     });

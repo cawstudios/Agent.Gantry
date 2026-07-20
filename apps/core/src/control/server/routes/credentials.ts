@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import { CapabilitySecretService } from '../../../application/capability-secrets/capability-secret-service.js';
 import { ModelCredentialService } from '../../../application/model-credentials/model-credential-service.js';
 import { getRuntimeStorage } from '../../../adapters/storage/postgres/runtime-store.js';
 import { isCredentialSecretCryptoError } from '../../../adapters/storage/postgres/repositories/credential-secret-crypto.js';
@@ -26,12 +27,23 @@ function modelCredentialService(): ModelCredentialService {
   );
 }
 
+function capabilityCredentialService(): CapabilitySecretService {
+  const storage = getRuntimeStorage();
+  return new CapabilitySecretService(
+    storage.repositories.capabilitySecrets,
+    (event) => storage.runtimeEvents.publish(event),
+  );
+}
+
 export async function handleCredentialRoutes(
   req: IncomingMessage,
   res: ServerResponse,
   ctx: ControlRouteContext,
   pathname: string,
 ): Promise<boolean> {
+  if (pathname.startsWith('/v1/credentials/capabilities/')) {
+    return handleCapabilityCredentialRoute(req, res, ctx, pathname);
+  }
   if (
     pathname !== '/v1/credentials/models' &&
     !pathname.startsWith('/v1/credentials/models/')
@@ -253,6 +265,105 @@ export async function handleCredentialRoutes(
     return true;
   }
 
+  return true;
+}
+
+async function handleCapabilityCredentialRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: ControlRouteContext,
+  pathname: string,
+): Promise<boolean> {
+  const parts = pathname.split('/').filter(Boolean);
+  if (
+    parts.length !== 4 ||
+    parts[0] !== 'v1' ||
+    parts[1] !== 'credentials' ||
+    parts[2] !== 'capabilities'
+  ) {
+    sendError(res, 404, 'NOT_FOUND', 'Capability credential route not found.');
+    return true;
+  }
+  if (!['GET', 'PUT', 'DELETE'].includes(req.method ?? '')) {
+    res.setHeader('Allow', 'GET, PUT, DELETE');
+    sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
+    return true;
+  }
+  const auth = authorizeControlRequest(req, res, ctx.keys, [
+    req.method === 'GET' ? 'credentials:read' : 'credentials:admin',
+  ]);
+  if (!auth) return true;
+  const appId = auth.appId as AppId;
+  let name: string;
+  try {
+    name = decodeURIComponent(parts[3] ?? '');
+  } catch {
+    sendError(res, 400, 'INVALID_REQUEST', 'Invalid credential name.');
+    return true;
+  }
+  const service = capabilityCredentialService();
+  try {
+    if (req.method === 'GET') {
+      sendJson(res, 200, {
+        credential: await service.inspect({ appId, name }),
+      });
+      return true;
+    }
+    if (req.method === 'DELETE') {
+      await service.unset({ appId, name, actor: `control-api:${auth.kid}` });
+      sendJson(res, 200, {
+        credential: await service.inspect({ appId, name }),
+      });
+      return true;
+    }
+    const rawBody = await readCredentialJson(req, res);
+    if (rawBody === undefined) return true;
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Request body must be JSON.');
+      return true;
+    }
+    const body = rawBody as Record<string, unknown>;
+    const unknown = unknownKeys(body, ['value', 'allowedCapabilityIds']);
+    if (unknown.length > 0) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        `Unsupported request field(s): ${unknown.join(', ')}.`,
+      );
+      return true;
+    }
+    const allowedCapabilityIds = body.allowedCapabilityIds;
+    if (
+      typeof body.value !== 'string' ||
+      !body.value ||
+      body.value.length > 65_536 ||
+      (allowedCapabilityIds !== undefined &&
+        (!Array.isArray(allowedCapabilityIds) ||
+          allowedCapabilityIds.length > 100 ||
+          allowedCapabilityIds.some((value) => typeof value !== 'string')))
+    ) {
+      sendError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'value and optional string[] allowedCapabilityIds are required.',
+      );
+      return true;
+    }
+    await service.set({
+      appId,
+      name,
+      value: body.value,
+      actor: `control-api:${auth.kid}`,
+      ...(allowedCapabilityIds
+        ? { allowedCapabilityIds: allowedCapabilityIds as string[] }
+        : {}),
+    });
+    sendJson(res, 200, { credential: await service.inspect({ appId, name }) });
+  } catch (error) {
+    sendCredentialMutationError(res, error);
+  }
   return true;
 }
 

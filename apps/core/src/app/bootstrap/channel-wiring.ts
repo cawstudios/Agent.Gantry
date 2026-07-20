@@ -86,6 +86,7 @@ import {
   type BoundProviderAccountChannel,
 } from '../../channels/provider-account-channel-connect.js';
 import * as routeProviderAccount from './channel-wiring-route-provider-account.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 const PROVIDER_INBOUND_LEASE_PREFIX = 'runtime:provider-inbound';
 type AccountOpts = { providerAccountId?: string };
 export function createChannelWiring(
@@ -264,6 +265,46 @@ export function createChannelWiring(
   }
 
   const hasConnectedChannels = (): boolean => connectedChannels.length > 0;
+  function getChannelTransportHealth() {
+    return resolved.providerIds
+      .filter((provider) => !provider.internal)
+      .map((provider) => {
+        const enabled = Boolean(
+          currentRuntimeSettings && provider.isEnabled(currentRuntimeSettings),
+        );
+        const configuredAccountCount = enabled
+          ? Object.values(
+              currentRuntimeSettings?.providerAccounts ?? {},
+            ).filter(
+              (account) =>
+                account.provider === provider.id &&
+                account.status !== 'disabled',
+            ).length
+          : 0;
+        const connected = connectedChannels.filter(
+          (candidate) =>
+            candidate.providerId === provider.id &&
+            candidate.channel.isConnected(),
+        );
+        const authenticatedConversationRegistrationCount = connected.reduce(
+          (count, candidate) =>
+            count +
+            (candidate.channel.getOperationalSnapshot?.()
+              .authenticatedConversationRegistrationCount ?? 0),
+          0,
+        );
+        return {
+          providerId: provider.id,
+          configured: enabled && configuredAccountCount > 0,
+          connected: connected.length > 0,
+          configuredAccountCount,
+          connectedAccountCount: connected.length,
+          authenticatedConversationRegistrationCount,
+          authenticatedConversationRegistrationAvailable:
+            authenticatedConversationRegistrationCount > 0,
+        };
+      });
+  }
   function describeDestinationJid(jid: string) {
     const provider = providerForJid(jid);
     return {
@@ -276,6 +317,24 @@ export function createChannelWiring(
 
   const hasChannel = (jid: string, options?: { providerAccountId?: string }) =>
     findBoundChannel(jid, options?.providerAccountId) !== undefined;
+  async function handleProviderHttpIngress(
+    providerId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: Record<string, unknown>,
+  ): Promise<boolean> {
+    const bound = connectedChannels.find(
+      (candidate) =>
+        candidate.providerId === providerId &&
+        candidate.interactionCallbacks &&
+        'handleHttpIngress' in candidate.channel &&
+        typeof candidate.channel.handleHttpIngress === 'function',
+    );
+    const handleHttpIngress = bound?.channel.handleHttpIngress;
+    if (!handleHttpIngress) return false;
+    await handleHttpIngress.call(bound.channel, request, response, body);
+    return true;
+  }
   function supportsStreaming(
     jid: string,
     options?: { providerAccountId?: string },
@@ -299,10 +358,26 @@ export function createChannelWiring(
     options: {
       durability: 'required' | 'best_effort';
       throwOnMissing?: boolean;
+      sourceMessageId?: string;
       messageOptions?: MessageSendOptions;
     },
   ): Promise<void> {
     await sendProviderMessageInternal(jid, rawText, {
+      ...options,
+      persistence: 'message_row_projection',
+    });
+  }
+  async function sendMessageWithReceipt(
+    jid: string,
+    rawText: string,
+    options: {
+      durability: 'required' | 'best_effort';
+      throwOnMissing?: boolean;
+      sourceMessageId?: string;
+      messageOptions?: MessageSendOptions;
+    },
+  ): Promise<MessageDeliveryResult | undefined> {
+    return sendProviderMessageInternal(jid, rawText, {
       ...options,
       persistence: 'message_row_projection',
     });
@@ -313,6 +388,7 @@ export function createChannelWiring(
     options: {
       permit: RecoveryDispatchPermit;
       throwOnMissing?: boolean;
+      sourceMessageId?: string;
       messageOptions?: MessageSendOptions;
     },
   ): Promise<MessageDeliveryResult | undefined> {
@@ -324,6 +400,9 @@ export function createChannelWiring(
     return sendProviderMessageInternal(jid, rawText, {
       durability: 'best_effort',
       ...options,
+      sourceMessageId: options.permit.sourceMessageId,
+      attemptCount: options.permit.attemptCount,
+      terminalFailure: options.permit.terminalFailure,
       persistence: 'none',
     });
   }
@@ -333,6 +412,9 @@ export function createChannelWiring(
     options: {
       durability: 'required' | 'best_effort';
       throwOnMissing?: boolean;
+      sourceMessageId?: string;
+      attemptCount?: number;
+      terminalFailure?: boolean;
       messageOptions?: MessageSendOptions;
       persistence: 'message_row_projection' | 'none';
     },
@@ -360,6 +442,8 @@ export function createChannelWiring(
           (bound) => bound.channel === channel && bound.channel.ownsJid(jid),
         )?.providerAccountId,
       appId: resolved.appId,
+      messageId: options.sourceMessageId,
+      attemptCount: options.attemptCount,
       publishRuntimeEvent: resolved.publishRuntimeEvent,
       logger: resolved.logger,
     });
@@ -390,6 +474,9 @@ export function createChannelWiring(
           sourceMessageId: messageId,
           provider,
           canonicalText: formatted,
+          providerPayload: options.messageOptions?.adaptiveCard
+            ? { adaptiveCard: options.messageOptions.adaptiveCard }
+            : undefined,
         });
       } catch (err) {
         throw new Error(
@@ -398,6 +485,8 @@ export function createChannelWiring(
         );
       }
     }
+
+    if (durableAttempt?.skipProviderSend) return;
 
     let outboundOps = (() => {
       if (options.persistence !== 'message_row_projection') return undefined;
@@ -524,6 +613,9 @@ export function createChannelWiring(
       await publishConversationOutboundEvent({
         deliveryStatus: partial ? 'partially_sent' : 'failed',
         error: sanitizeDeliveryError(err, provider),
+        terminal: partial
+          ? sanitizedRetryTail === undefined
+          : options.terminalFailure === true,
       });
       throw thrownError;
     }
@@ -717,10 +809,13 @@ export function createChannelWiring(
     describeDestinationJid,
     connectEnabledChannels,
     hasConnectedChannels,
+    getChannelTransportHealth,
     hasChannel,
+    handleProviderHttpIngress,
     supportsStreaming,
     supportsProgress,
     sendMessage,
+    sendMessageWithReceipt,
     sendProviderMessage,
     createRecoveryDispatchPermit,
     setRetryTailRecoveryEnqueue,

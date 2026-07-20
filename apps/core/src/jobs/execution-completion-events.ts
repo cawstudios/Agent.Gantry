@@ -10,6 +10,7 @@ export async function publishSchedulerRunCompletion(input: {
   notified: boolean;
   startNotified: boolean;
   summary: string;
+  result?: string | null;
   nextRun: string | null;
   boundTriggerId?: string;
   eventAppSession?: SchedulerEventAppSession;
@@ -48,6 +49,7 @@ export async function publishSchedulerRunCompletion(input: {
         deliveryState: input.notified ? 'sent' : 'not_sent',
         startNotificationState: input.startNotified ? 'sent' : 'not_sent',
         summary: input.summary,
+        ...(input.result ? { result: input.result } : {}),
         nextRun: input.nextRun,
       },
       actor: 'scheduler',

@@ -96,6 +96,7 @@ export interface AgentInput {
   runtime?: AgentRuntime;
   deepAgentSkills?: DeepAgentSkillProjection;
   responseSchema?: Record<string, unknown>;
+  callerResolvedTools?: import('../domain/types.js').CallerResolvedToolsConfig;
 }
 
 export interface AgentOutput {
@@ -128,13 +129,16 @@ export interface AgentOutputProviderSession {
 export interface AgentOutputRuntimeEvent {
   appId?: string;
   agentId?: string;
+  sessionId?: string;
   runId?: string;
   jobId?: string;
   conversationId?: string;
   threadId?: string;
   eventType: string;
   actor?: string;
+  correlationId?: string | null;
   responseMode?: 'sse' | 'webhook' | 'both' | 'none';
+  webhookId?: string | null;
   payload: unknown;
 }
 

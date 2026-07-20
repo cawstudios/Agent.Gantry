@@ -13,6 +13,8 @@ const ALLOWED_RAW_SQL_FILES = new Set([
   'apps/core/src/adapters/storage/postgres/repositories/worker-coordination-lease.postgres.ts',
   // pg_advisory_xact_lock makes async task admission atomic across workers.
   'apps/core/src/adapters/storage/postgres/repositories/async-task-repository.postgres.ts',
+  // pg_advisory_xact_lock serializes SDK-session capacity reservations.
+  'apps/core/src/adapters/storage/postgres/repositories/live-admission-work-item-repository.postgres.ts',
   // LISTEN/NOTIFY is wakeup-only; durable rows remain authoritative.
   'apps/core/src/adapters/storage/postgres/live-admission-notify.postgres.ts',
   'apps/core/src/adapters/storage/postgres/runtime-event-notifier.postgres.ts',
@@ -42,7 +44,10 @@ describe('Postgres raw SQL allowlist', () => {
     const violations: string[] = [];
     for (const scanRoot of SCAN_ROOTS) {
       for (const file of listSourceFiles(path.join(ROOT, scanRoot))) {
-        const relativePath = path.relative(ROOT, file);
+        const relativePath = path
+          .relative(ROOT, file)
+          .split(path.sep)
+          .join('/');
         const text = fs.readFileSync(file, 'utf8');
         const matches = [...text.matchAll(RAW_SQL_PATTERN)];
         if (matches.length === 0 || ALLOWED_RAW_SQL_FILES.has(relativePath)) {

@@ -49,6 +49,10 @@ import {
 } from './job-capability-requirements.js';
 import { CapabilitySecretService } from '../capability-secrets/capability-secret-service.js';
 import {
+  invalidWorkspaceConfigBlocker,
+  pinnedSkillBlocker,
+} from './job-readiness-blockers.js';
+import {
   formatMissingGantrySecretsMessage,
   humanizeTechnicalIdentifier,
 } from '../../shared/user-visible-messages.js';
@@ -83,6 +87,7 @@ export interface JobReadinessInput extends JobReadinessDeps {
     | 'execution_context'
     | 'notification_routes'
     | 'setup_state'
+    | 'agent_task'
   >;
   appId?: string;
   agentId?: string;
@@ -108,6 +113,13 @@ export async function evaluateJobReadiness(
       previous: input.job.setup_state,
     });
   }
+  const requiredSkillBlocker = await pinnedSkillBlocker({
+    job: input.job,
+    appId,
+    agentId,
+    repository: input.skillRepository,
+  });
+  if (requiredSkillBlocker) blockers.push(requiredSkillBlocker);
   let splitRequirements;
   try {
     splitRequirements = splitAccessRequirements(input.job.access_requirements);
@@ -262,37 +274,7 @@ export async function evaluateJobReadiness(
       setupState.state === 'ready' ? null : SETUP_REQUIRED_PAUSE_REASON,
   };
 }
-function invalidWorkspaceConfigBlocker(
-  job: JobReadinessInput['job'],
-): JobSetupBlocker | null {
-  const workspaceKey =
-    typeof job.workspace_key === 'string' ? job.workspace_key.trim() : '';
-  if (!workspaceKey) {
-    return brokerUnreachableBlocker(
-      'Job workspace is not configured. The job cannot resolve its runtime workspace.',
-    );
-  }
-  const executionContext = job.execution_context as
-    | { workspaceKey?: unknown; conversationJid?: unknown }
-    | null
-    | undefined;
-  if (executionContext) {
-    const ctxWorkspaceKey =
-      typeof executionContext.workspaceKey === 'string'
-        ? executionContext.workspaceKey.trim()
-        : '';
-    const ctxConversationJid =
-      typeof executionContext.conversationJid === 'string'
-        ? executionContext.conversationJid.trim()
-        : '';
-    if (!ctxWorkspaceKey || !ctxConversationJid) {
-      return brokerUnreachableBlocker(
-        'Job execution context is invalid. It is missing a workspace key or conversation install.',
-      );
-    }
-  }
-  return null;
-}
+
 function brokerUnreachableBlocker(message: string): JobSetupBlocker {
   return {
     state: 'broker_unreachable',

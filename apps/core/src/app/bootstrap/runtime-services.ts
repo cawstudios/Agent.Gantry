@@ -1,5 +1,6 @@
 import {
   DEFAULT_TRIGGER,
+  MAX_MESSAGES_PER_PROMPT,
   MESSAGE_FETCH_PAGE_SIZE,
   TIMEZONE,
   getCredentialBrokerRuntimeConfig,
@@ -375,7 +376,9 @@ export async function startRuntimeServices(
   const startScheduler = () =>
     resolved.startSchedulerLoop({
       processRole,
+      runtimeAppId: String(channelWiring.getRuntimeAppId()),
       conversationRoutes: () => app.getConversationRoutes(),
+      projectConversationRoute: app.projectConversationRoute,
       queue: app.queue,
       onProcess: (groupJid, proc, runHandle, workspaceFolder, stopAliasJids) =>
         app.queue.registerProcess(
@@ -500,7 +503,6 @@ export async function startRuntimeServices(
           liveTurnAuthority.registerLocalRunner(queueJid, hooks, routing)
       : null,
   );
-  let handleActiveControlCommand: ActiveControlCommandHandler | undefined;
   app.queue.setProcessMessagesFn(
     buildLiveAdmissionProcessor({
       liveTurnAuthority,
@@ -508,6 +510,7 @@ export async function startRuntimeServices(
       opsRepository: resolved.opsRepository,
       executionAdapter: resolved.executionAdapter ?? app.executionAdapter,
       messageFetchPageSize: MESSAGE_FETCH_PAGE_SIZE,
+      maxMessagesPerPrompt: MAX_MESSAGES_PER_PROMPT,
       timezone: TIMEZONE,
       enqueueMessageCheck: app.queue.enqueueMessageCheck.bind(app.queue),
       warn: (context, message) => resolved.logger.warn(context, message),
@@ -599,7 +602,7 @@ export async function startRuntimeServices(
     },
   };
   registerRuntimeLiveStopMessageAction(channelWiring, app, liveMessageQueue);
-  handleActiveControlCommand = async ({
+  const handleActiveControlCommand: ActiveControlCommandHandler = async ({
     chatJid,
     queueJid,
     group,
@@ -695,6 +698,16 @@ export async function startRuntimeServices(
     const liveSendProfile: OutboundDeliveryProfile = {
       profileId: LIVE_SEND_PROFILE_ID,
       plan: (input) => {
+        const providerPayload =
+          input.metadata && typeof input.metadata === 'object'
+            ? input.metadata.providerPayload
+            : undefined;
+        if (providerPayload) {
+          return {
+            parts: [{ canonicalText: input.text, providerPayload }],
+            canonicalFinalText: input.text,
+          };
+        }
         const segments = splitLiveSendProfileText(input.text);
         return {
           parts: segments.map((segment) => ({
@@ -761,6 +774,7 @@ export async function startRuntimeServices(
           sourceProvider: input.provider,
           destinationJid: input.chatJid,
           destinationThreadId: input.threadId,
+          providerPayload: input.providerPayload,
         },
         initialClaim: {
           claimToken: `claim:live-send:${input.sourceMessageId}`,
@@ -768,7 +782,15 @@ export async function startRuntimeServices(
         },
       });
       const claimedItems = started.claimedItems;
-      if (!started.created || !claimedItems || claimedItems.length === 0) {
+      if (!started.created) {
+        return {
+          skipProviderSend: true,
+          settleSent: async () => undefined,
+          settleFailed: async () => undefined,
+          settlePartiallyDelivered: async () => undefined,
+        };
+      }
+      if (!claimedItems || claimedItems.length === 0) {
         throw new Error(
           `Durable outbound immediate send claim was not created for ${input.sourceMessageId}.`,
         );
@@ -929,11 +951,24 @@ export async function startRuntimeServices(
               'Outbound delivery channel for canonical destination is unavailable.',
           } as const;
         }
+        const sourceMessageId = sourceMessageIdFromDeliveryIdempotencyKey(
+          claimed.delivery.idempotencyKey,
+        );
         const recoveryPermit = channelWiring.createRecoveryDispatchPermit({
           deliveryId: claimed.delivery.id,
           itemId: claimed.item.id,
           destinationJid,
           canonicalText: claimed.item.canonicalText,
+          ...(sourceMessageId ? { sourceMessageId } : {}),
+          ...(Number.isSafeInteger(claimed.item.attemptCount) &&
+          claimed.item.attemptCount > 0
+            ? {
+                attemptCount: claimed.item.attemptCount,
+                ...(claimed.item.attemptCount >= 4
+                  ? { terminalFailure: true }
+                  : {}),
+              }
+            : {}),
           ...(destinationThreadId ? { threadId: destinationThreadId } : {}),
         });
         try {
@@ -945,6 +980,17 @@ export async function startRuntimeServices(
               throwOnMissing: true,
               messageOptions: {
                 ...destinationAccount,
+                ...(destination.providerData
+                  ? { providerData: destination.providerData }
+                  : {}),
+                ...(payload?.adaptiveCard
+                  ? {
+                      adaptiveCard: payload.adaptiveCard as Record<
+                        string,
+                        unknown
+                      >,
+                    }
+                  : {}),
                 ...(destinationThreadId
                   ? { threadId: destinationThreadId }
                   : {}),
@@ -1066,4 +1112,27 @@ export async function startRuntimeServices(
     info: (obj, msg) => resolved.logger.info(obj as never, msg as never),
     warn: (context, message) => resolved.logger.warn(context, message),
   });
+}
+
+function sourceMessageIdFromDeliveryIdempotencyKey(
+  idempotencyKey: string | undefined,
+): string | undefined {
+  if (!idempotencyKey) return undefined;
+  const livePrefix = 'live-send:';
+  if (idempotencyKey.startsWith(livePrefix)) {
+    return idempotencyKey.slice(livePrefix.length) || undefined;
+  }
+  const retryPrefix = 'retry-tail:';
+  if (!idempotencyKey.startsWith(retryPrefix)) return undefined;
+  const fingerprintSeparator = idempotencyKey.length - 25;
+  if (
+    fingerprintSeparator <= retryPrefix.length ||
+    idempotencyKey[fingerprintSeparator] !== ':' ||
+    !/^[0-9a-f]{24}$/.test(idempotencyKey.slice(fingerprintSeparator + 1))
+  ) {
+    return undefined;
+  }
+  return (
+    idempotencyKey.slice(retryPrefix.length, fingerprintSeparator) || undefined
+  );
 }

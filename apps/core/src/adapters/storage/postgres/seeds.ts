@@ -11,6 +11,7 @@ import {
   GANTRY_FACADE_INPUT_SCHEMAS,
   type GantryFacadeExactToolName,
 } from '../../../shared/agent-tool-references.js';
+import { parseControlApiKeys } from '../../../shared/control-api-keys.js';
 
 export const DEFAULT_APP_ID = 'default';
 export const DEFAULT_AGENT_ID = 'agent:main_agent';
@@ -26,8 +27,21 @@ export const DEFAULT_SKILL_CATALOG = [
   { id: 'skill:browser', name: 'browser' },
 ] as const;
 
+export function configuredControlAppIds(rawJson?: string): string[] {
+  return [
+    ...new Set(
+      parseControlApiKeys({ rawJson })
+        .map(({ appId }) => appId)
+        .filter((appId) => appId !== DEFAULT_APP_ID),
+    ),
+  ];
+}
+
 export async function seedDefaultRuntimeData(
   db: NodePgDatabase<typeof pgSchema>,
+  controlAppIds = configuredControlAppIds(
+    process.env.GANTRY_CONTROL_API_KEYS_JSON,
+  ),
 ): Promise<void> {
   await db.transaction(async (tx) => {
     await tx
@@ -45,6 +59,17 @@ export async function seedDefaultRuntimeData(
           updatedAt: sql`now()`,
         },
       });
+
+    for (const appId of controlAppIds) {
+      await tx
+        .insert(pgSchema.appsPostgres)
+        .values({
+          id: appId,
+          slug: appId,
+          name: appId,
+        })
+        .onConflictDoNothing({ target: pgSchema.appsPostgres.id });
+    }
 
     await tx
       .insert(pgSchema.llmProfilesPostgres)

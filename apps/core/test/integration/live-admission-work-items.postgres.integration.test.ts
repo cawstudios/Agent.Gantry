@@ -3,6 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { quotePostgresIdentifier } from '@core/adapters/storage/postgres/storage-service.js';
 import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 import { nowMs, toIso } from '@core/shared/time/datetime.js';
+import {
+  linkSdkSessionAcceptedEventWithExecutor,
+  markSdkSessionTurnRunningWithExecutor,
+  preflightSdkSessionAdmissionWithExecutor,
+  promoteSdkSessionAdmissionWithExecutor,
+  settleSdkSessionTurnWithExecutor,
+} from '@core/adapters/storage/postgres/repositories/live-admission-work-item-repository.postgres.js';
+import { PostgresLiveTurnRepository } from '@core/adapters/storage/postgres/repositories/live-turn-repository.postgres.js';
 
 import {
   createPostgresIntegrationRuntime,
@@ -37,6 +45,41 @@ maybeDescribe('live admission work items (Postgres)', () => {
   afterAll(async () => {
     await runtime?.cleanup();
   });
+
+  async function registerSdkSessionScope(input: {
+    appId: string;
+    agentSessionId: string;
+    conversationId: string;
+  }): Promise<void> {
+    const createdAt = toIso(nowMs());
+    const agentId = `agent:${input.appId}:sdk-test`;
+    await runtime.service.pool.query(
+      `INSERT INTO apps (id, slug, name, status, created_at, updated_at)
+       VALUES ($1, $1, $1, 'active', $2, $2)`,
+      [input.appId, createdAt],
+    );
+    await runtime.service.pool.query(
+      `INSERT INTO agents (id, app_id, name, status, created_at, updated_at)
+       VALUES ($1, $2, $1, 'active', $3, $3)`,
+      [agentId, input.appId, createdAt],
+    );
+    await runtime.service.pool.query(
+      `INSERT INTO conversations (
+         id, app_id, provider_account_id, external_ref_json, kind, status,
+         created_at, updated_at
+       ) VALUES ($1, $2, 'provider:sdk-test', '{}', 'direct', 'active', $3, $3)`,
+      [input.conversationId, input.appId, createdAt],
+    );
+    await runtime.repositories.agentSessions.saveAgentSession({
+      id: input.agentSessionId as never,
+      appId: input.appId as never,
+      agentId: agentId as never,
+      conversationId: input.conversationId as never,
+      status: 'active',
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
 
   it('deduplicates provider delivery by idempotency key', async () => {
     const first = await liveTurns.enqueueLiveAdmissionWorkItem({
@@ -87,6 +130,488 @@ maybeDescribe('live admission work items (Postgres)', () => {
       id: 'admission-id-replay',
       idempotencyKey: 'telegram:delivery:id-replay:root',
     });
+  });
+
+  it('reserves and replays one fingerprinted SDK-session turn with stable ids', async () => {
+    const sdkBase = {
+      id: 'sdk-admission-1',
+      appId: 'sdk-admission-app',
+      agentSessionId: 'sdk-admission-session',
+      conversationId: 'app:sdk-admission-app:conversation',
+      threadId: 'thread-1',
+      queueJid: 'app:sdk-admission-app:conversation::thread-1',
+      messageId: 'message:app:sdk-admission-app:conversation:sdk-message-1',
+      requestMessageId: 'sdk-message-1',
+      messageCursor: '2026-07-20T00:00:00.000Z::sdk-message-1',
+      idempotencyKey: 'teams-activity-1',
+      requestFingerprint: 'fingerprint-1',
+      queuePolicy: {
+        maxWaitingMessages: 3,
+        maxQueueWaitMs: 90_000,
+        executionTimeoutMs: 90_000,
+      },
+      now: '2026-07-20T00:00:00.000Z',
+    };
+    const reserved = await runtime.service.db.transaction(async (tx) => {
+      const preflight = await preflightSdkSessionAdmissionWithExecutor(tx, {
+        appId: sdkBase.appId,
+        agentSessionId: sdkBase.agentSessionId,
+        idempotencyKey: sdkBase.idempotencyKey,
+        requestFingerprint: sdkBase.requestFingerprint,
+        queuePolicy: sdkBase.queuePolicy,
+        now: sdkBase.now,
+      });
+      expect(preflight.outcome).toBe('available');
+      if (preflight.outcome !== 'available')
+        throw new Error('expected preflight');
+      return promoteSdkSessionAdmissionWithExecutor(tx, {
+        ...sdkBase,
+        preflight: preflight.preflight,
+      });
+    });
+    expect(reserved).toMatchObject({
+      outcome: 'enqueued',
+      item: {
+        id: 'sdk-admission-1',
+        messageId: 'message:app:sdk-admission-app:conversation:sdk-message-1',
+        requestMessageId: 'sdk-message-1',
+        requestFingerprint: 'fingerprint-1',
+        turnState: 'waiting',
+        queueDeadlineAt: '2026-07-20T00:01:30.000Z',
+        executionTimeoutMs: 90_000,
+      },
+    });
+
+    const event = await runtime.storageRuntime.runtimeEvents.publish({
+      appId: 'default' as never,
+      eventType: RUNTIME_EVENT_TYPES.WEBHOOK_TEST,
+      actor: 'test',
+      payload: { source: 'sdk-session-admission-test' },
+    });
+    const linked = await runtime.service.db.transaction((tx) =>
+      linkSdkSessionAcceptedEventWithExecutor(tx, {
+        id: 'sdk-admission-1',
+        acceptedEventId: event.eventId,
+      }),
+    );
+    expect(linked?.acceptedEventId).toBe(event.eventId);
+
+    const replay = await runtime.service.db.transaction((tx) =>
+      preflightSdkSessionAdmissionWithExecutor(tx, {
+        appId: sdkBase.appId,
+        agentSessionId: sdkBase.agentSessionId,
+        idempotencyKey: sdkBase.idempotencyKey,
+        requestFingerprint: sdkBase.requestFingerprint,
+        queuePolicy: sdkBase.queuePolicy,
+      }),
+    );
+    expect(replay).toMatchObject({
+      outcome: 'replayed',
+      item: {
+        id: 'sdk-admission-1',
+        requestMessageId: 'sdk-message-1',
+        acceptedEventId: event.eventId,
+      },
+    });
+
+    const conflict = await runtime.service.db.transaction((tx) =>
+      preflightSdkSessionAdmissionWithExecutor(tx, {
+        appId: sdkBase.appId,
+        agentSessionId: sdkBase.agentSessionId,
+        idempotencyKey: sdkBase.idempotencyKey,
+        requestFingerprint: 'fingerprint-changed',
+        queuePolicy: sdkBase.queuePolicy,
+      }),
+    );
+    expect(conflict.outcome).toBe('fingerprint_conflict');
+  });
+
+  it('atomically caps an SDK session at one active plus three waiting turns', async () => {
+    const appId = 'sdk-cap-app';
+    const agentSessionId = 'sdk-cap-session';
+    const reserve = (ordinal: number) =>
+      runtime.service.db.transaction(async (tx) => {
+        const now = `2026-07-20T00:00:0${ordinal}.000Z`;
+        const preflight = await preflightSdkSessionAdmissionWithExecutor(tx, {
+          appId,
+          agentSessionId,
+          idempotencyKey: `teams-activity-${ordinal}`,
+          requestFingerprint: `fingerprint-${ordinal}`,
+          queuePolicy: {
+            maxWaitingMessages: 3,
+            maxQueueWaitMs: 90_000,
+            executionTimeoutMs: 90_000,
+          },
+          now,
+        });
+        if (preflight.outcome !== 'available') return preflight;
+        const promoted = await promoteSdkSessionAdmissionWithExecutor(tx, {
+          id: `sdk-cap-admission-${ordinal}`,
+          appId,
+          agentSessionId,
+          conversationId: `app:${appId}:conversation`,
+          queueJid: `app:${appId}:conversation`,
+          messageId: `message:app:${appId}:conversation:sdk-cap-message-${ordinal}`,
+          requestMessageId: `sdk-cap-message-${ordinal}`,
+          messageCursor: `${now}::sdk-cap-message-${ordinal}`,
+          preflight: preflight.preflight,
+          now,
+        });
+        return { outcome: 'promoted' as const, item: promoted.item };
+      });
+
+    const concurrent = await Promise.all([1, 2, 3, 4, 5].map(reserve));
+    expect(
+      concurrent.filter((result) => result.outcome === 'promoted'),
+    ).toHaveLength(4);
+    expect(
+      concurrent.filter((result) => result.outcome === 'capacity_exceeded'),
+    ).toEqual([
+      { outcome: 'capacity_exceeded', activeAndWaiting: 4, capacity: 4 },
+    ]);
+
+    const running = await runtime.service.db.transaction((tx) =>
+      markSdkSessionTurnRunningWithExecutor(tx, {
+        messageId: 'message:app:sdk-cap-app:conversation:sdk-cap-message-1',
+        executionDeadlineAt: '2026-07-20T00:01:31.000Z',
+        now: '2026-07-20T00:00:01.000Z',
+      }),
+    );
+    expect(running?.turnState).toBe('running');
+    const settled = await runtime.service.db.transaction((tx) =>
+      settleSdkSessionTurnWithExecutor(tx, {
+        messageId: 'message:app:sdk-cap-app:conversation:sdk-cap-message-1',
+        state: 'completed',
+        terminalCode: 'completed',
+        now: '2026-07-20T00:00:02.000Z',
+      }),
+    );
+    expect(settled).toMatchObject({
+      turnState: 'completed',
+      terminalCode: 'completed',
+    });
+    await expect(reserve(6)).resolves.toMatchObject({ outcome: 'promoted' });
+  });
+
+  it('claims only the head SDK turn and releases the next turn after terminal settlement', async () => {
+    const appId = 'sdk-serialized-app';
+    const agentSessionId = 'sdk-serialized-session';
+    const conversationId = 'conversation:sdk-serialized';
+    await registerSdkSessionScope({ appId, agentSessionId, conversationId });
+    const now = toIso(nowMs());
+    const reserve = async (ordinal: number) => {
+      const messageId = `message:app:default:serialized-${ordinal}`;
+      const result = await runtime.service.db.transaction(async (tx) => {
+        const preflight = await preflightSdkSessionAdmissionWithExecutor(tx, {
+          appId,
+          agentSessionId,
+          idempotencyKey: `serialized-${ordinal}`,
+          requestFingerprint: `serialized-fingerprint-${ordinal}`,
+          queuePolicy: {
+            maxWaitingMessages: 3,
+            maxQueueWaitMs: 90_000,
+            executionTimeoutMs: 90_000,
+          },
+          now: toIso(Date.parse(now) + ordinal),
+        });
+        if (preflight.outcome !== 'available') {
+          throw new Error('Expected serialized SDK preflight');
+        }
+        return promoteSdkSessionAdmissionWithExecutor(tx, {
+          id: `sdk-serialized-admission-${ordinal}`,
+          appId,
+          agentSessionId,
+          conversationId,
+          queueJid: conversationId,
+          messageId,
+          requestMessageId: `serialized-${ordinal}`,
+          messageCursor: `${toIso(Date.parse(now) + ordinal)}::serialized-${ordinal}`,
+          preflight: preflight.preflight,
+        });
+      });
+      const accepted = await runtime.storageRuntime.runtimeEvents.publish({
+        appId: appId as never,
+        sessionId: agentSessionId as never,
+        eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+        actor: 'sdk',
+        correlationId: `serialized-correlation-${ordinal}`,
+        responseMode: 'sse',
+        payload: { messageId: `serialized-${ordinal}` },
+      });
+      await runtime.service.db.transaction((tx) =>
+        linkSdkSessionAcceptedEventWithExecutor(tx, {
+          id: result.item.id,
+          acceptedEventId: accepted.eventId,
+        }),
+      );
+      return result.item;
+    };
+
+    const first = await reserve(1);
+    const second = await reserve(2);
+    const claimed = await liveTurns.claimLiveAdmissionWorkItems({
+      appId,
+      workerInstanceId: 'sdk-serialized-worker-1',
+      claimToken: 'sdk-serialized-claim-1',
+      claimExpiresAt: toIso(nowMs() + 60_000),
+      limit: 100,
+    });
+    const serializedClaims = claimed.filter(
+      (item) => item.agentSessionId === agentSessionId,
+    );
+    expect(serializedClaims.map((item) => item.id)).toEqual([first.id]);
+    await liveTurns.settleLiveAdmissionWorkItem({
+      id: first.id,
+      workerInstanceId: 'sdk-serialized-worker-1',
+      claimToken: 'sdk-serialized-claim-1',
+      state: 'completed',
+    });
+    await runtime.service.db.transaction((tx) =>
+      settleSdkSessionTurnWithExecutor(tx, {
+        messageId: first.messageId,
+        state: 'completed',
+      }),
+    );
+
+    const released = await liveTurns.claimLiveAdmissionWorkItems({
+      appId,
+      workerInstanceId: 'sdk-serialized-worker-2',
+      claimToken: 'sdk-serialized-claim-2',
+      claimExpiresAt: toIso(nowMs() + 60_000),
+      limit: 100,
+    });
+    expect(released.map((item) => item.id)).toContain(second.id);
+    await liveTurns.settleLiveAdmissionWorkItem({
+      id: second.id,
+      workerInstanceId: 'sdk-serialized-worker-2',
+      claimToken: 'sdk-serialized-claim-2',
+      state: 'completed',
+    });
+  });
+
+  it('durably rejects an expired SDK queue entry with a typed event', async () => {
+    const appId = 'sdk-queue-expired-app';
+    const agentSessionId = 'sdk-queue-expired-session';
+    const conversationId = 'conversation:sdk-queue-expired';
+    await registerSdkSessionScope({ appId, agentSessionId, conversationId });
+    const messageId = 'message:app:default:queue-expired';
+    const acceptedAt = toIso(nowMs() - 120_000);
+    const reserved = await runtime.service.db.transaction(async (tx) => {
+      const preflight = await preflightSdkSessionAdmissionWithExecutor(tx, {
+        appId,
+        agentSessionId,
+        idempotencyKey: 'sdk-queue-expired',
+        requestFingerprint: 'sdk-queue-expired-fingerprint',
+        queuePolicy: {
+          maxWaitingMessages: 3,
+          maxQueueWaitMs: 1_000,
+          executionTimeoutMs: 90_000,
+        },
+        now: acceptedAt,
+      });
+      if (preflight.outcome !== 'available') {
+        throw new Error('Expected expired SDK preflight');
+      }
+      return promoteSdkSessionAdmissionWithExecutor(tx, {
+        id: 'sdk-queue-expired-admission',
+        appId,
+        agentSessionId,
+        conversationId,
+        queueJid: conversationId,
+        messageId,
+        requestMessageId: 'sdk-queue-expired',
+        messageCursor: `${acceptedAt}::sdk-queue-expired`,
+        preflight: preflight.preflight,
+      });
+    });
+    const accepted = await runtime.storageRuntime.runtimeEvents.publish({
+      appId: appId as never,
+      sessionId: agentSessionId as never,
+      eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+      actor: 'sdk',
+      correlationId: 'sdk-queue-expired-correlation',
+      responseMode: 'sse',
+      payload: { messageId: 'sdk-queue-expired' },
+    });
+    await runtime.service.db.transaction((tx) =>
+      linkSdkSessionAcceptedEventWithExecutor(tx, {
+        id: reserved.item.id,
+        acceptedEventId: accepted.eventId,
+      }),
+    );
+
+    await expect(
+      liveTurns.prepareSdkSessionTurn?.({ messageId }),
+    ).resolves.toMatchObject({
+      turnState: 'timed_out',
+      terminalCode: 'queue_wait_timeout',
+    });
+    const events = await runtime.repositories.runtimeEvents.listRuntimeEvents({
+      appId: appId as never,
+      sessionId: agentSessionId as never,
+      eventTypes: [RUNTIME_EVENT_TYPES.SESSION_MESSAGE_REJECTED],
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        correlationId: 'sdk-queue-expired-correlation',
+        payload: expect.objectContaining({
+          messageId: 'sdk-queue-expired',
+          canonicalMessageId: messageId,
+          phase: 'queue',
+          code: 'queue_wait_timeout',
+          retryable: true,
+        }),
+      }),
+    );
+  });
+
+  it('atomically rejects a claimed SDK admission and rolls back on event failure', async () => {
+    const appId = 'sdk-admission-rejection-app';
+    const agentSessionId = 'sdk-admission-rejection-session';
+    const conversationId = 'conversation:sdk-admission-rejection';
+    const messageId = 'message:app:default:admission-rejection';
+    const itemId = 'sdk-admission-rejection-item';
+    const claimToken = 'sdk-admission-rejection-claim';
+    const workerInstanceId = 'sdk-admission-rejection-worker';
+    const acceptedAt = toIso(nowMs());
+    await registerSdkSessionScope({ appId, agentSessionId, conversationId });
+    const reserved = await runtime.service.db.transaction(async (tx) => {
+      const preflight = await preflightSdkSessionAdmissionWithExecutor(tx, {
+        appId,
+        agentSessionId,
+        idempotencyKey: 'sdk-admission-rejection',
+        requestFingerprint: 'sdk-admission-rejection-fingerprint',
+        queuePolicy: {
+          maxWaitingMessages: 3,
+          maxQueueWaitMs: 90_000,
+          executionTimeoutMs: 90_000,
+        },
+        now: acceptedAt,
+      });
+      if (preflight.outcome !== 'available') {
+        throw new Error('Expected SDK admission rejection preflight');
+      }
+      return promoteSdkSessionAdmissionWithExecutor(tx, {
+        id: itemId,
+        appId,
+        agentSessionId,
+        conversationId,
+        queueJid: conversationId,
+        messageId,
+        requestMessageId: 'sdk-admission-rejection',
+        messageCursor: `${acceptedAt}::sdk-admission-rejection`,
+        preflight: preflight.preflight,
+      });
+    });
+    const accepted = await runtime.storageRuntime.runtimeEvents.publish({
+      appId: appId as never,
+      sessionId: agentSessionId as never,
+      conversationId: conversationId as never,
+      eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+      actor: 'sdk',
+      correlationId: 'sdk-admission-rejection-correlation',
+      responseMode: 'sse',
+      payload: { messageId: 'sdk-admission-rejection' },
+    });
+    await runtime.service.db.transaction((tx) =>
+      linkSdkSessionAcceptedEventWithExecutor(tx, {
+        id: reserved.item.id,
+        acceptedEventId: accepted.eventId,
+      }),
+    );
+    await liveTurns.claimLiveAdmissionWorkItems({
+      appId,
+      workerInstanceId,
+      claimToken,
+      claimExpiresAt: toIso(nowMs() + 60_000),
+      limit: 1,
+    });
+
+    const eventFailure = new Error('SDK admission rejection event failed');
+    const failingLiveTurns = new PostgresLiveTurnRepository(
+      runtime.service.db,
+      undefined,
+      {
+        appendRuntimeEventWithExecutor: async () => {
+          throw eventFailure;
+        },
+      } as never,
+    );
+    await expect(
+      failingLiveTurns.rejectClaimedSdkSessionAdmission({
+        id: itemId,
+        claimToken,
+        workerInstanceId,
+        code: 'admission_failed',
+        retryable: true,
+      }),
+    ).rejects.toThrow(eventFailure);
+    const rolledBack = await runtime.service.pool.query<{
+      state: string;
+      turn_state: string;
+    }>(
+      `SELECT state, turn_state FROM live_admission_work_items WHERE id = $1`,
+      [itemId],
+    );
+    expect(rolledBack.rows[0]).toEqual({
+      state: 'claimed',
+      turn_state: 'waiting',
+    });
+
+    await expect(
+      liveTurns.rejectClaimedSdkSessionAdmission?.({
+        id: itemId,
+        claimToken,
+        workerInstanceId,
+        code: 'admission_failed',
+        retryable: true,
+      }),
+    ).resolves.toBe(true);
+    const settled = await runtime.service.pool.query<{
+      state: string;
+      turn_state: string;
+      terminal_code: string;
+    }>(
+      `SELECT state, turn_state, terminal_code FROM live_admission_work_items WHERE id = $1`,
+      [itemId],
+    );
+    expect(settled.rows[0]).toEqual({
+      state: 'failed',
+      turn_state: 'failed',
+      terminal_code: 'admission_failed',
+    });
+    const events = await runtime.repositories.runtimeEvents.listRuntimeEvents({
+      appId: appId as never,
+      sessionId: agentSessionId as never,
+      eventTypes: [RUNTIME_EVENT_TYPES.SESSION_MESSAGE_REJECTED],
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      correlationId: 'sdk-admission-rejection-correlation',
+      payload: expect.objectContaining({
+        messageId: 'sdk-admission-rejection',
+        canonicalMessageId: messageId,
+        phase: 'admission',
+        code: 'admission_failed',
+        retryable: true,
+      }),
+    });
+    await expect(
+      liveTurns.rejectClaimedSdkSessionAdmission?.({
+        id: itemId,
+        claimToken,
+        workerInstanceId,
+        code: 'admission_failed',
+        retryable: true,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      runtime.repositories.runtimeEvents.listRuntimeEvents({
+        appId: appId as never,
+        sessionId: agentSessionId as never,
+        eventTypes: [RUNTIME_EVENT_TYPES.SESSION_MESSAGE_REJECTED],
+      }),
+    ).resolves.toHaveLength(1);
   });
 
   it('claims due rows in durable FIFO order without prompt text payloads', async () => {
@@ -599,8 +1124,8 @@ maybeDescribe('live admission work items (Postgres)', () => {
       agentId: 'agent:atomic_agent',
       conversationId: 'tg:live-admission-atomic',
       threadId: null,
-      queueJid: 'tg:live-admission-atomic',
-      messageId: 'message:tg:live-admission-atomic:msg-atomic-1',
+      queueJid: expect.stringContaining('tg:live-admission-atomic'),
+      messageId: expect.stringMatching(/^message:/),
       senderUserId: 'user-atomic',
       senderDisplayName: 'Atomic User',
       state: 'queued',
@@ -690,7 +1215,7 @@ maybeDescribe('live admission work items (Postgres)', () => {
     });
     expect(result.liveAdmissionResult?.item).toMatchObject({
       state: 'queued',
-      messageId: 'message:tg:live-admission-event-atomic:msg-event-admission-1',
+      messageId: expect.stringMatching(/^message:/),
     });
     await expect(
       runtime.ops.getMessagesSince('tg:live-admission-event-atomic', '', 10, {

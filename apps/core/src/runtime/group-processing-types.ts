@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'child_process';
 
 import type {
+  AppMessageResponseRoute,
   MessageSendOptions,
   ProgressUpdateOptions,
   ConversationRoute,
@@ -50,6 +51,10 @@ export type GroupProcessingRepository = RuntimeAgentSessionRepository &
 
 export type GroupProcessOptions = {
   queued?: boolean;
+  /** Optional local duration for non-SDK callers. */
+  timeoutMs?: number;
+  /** Persisted SDK deadline; every provider attempt recomputes its remaining budget. */
+  executionDeadlineAtMs?: number;
   memoryContext?: {
     userId?: string;
     source?: 'message' | 'command';
@@ -158,6 +163,9 @@ export interface GroupProcessingDeps {
   getCursor: (chatJid: string) => Promise<string> | string;
   setCursor: (chatJid: string, timestamp: string) => void;
   saveState: () => Promise<void> | void;
+  activateTurnResponseRoute?: (
+    route: AppMessageResponseRoute,
+  ) => Promise<void> | void;
   setGroupModelOverride: (
     chatJid: string,
     model: string | undefined,

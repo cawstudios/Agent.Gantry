@@ -47,7 +47,7 @@ import type {
   ControlRouteContext,
   ControlServerState,
 } from './handler-context.js';
-import { sendError } from './http.js';
+import { readJson, sendError } from './http.js';
 import { createRateLimiter } from './rate-limit.js';
 import { handleAgentRoutes } from './routes/agents.js';
 import { handleBrainRoutes } from './routes/brain.js';
@@ -63,6 +63,7 @@ import { handleMcpServerRoutes } from './routes/mcp-servers.js';
 import { handleModelRoutes } from './routes/models.js';
 import { handleOpenApiRoutes } from './routes/openapi.js';
 import { handleRunRoutes } from './routes/runs.js';
+import { handleRuntimeEventRoutes } from './routes/runtime-events.js';
 import { handleSessionRoutes } from './routes/sessions.js';
 import { handleSettingsRoutes } from './routes/settings.js';
 import { handleSkillRoutes } from './routes/skills.js';
@@ -145,6 +146,26 @@ function createControlRequestHandler(
     res.on('error', (error) => logControlStreamError(error, pathname));
 
     try {
+      if (pathname === '/channels/teams/messages' && req.method === 'POST') {
+        const body = await readJson(req, 1024 * 1024);
+        const handled = await ctx.handleProviderHttpIngress?.(
+          'teams',
+          req,
+          res,
+          body && typeof body === 'object' && !Array.isArray(body)
+            ? (body as Record<string, unknown>)
+            : {},
+        );
+        if (!handled) {
+          sendControlError(
+            res,
+            503,
+            'UNAVAILABLE',
+            'Microsoft Teams transport is not connected.',
+          );
+        }
+        return;
+      }
       // Ops profile (live-worker, job-worker) serves only operational and
       // read-only diagnostic routes; every admin/mutation route is unmounted and
       // falls through to the 404 fallback below.
@@ -173,6 +194,7 @@ function createControlRequestHandler(
       if (await handleJobRoutes(req, res, ctx, url, pathname)) return;
       if (await handleExternalIngressRoutes(req, res, ctx, pathname)) return;
       if (await handleRunRoutes(req, res, ctx, url, pathname)) return;
+      if (await handleRuntimeEventRoutes(req, res, ctx, url, pathname)) return;
       if (await handleUsageRoutes(req, res, ctx, url, pathname)) return;
       if (await handleSettingsRoutes(req, res, ctx, pathname)) return;
       if (await handleSkillRoutes(req, res, ctx, url, pathname)) return;
@@ -221,6 +243,8 @@ export function startControlServer(input: {
   app: RuntimeApp;
   getBrowserStatus?: JobManagementServiceDeps['getBrowserStatus'];
   sendConversationIngressProjection?: ControlRouteContext['sendConversationIngressProjection'];
+  sendConversationMessage?: ControlRouteContext['sendConversationMessage'];
+  handleProviderHttpIngress?: ControlRouteContext['handleProviderHttpIngress'];
   addMessageReaction?: ControlRouteContext['addMessageReaction'];
   /**
    * Which control routes to mount. `'full'` (default) mounts every route, the
@@ -241,6 +265,7 @@ export function startControlServer(input: {
   isSchedulerReady?: () => boolean;
   oldestWaitingLiveAdmissionSeconds?: () => number;
   liveCapacityLimit?: () => number;
+  getChannelTransportHealth?: ControlRouteContext['getChannelTransportHealth'];
 }): ControlServerHandle {
   configureDesiredSettingsStorageProvider(async () => {
     const storage = getRuntimeStorage();
@@ -325,6 +350,7 @@ export function startControlServer(input: {
     isSchedulerReady: input.isSchedulerReady,
     oldestWaitingLiveAdmissionSeconds: input.oldestWaitingLiveAdmissionSeconds,
     liveCapacityLimit: input.liveCapacityLimit,
+    getChannelTransportHealth: input.getChannelTransportHealth,
     socketPath,
     port,
     maxConcurrentStreams: 25,
@@ -377,6 +403,8 @@ export function startControlServer(input: {
       });
     },
     sendConversationIngressProjection: input.sendConversationIngressProjection,
+    sendConversationMessage: input.sendConversationMessage,
+    handleProviderHttpIngress: input.handleProviderHttpIngress,
     addMessageReaction: input.addMessageReaction,
     getBrowserStatus: input.getBrowserStatus,
     syncSettingsFromProjection: (appId: AppId) => {

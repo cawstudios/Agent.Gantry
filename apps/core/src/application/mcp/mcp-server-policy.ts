@@ -31,6 +31,7 @@ export const STDIO_TEMPLATE_COMMANDS: Record<
 > = {
   'node-script': { command: 'node', args: [] },
   'npx-package': { command: 'npx', args: ['-y'] },
+  'installed-package': { command: '', args: [] },
 };
 
 const METADATA_HOSTNAMES = new Set(['metadata.google.internal', 'metadata']);
@@ -251,10 +252,19 @@ function validateStdioTemplateArgs(config: McpServerTransportConfig): void {
     }
     return;
   }
+  if (config.templateId === 'installed-package') {
+    if (args.length !== 1 || !/^[a-z0-9][a-z0-9._-]*$/.test(args[0] ?? '')) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        'installed-package MCP server requires exactly one safe bundled package binary name.',
+      );
+    }
+    return;
+  }
   if (args.length > 0) {
     throw new ApplicationError(
       'INVALID_REQUEST',
-      'stdio_template MCP server args are only supported for npx-package in v1.',
+      'stdio_template MCP server args are only supported for package templates in v1.',
     );
   }
 }

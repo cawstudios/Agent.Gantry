@@ -50,6 +50,7 @@ export class PostgresControlPlaneRepository {
     conversationId: string;
     chatJid: string;
     workspaceFolder: string;
+    agentId?: string;
     title?: string | null;
     defaultResponseMode?: ControlResponseMode;
     defaultWebhookId?: string | null;
@@ -61,6 +62,7 @@ export class PostgresControlPlaneRepository {
         externalConversationId: input.conversationId,
         externalConversationRef: input.chatJid,
         agentFolder: workspaceKey,
+        agentId: input.agentId,
         title: input.title,
       });
       const now = currentIso();

@@ -154,13 +154,14 @@ export function sendError(
   code: string,
   message: string,
   details?: Record<string, unknown>,
+  retryable = status >= 500,
 ): void {
   sendJson(res, status, {
     error: {
       code,
       message,
       details: details ?? null,
-      retryable: status >= 500,
+      retryable,
       requestId: randomUUID(),
     },
   });
@@ -207,6 +208,12 @@ export function sendApplicationError(
         overrides?.RATE_LIMITED ?? 'RATE_LIMITED',
         error.message,
       );
+      return true;
+    case 'SESSION_IDEMPOTENCY_CONFLICT':
+      sendError(res, 409, 'SESSION_IDEMPOTENCY_CONFLICT', error.message);
+      return true;
+    case 'SESSION_QUEUE_FULL':
+      sendError(res, 429, 'SESSION_QUEUE_FULL', error.message, undefined, true);
       return true;
     case 'WAIT_TIMEOUT':
       sendError(

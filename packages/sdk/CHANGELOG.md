@@ -1,5 +1,14 @@
 # @gantry/sdk
 
+## 0.5.0
+
+- Added app-owned agent selection and canonical `executionContext` to session
+  ensure responses for direct job handoff.
+- Added typed model credential list, set, and disable operations for scoped
+  deployment reconciliation.
+- Added durable app-scoped runtime event list/stream APIs with cursor replay.
+- Added explicit per-turn model aliases for SDK session messages.
+
 ## 0.4.0
 
 - Updated SDK contracts for the clean capability, model defaults, and job capability requirement surfaces.

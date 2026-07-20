@@ -1,5 +1,10 @@
 ## Scheduler Job Runtime Notes
 
+- After restart, a scheduler may lazily re-project a missing live-only app
+  conversation route from the job's canonical control session. Require exact
+  app, session, canonical conversation JID, workspace, and effective-agent
+  matches; mismatches still dead-letter.
+
 - Host-owned system jobs do not have child-runner heartbeats. They must carry
   explicit abortable deadlines through `handleSystemJob` into any subsystem
   work they start, and their `timeout_ms` must include only intentional
@@ -22,6 +27,14 @@
   child Gantry agent run; `task_message` persists steering before delivering it
   through runner continuation input. Dormant unavailable handlers are not a
   product surface.
+- Caller-defined agent jobs may supply response schemas, caller-resolved tools,
+  model controls, execution budgets, and an exact required skill name/hash.
+  Keep those policies generic: applications own domain task keys, timeouts, and
+  tool definitions, while Gantry enforces their declared ceilings and emits
+  durable interaction/result events.
+- `task_wait` waits on durable delegated-task rows and the task-change signal;
+  it must never ask the model to poll. Keyed delegated tasks are idempotent
+  within their parent job run so replay cannot create duplicate children.
 - Scheduler terminal notifications are user-facing lifecycle receipts. Format
   job reports, system maintenance results, and next-run times into readable
   product copy before delivery; never surface raw queue bookkeeping JSON,

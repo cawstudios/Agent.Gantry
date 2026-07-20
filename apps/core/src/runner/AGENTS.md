@@ -44,6 +44,10 @@
   read/list/cancel, steering via `task_message`, abort propagation, terminal
   receipts, and restart recovery. Dormant unavailable handlers and task rows
   without an executor are not valid.
+- Caller-resolved MCP tools are per-job projections supplied through the typed
+  job contract. Their schemas may be dynamic, but invocation must cross signed
+  host IPC, create a durable interaction, honor the shared job-run budget, and
+  resume only from the app-scoped SDK resolution API.
 - Durable file/web authority uses Gantry-owned facade names such as
   `FileSearch`, `FileRead`, `FileEdit`, `FileWrite`, `WebSearch`, and
   `WebRead`. The selected harness maps those names to provider-native tools

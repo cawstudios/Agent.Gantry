@@ -44,6 +44,7 @@ type FormatSettingsImportPreflightFailure = (
 ) => string;
 
 interface StartupDeps {
+  appId: AppId;
   ensureRuntimeLayoutDirectories: typeof ensureRuntimeLayoutDirectories;
   initializeRuntimeStorage: typeof initializeRuntimeStorage;
   loadRuntimeSettings: typeof loadRuntimeSettings;
@@ -65,6 +66,7 @@ const INTERNAL_DEFAULT_AGENT_JID = 'app:default';
 
 function makeDefaultDeps(): StartupDeps {
   return {
+    appId: 'default' as AppId,
     ensureRuntimeLayoutDirectories,
     initializeRuntimeStorage,
     loadRuntimeSettings,
@@ -98,6 +100,7 @@ export async function runStartup(
       return resolved.loadRuntimeSettings(GANTRY_HOME);
     }
     const revisionSettings = await loadRevisionAuthoritySettings({
+      appId: resolved.appId,
       runtimeHome: GANTRY_HOME,
       storage,
       app,
@@ -207,6 +210,7 @@ function isRuntimeStorageSettingsError(err: unknown): boolean {
 }
 
 async function loadRevisionAuthoritySettings(input: {
+  appId: AppId;
   runtimeHome: string;
   storage: Awaited<ReturnType<typeof initializeRuntimeStorage>>;
   app: RuntimeApp;
@@ -217,7 +221,7 @@ async function loadRevisionAuthoritySettings(input: {
   formatRuntimePreflightFailure: FormatSettingsImportPreflightFailure;
   logger: StartupDeps['logger'];
 }): Promise<RuntimeSettings> {
-  const appId = 'default' as AppId;
+  const appId = input.appId;
   const latest =
     await input.storage.repositories.settingsRevisions.getLatestSettingsRevision(
       appId,

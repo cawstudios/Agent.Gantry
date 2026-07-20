@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConversationRoute, Job } from '@core/domain/types.js';
+import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
 
 const runtimeStoreMock = vi.hoisted(() => ({
   publish: vi.fn(async () => undefined),
@@ -211,6 +212,7 @@ describe('jobs/execution', () => {
     vi.clearAllMocks();
     runtimeStoreMock.appendRunnerControlEvent.mockResolvedValue('persisted');
     runtimeStoreMock.heartbeatRunLease.mockResolvedValue(true);
+    runtimeStoreMock.getAppSessionById.mockResolvedValue(null);
     handleSystemJobMock.mockResolvedValue('System job completed.');
   });
 
@@ -303,6 +305,120 @@ describe('jobs/execution', () => {
           status: 'dead_lettered',
           delivery_state: 'sent',
         }),
+      }),
+    );
+  });
+
+  it('restores a persisted app-session route before scheduler execution', async () => {
+    const job = makeJob({
+      id: 'system:dreaming:scheduler_agent:abc123',
+      app_id: 'manipal-tender-copilot',
+      prompt: '__system:memory_dream',
+      session_id: 'session-1',
+      execution_context: {
+        conversationJid: 'app:manipal-tender-copilot:scheduled-job',
+        threadId: null,
+        workspaceKey: 'scheduler_agent',
+        sessionId: 'session-1',
+      },
+    });
+    const opsRepository = makeOpsRepository(job);
+    const routes: Record<string, ConversationRoute> = {};
+    const projectConversationRoute = vi.fn(
+      async (jid: string, route: ConversationRoute) => {
+        routes[makeAgentThreadQueueKey(jid, 'agent:scheduler_agent')] = route;
+      },
+    );
+    runtimeStoreMock.getAppSessionById.mockResolvedValue({
+      sessionId: 'session-1',
+      appId: 'manipal-tender-copilot',
+      agentId: 'agent:scheduler_agent',
+      conversationId: 'scheduled-job',
+      chatJid: 'app:manipal-tender-copilot:scheduled-job',
+      workspaceFolder: 'scheduler_agent',
+      workspaceKey: 'scheduler_agent',
+      title: 'Display title is not route identity',
+      defaultResponseMode: 'none',
+      defaultWebhookId: null,
+      createdAt: '2026-05-08T00:00:00.000Z',
+      updatedAt: '2026-05-08T00:00:00.000Z',
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => routes,
+        projectConversationRoute,
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        runAgent: vi.fn() as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(projectConversationRoute).toHaveBeenCalledWith(
+      'app:manipal-tender-copilot:scheduled-job',
+      expect.objectContaining({
+        folder: 'scheduler_agent',
+        name: 'manipal-tender-copilot:scheduled-job',
+      }),
+    );
+    expect(handleSystemJobMock).toHaveBeenCalledOnce();
+    expect(opsRepository.createJobRun).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'dead_lettered' }),
+    );
+  });
+
+  it('does not restore an app-session route owned by another agent', async () => {
+    const job = makeJob({
+      app_id: 'manipal-tender-copilot',
+      session_id: 'session-1',
+      execution_context: {
+        conversationJid: 'app:manipal-tender-copilot:scheduled-job',
+        threadId: null,
+        workspaceKey: 'scheduler_agent',
+        sessionId: 'session-1',
+      },
+    });
+    const opsRepository = makeOpsRepository(job);
+    const projectConversationRoute = vi.fn(async () => undefined);
+    runtimeStoreMock.getAppSessionById.mockResolvedValue({
+      sessionId: 'session-1',
+      appId: 'manipal-tender-copilot',
+      agentId: 'agent:another_agent',
+      conversationId: 'scheduled-job',
+      chatJid: 'app:manipal-tender-copilot:scheduled-job',
+      workspaceFolder: 'scheduler_agent',
+      workspaceKey: 'scheduler_agent',
+      title: 'Scheduled Job',
+      defaultResponseMode: 'none',
+      defaultWebhookId: null,
+      createdAt: '2026-05-08T00:00:00.000Z',
+      updatedAt: '2026-05-08T00:00:00.000Z',
+    });
+
+    await runJob(
+      job,
+      {
+        conversationRoutes: () => ({}),
+        projectConversationRoute,
+        queue: {} as never,
+        onProcess: () => {},
+        sendMessage: vi.fn(async () => undefined) as never,
+        opsRepository: opsRepository as never,
+        runAgent: vi.fn() as never,
+      },
+      'tg:scheduler',
+    );
+
+    expect(projectConversationRoute).not.toHaveBeenCalled();
+    expect(opsRepository.createJobRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'dead_lettered',
+        error_summary:
+          'Execution context route not found: app:manipal-tender-copilot:scheduled-job',
       }),
     );
   });

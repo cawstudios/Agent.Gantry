@@ -6,7 +6,9 @@ import { writeTaskIpcResponse } from '../jobs/ipc-shared.js';
 import { logger } from '../infrastructure/logging/logger.js';
 
 export const isLongRunningTask = (type: string): boolean =>
-  type.startsWith('mcp_') || type === 'scheduler_wait_for_events';
+  type.startsWith('mcp_') ||
+  type === 'scheduler_wait_for_events' ||
+  type === 'task_wait';
 
 export async function processLongRunningTaskIpc(input: {
   data: ReturnType<typeof parseTaskIpcData>;

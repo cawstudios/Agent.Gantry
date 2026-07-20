@@ -31,6 +31,8 @@ export async function applyRuntimeSettingsDesiredState(input: {
   previousSettings?: RuntimeSettings;
   reloadRuntimeState?: () => Promise<void>;
 }): Promise<RuntimeSettings> {
+  const projectsToLocalSettings =
+    !input.appId || input.appId === ('default' as AppId);
   const service = new SettingsDesiredStateService({
     ops: input.ops,
     repositories: input.repositories,
@@ -56,13 +58,19 @@ export async function applyRuntimeSettingsDesiredState(input: {
   }
   const rollback = async () => {
     if (!input.previousSettings) return;
-    saveRuntimeSettings(input.runtimeHome, input.previousSettings);
+    if (projectsToLocalSettings) {
+      saveRuntimeSettings(input.runtimeHome, input.previousSettings);
+    }
     await service.reconcile(input.previousSettings);
     await input.reloadRuntimeState?.();
-    activateRuntimeModelAliases(input.previousSettings);
+    if (projectsToLocalSettings) {
+      activateRuntimeModelAliases(input.previousSettings);
+    }
   };
   try {
-    saveRuntimeSettings(input.runtimeHome, settings);
+    if (projectsToLocalSettings) {
+      saveRuntimeSettings(input.runtimeHome, settings);
+    }
     const reconcile = await service.reconcile(reconcileSettings);
     if (reconcile.invalidReferences.length > 0) {
       throw new Error(
@@ -70,7 +78,9 @@ export async function applyRuntimeSettingsDesiredState(input: {
       );
     }
     await input.reloadRuntimeState?.();
-    activateRuntimeModelAliases(settings);
+    if (projectsToLocalSettings) {
+      activateRuntimeModelAliases(settings);
+    }
     return settings;
   } catch (err) {
     await rollback();
@@ -88,7 +98,21 @@ export async function syncRuntimeSettingsFromProjection(input: {
   pool?: SettingsRevisionMirror['pool'];
   createdBy?: string;
 }): Promise<void> {
-  const settings = loadRuntimeSettings(input.runtimeHome);
+  let settings = loadRuntimeSettings(input.runtimeHome);
+  if (
+    input.settingsRevisions &&
+    input.appId &&
+    input.appId !== ('default' as AppId)
+  ) {
+    const latest = await input.settingsRevisions.getLatestSettingsRevision(
+      input.appId,
+    );
+    if (latest) {
+      const { settingsFromRevisionDocument } =
+        await import('./settings-import-service.js');
+      settings = settingsFromRevisionDocument(latest.settingsDocument);
+    }
+  }
   const service = new SettingsDesiredStateService({
     ops: input.ops,
     repositories: input.repositories,

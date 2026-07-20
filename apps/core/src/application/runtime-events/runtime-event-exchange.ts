@@ -5,7 +5,10 @@ import type {
   RuntimeEventPublishInput,
 } from '../../domain/events/events.js';
 import type { NewMessage } from '../../domain/types.js';
-import type { LiveAdmissionWorkItemEnqueueResult } from '../../domain/ports/live-turns.js';
+import type {
+  LiveAdmissionWorkItemEnqueueResult,
+  SdkSessionQueuePolicy,
+} from '../../domain/ports/live-turns.js';
 import {
   normalizeRuntimeEventConversationId,
   normalizeRuntimeEventThreadId,
@@ -25,6 +28,31 @@ export interface RuntimeEventSubscription {
   close(): void;
 }
 
+export interface SdkSessionMessageAdmissionRequest {
+  requestMessageId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  queuePolicy?: SdkSessionQueuePolicy;
+}
+
+export type LiveAdmissionMessagePublishResult =
+  | {
+      outcome: 'accepted';
+      event: RuntimeEvent;
+      liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
+    }
+  | {
+      outcome: 'replayed';
+      messageId: string;
+      acceptedEventId: number;
+    }
+  | { outcome: 'fingerprint_conflict' }
+  | {
+      outcome: 'capacity_exceeded';
+      activeAndWaiting: number;
+      capacity: number;
+    };
+
 interface LiveAdmissionActivatingRuntimeEventRepository extends RuntimeEventRepository {
   appendRuntimeEventAndStoreLiveAdmission?(
     input: RuntimeEventPublishInput,
@@ -34,14 +62,12 @@ interface LiveAdmissionActivatingRuntimeEventRepository extends RuntimeEventRepo
         appId: string;
         agentId?: string | null;
         agentSessionId?: string | null;
+        sdkSessionAdmissionRequest?: SdkSessionMessageAdmissionRequest;
         triggerDecision?: Record<string, unknown>;
         now?: string;
       };
     },
-  ): Promise<{
-    event: RuntimeEvent;
-    liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
-  }>;
+  ): Promise<LiveAdmissionMessagePublishResult>;
 }
 
 export class RuntimeEventExchange {
@@ -71,14 +97,12 @@ export class RuntimeEventExchange {
         appId: string;
         agentId?: string | null;
         agentSessionId?: string | null;
+        sdkSessionAdmissionRequest?: SdkSessionMessageAdmissionRequest;
         triggerDecision?: Record<string, unknown>;
         now?: string;
       };
     },
-  ): Promise<{
-    event: RuntimeEvent;
-    liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
-  }> {
+  ): Promise<LiveAdmissionMessagePublishResult> {
     const repository = this
       .repository as LiveAdmissionActivatingRuntimeEventRepository;
     const normalized = normalizeRuntimeEventPublishInput(input);
@@ -91,12 +115,14 @@ export class RuntimeEventExchange {
       normalized,
       admission,
     );
-    try {
-      await this.notifier.notify(result.event);
-    } catch {
-      // Wakeups are best-effort; durable consumers recover by cursor polling.
+    if (result.outcome === 'accepted') {
+      try {
+        await this.notifier.notify(result.event);
+      } catch {
+        // Wakeups are best-effort; durable consumers recover by cursor polling.
+      }
+      notifyWebhookDeliveryReady();
     }
-    notifyWebhookDeliveryReady();
     return result;
   }
 

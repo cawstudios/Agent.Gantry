@@ -169,6 +169,7 @@ export async function publishSchedulerCompletionEvent(input: {
   notified: boolean;
   startNotified: boolean;
   summary: string;
+  result?: string | null;
   nextRun: string | null;
   state: SchedulerRunEventState;
   runtimeAppId: string;
@@ -185,6 +186,7 @@ export async function publishSchedulerCompletionEvent(input: {
     notified: input.notified,
     startNotified: input.startNotified,
     summary: input.summary,
+    result: input.result,
     nextRun: input.nextRun,
     boundTriggerId: input.state.boundTriggerId,
     eventAppSession: input.state.eventAppSession,

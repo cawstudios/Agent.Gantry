@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DEFAULT_LLM_PROFILE_ID } from '@core/adapters/storage/postgres/seeds.js';
+import { PostgresLiveTurnRepository } from '@core/adapters/storage/postgres/repositories/live-turn-repository.postgres.js';
+import { conversationIdForJid } from '@core/adapters/storage/postgres/repositories/canonical-graph-repository.postgres.js';
 import {
   configurePendingInteractionDurability,
   resolvePendingInteractionRecord,
@@ -15,6 +17,7 @@ import {
   type LiveTurnLeaseDeps,
 } from '@core/application/live-turns/live-turn-lease-service.js';
 import { nowIso, nowMs, toIso } from '@core/shared/time/datetime.js';
+import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 
 import {
   createPostgresIntegrationRuntime,
@@ -39,7 +42,7 @@ maybeDescribe('live horizontal execution acceptance gates', () => {
   let liveTurns: PostgresIntegrationRuntime['repositories']['liveTurns'];
   let coordination: PostgresIntegrationRuntime['repositories']['workerCoordination'];
   const agentId = 'agent-live' as never;
-  const configVersionId = 'config-live' as never;
+  const configVersionId = 'config:agent-live:1' as never;
   const llmProfileId = DEFAULT_LLM_PROFILE_ID as never;
 
   const createLiveRun = async (runId: string) => {
@@ -109,7 +112,7 @@ maybeDescribe('live horizontal execution acceptance gates', () => {
     ]) {
       await coordination.registerWorker({ id, bootNonce: `nonce-${id}` });
     }
-  });
+  }, 60_000);
 
   afterAll(async () => {
     configurePendingInteractionDurability(null);
@@ -451,6 +454,134 @@ maybeDescribe('live horizontal execution acceptance gates', () => {
     ).resolves.toBe(true);
   });
 
+  it('links the canonical message FK and emits correlated live start and terminal events', async () => {
+    const chatJid = 'app:live-lifecycle';
+    const sessionId = 'session-live-lifecycle';
+    const appResponseRoute = {
+      sessionId,
+      threadId: null,
+      responseMode: 'sse' as const,
+      webhookId: null,
+      correlationId: 'correlation-live-lifecycle',
+    };
+    await runtime.ops.storeMessage({
+      id: 'provider-message-live-lifecycle',
+      chat_jid: chatJid,
+      provider: 'app',
+      sender: 'user-live-lifecycle',
+      sender_name: 'Live User',
+      content: 'Run the live lifecycle test',
+      timestamp: nowIso(),
+      appResponseRoute,
+    });
+    const replay = await runtime.ops.getMessagesSince(chatJid, '', 10, {
+      threadId: null,
+    });
+    const message = replay.at(-1);
+    expect(message).toMatchObject({
+      id: 'provider-message-live-lifecycle',
+      canonicalMessageId: expect.stringMatching(/^message:/),
+      appResponseRoute,
+    });
+    const canonicalMessageId = message!.canonicalMessageId!;
+    await runtime.repositories.agentSessions.saveAgentSession({
+      id: sessionId as never,
+      appId: 'default' as never,
+      agentId,
+      conversationId: conversationIdForJid(chatJid) as never,
+      status: 'active',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+    const runId = await runtime.ops.createSessionAgentRun({
+      agentSessionId: sessionId,
+      executionProviderId: 'anthropic:claude-agent-sdk' as never,
+      messageId: canonicalMessageId,
+      appResponseRoute,
+      cause: 'message',
+    });
+    expect(runId).toEqual(expect.any(String));
+    await expect(
+      runtime.repositories.agentRuns.getAgentRun(runId as never),
+    ).resolves.toMatchObject({ messageId: canonicalMessageId });
+    const started = await runtime.repositories.runtimeEvents.listRuntimeEvents({
+      appId: 'default' as never,
+      runId: runId as never,
+      eventTypes: [RUNTIME_EVENT_TYPES.RUN_STARTED],
+    });
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatchObject({
+      sessionId,
+      runId,
+      correlationId: appResponseRoute.correlationId,
+      responseMode: 'sse',
+      payload: expect.objectContaining({ messageId: canonicalMessageId }),
+    });
+
+    const turnId = 'turn-live-lifecycle';
+    await liveTurns.claimLiveTurn({
+      id: turnId,
+      scope: makeScope({
+        agentSessionId: sessionId,
+        conversationId: chatJid,
+      }),
+      workerInstanceId: 'w1',
+      runId,
+      pendingMessage: {
+        kind: 'message_cursor',
+        messageId: canonicalMessageId,
+        appResponseRoute,
+      },
+    });
+    const lease = await coordination.claimRunLease({
+      runId: runId!,
+      workerInstanceId: 'w1',
+      ttlMs: 60_000,
+    });
+    await liveTurns.attachLiveTurnLease({
+      id: turnId,
+      runId: runId!,
+      lease: {
+        leaseToken: lease!.leaseToken,
+        workerInstanceId: lease!.workerInstanceId,
+        fencingVersion: lease!.fencingVersion,
+      },
+    });
+    await expect(
+      liveTurns.finalizeLiveTurnWithLease({
+        id: turnId,
+        turnState: 'completed',
+        leaseOutcome: 'completed',
+        fence: {
+          leaseToken: lease!.leaseToken,
+          workerInstanceId: lease!.workerInstanceId,
+          fencingVersion: lease!.fencingVersion,
+        },
+        agentRunCompletion: {
+          status: 'completed',
+          resultSummary: 'Live lifecycle completed.',
+        },
+      }),
+    ).resolves.toBe(true);
+    const completed =
+      await runtime.repositories.runtimeEvents.listRuntimeEvents({
+        appId: 'default' as never,
+        runId: runId as never,
+        eventTypes: [RUNTIME_EVENT_TYPES.RUN_COMPLETED],
+      });
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({
+      sessionId,
+      runId,
+      correlationId: appResponseRoute.correlationId,
+      responseMode: 'sse',
+      payload: expect.objectContaining({
+        messageId: canonicalMessageId,
+        resultSummary: 'Live lifecycle completed.',
+      }),
+    });
+  });
+
   it('finalizes turn and lease together and rejects stale finalization', async () => {
     const scope = makeScope({ conversationId: 'tg:fenced-finalize' });
     await createLiveRun('run-fenced-finalize');
@@ -492,11 +623,22 @@ maybeDescribe('live horizontal execution acceptance gates', () => {
           workerInstanceId: staleLease!.workerInstanceId,
           fencingVersion: staleLease!.fencingVersion,
         },
+        agentRunCompletion: {
+          status: 'completed',
+          resultSummary: 'stale result',
+        },
       }),
     ).resolves.toBe(false);
     await expect(
       liveTurns.getLiveTurnById('turn-fenced-finalize'),
     ).resolves.toMatchObject({ state: 'claimed', endedAt: null });
+    await expect(
+      runtime.repositories.runtimeEvents.listRuntimeEvents({
+        appId: 'default' as never,
+        runId: 'run-fenced-finalize' as never,
+        eventTypes: [RUNTIME_EVENT_TYPES.RUN_COMPLETED],
+      }),
+    ).resolves.toHaveLength(0);
 
     await expect(
       liveTurns.finalizeLiveTurnWithLease({
@@ -508,8 +650,40 @@ maybeDescribe('live horizontal execution acceptance gates', () => {
           workerInstanceId: recoveredLease!.workerInstanceId,
           fencingVersion: recoveredLease!.fencingVersion,
         },
+        agentRunCompletion: {
+          status: 'completed',
+          resultSummary: 'accepted result',
+        },
       }),
     ).resolves.toBe(true);
+    await expect(
+      liveTurns.finalizeLiveTurnWithLease({
+        id: 'turn-fenced-finalize',
+        turnState: 'completed',
+        leaseOutcome: 'completed',
+        fence: {
+          leaseToken: recoveredLease!.leaseToken,
+          workerInstanceId: recoveredLease!.workerInstanceId,
+          fencingVersion: recoveredLease!.fencingVersion,
+        },
+        agentRunCompletion: {
+          status: 'completed',
+          resultSummary: 'duplicate result',
+        },
+      }),
+    ).resolves.toBe(false);
+    const terminalEvents =
+      await runtime.repositories.runtimeEvents.listRuntimeEvents({
+        appId: 'default' as never,
+        runId: 'run-fenced-finalize' as never,
+        eventTypes: [RUNTIME_EVENT_TYPES.RUN_COMPLETED],
+      });
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]).toMatchObject({
+      runId: 'run-fenced-finalize',
+      eventType: RUNTIME_EVENT_TYPES.RUN_COMPLETED,
+      payload: expect.objectContaining({ resultSummary: 'accepted result' }),
+    });
     await expect(
       liveTurns.getLiveTurnById('turn-fenced-finalize'),
     ).resolves.toMatchObject({
@@ -527,6 +701,78 @@ maybeDescribe('live horizontal execution acceptance gates', () => {
         workerInstanceId: 'w2',
       }),
     ).resolves.not.toBeNull();
+  });
+
+  it('rolls back the fenced terminal write when runtime event append fails', async () => {
+    const runId = 'run-terminal-event-rollback';
+    const turnId = 'turn-terminal-event-rollback';
+    await createLiveRun(runId);
+    const eventFailure = new Error('terminal event append failed');
+    const failingLiveTurns = new PostgresLiveTurnRepository(
+      runtime.service.db,
+      undefined,
+      {
+        appendRuntimeEventWithExecutor: async () => {
+          throw eventFailure;
+        },
+      } as never,
+    );
+    await failingLiveTurns.claimLiveTurn({
+      id: turnId,
+      scope: makeScope({ conversationId: 'tg:terminal-event-rollback' }),
+      workerInstanceId: 'w1',
+      runId,
+    });
+    const lease = await coordination.claimRunLease({
+      runId,
+      workerInstanceId: 'w1',
+      ttlMs: 60_000,
+    });
+    const fence = {
+      leaseToken: lease!.leaseToken,
+      workerInstanceId: lease!.workerInstanceId,
+      fencingVersion: lease!.fencingVersion,
+    };
+    await failingLiveTurns.attachLiveTurnLease({
+      id: turnId,
+      runId,
+      lease: fence,
+    });
+
+    await expect(
+      failingLiveTurns.finalizeLiveTurnWithLease({
+        id: turnId,
+        turnState: 'failed',
+        leaseOutcome: 'failed',
+        fence,
+        agentRunCompletion: {
+          status: 'failed',
+          errorSummary: 'runner failed',
+        },
+      }),
+    ).rejects.toThrow(eventFailure);
+    await expect(
+      failingLiveTurns.getLiveTurnById(turnId),
+    ).resolves.toMatchObject({ state: 'claimed', endedAt: null });
+    await expect(
+      runtime.repositories.agentRuns.getAgentRun(runId as never),
+    ).resolves.toMatchObject({ status: 'running', endedAt: undefined });
+    await expect(
+      coordination.getActiveRunLease({ runId }),
+    ).resolves.toMatchObject({ leaseToken: lease!.leaseToken });
+
+    await expect(
+      liveTurns.finalizeLiveTurnWithLease({
+        id: turnId,
+        turnState: 'failed',
+        leaseOutcome: 'failed',
+        fence,
+        agentRunCompletion: {
+          status: 'failed',
+          errorSummary: 'runner failed',
+        },
+      }),
+    ).resolves.toBe(true);
   });
 
   it('recovers an expired live turn at a higher fencing version exactly once', async () => {

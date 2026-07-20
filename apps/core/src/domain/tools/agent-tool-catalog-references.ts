@@ -6,10 +6,13 @@ import {
   isAdminMcpToolFullName,
 } from '../../shared/admin-mcp-tools.js';
 import {
+  GANTRY_FACADE_INPUT_SCHEMAS,
   persistentPermissionToolId,
   parseReadableScopedToolRule,
   RUN_COMMAND_TOOL_NAME,
   validateReadableAgentToolRule,
+  isGantryFacadeExactToolRule,
+  type GantryFacadeExactToolName,
 } from '../../shared/agent-tool-references.js';
 import {
   containsGeneratedRuntimeSkillPath,
@@ -63,6 +66,14 @@ export async function ensureAgentToolCatalogItem(input: {
     });
   }
   if (resolved.tool) return resolved.tool;
+  if (isGantryFacadeExactToolRule(reference)) {
+    return saveGantryFacadeTool({
+      repository: input.repository,
+      appId: input.appId,
+      name: reference as GantryFacadeExactToolName,
+      now: input.now,
+    });
+  }
   if (
     resolved.error &&
     !(
@@ -113,6 +124,33 @@ export async function ensureAgentToolCatalogItem(input: {
     selectable: true,
     status: 'active',
     adapterRef: input.adapterRef ?? 'permission/settings.yaml',
+    createdAt: input.now as never,
+    updatedAt: input.now as never,
+  };
+  await input.repository.saveTool(item);
+  return item;
+}
+
+async function saveGantryFacadeTool(input: {
+  repository: ToolCatalogRepository;
+  appId: AppId;
+  name: GantryFacadeExactToolName;
+  now: string;
+}): Promise<ToolCatalogItem> {
+  const item: ToolCatalogItem = {
+    id: persistentPermissionToolId(input.appId, input.name) as ToolId,
+    appId: input.appId,
+    name: input.name,
+    kind: 'host',
+    provider: 'gantry',
+    displayName: input.name,
+    description: `Use the Gantry ${input.name} runtime facade.`,
+    category: input.name === 'AgentDelegation' ? 'agent' : 'productivity',
+    risk: input.name === 'AgentDelegation' ? 'medium' : 'high',
+    selectable: true,
+    status: 'active',
+    inputSchema: GANTRY_FACADE_INPUT_SCHEMAS[input.name],
+    adapterRef: `gantry/facade/${input.name}`,
     createdAt: input.now as never,
     updatedAt: input.now as never,
   };

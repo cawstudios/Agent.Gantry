@@ -60,7 +60,8 @@ FROM ${NODE_IMAGE} AS runtime
 
 ENV NODE_ENV=production \
     GANTRY_HOME=/var/lib/gantry \
-    GANTRY_BOOTSTRAP_SETTINGS_IF_MISSING=1
+    GANTRY_BOOTSTRAP_SETTINGS_IF_MISSING=1 \
+    PATH=/app/node_modules/.bin:$PATH
 
 # Skill-script interpreters. Skills are distributed as data artifacts in any
 # language; the image carries the interpreters their scripts need at runtime.
@@ -110,7 +111,8 @@ COPY --from=build /app/packages/sdk/package.json ./packages/sdk/package.json
 # Ops scripts: fleet settings seed + entrypoint.
 COPY ops/docker/fleet-settings-seed.mjs ./ops/docker/fleet-settings-seed.mjs
 COPY ops/docker/entrypoint.sh /usr/local/bin/gantry-entrypoint
-RUN chmod +x /usr/local/bin/gantry-entrypoint
+RUN sed -i 's/\r$//' /usr/local/bin/gantry-entrypoint \
+    && chmod +x /usr/local/bin/gantry-entrypoint
 
 # Control port (liveness /healthz, readiness /readyz, internal /metrics) is
 # set by the deployment via GANTRY_CONTROL_PORT; documented, not hardcoded.

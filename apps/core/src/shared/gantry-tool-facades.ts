@@ -18,6 +18,7 @@ const GANTRY_FACADE_EXACT_TOOL_NAME_SET = new Set<string>(
 );
 const GANTRY_DELEGATION_TOOL_NAME_SET = new Set([
   'delegate_task',
+  'task_wait',
   'task_message',
 ]);
 

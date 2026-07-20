@@ -68,6 +68,7 @@ export interface AdapterInlineAgentInput {
   runLeaseToken?: string;
   runLeaseFencingVersion?: number;
   responseSchema?: Record<string, unknown>;
+  callerResolvedTools?: import('../../domain/types.js').CallerResolvedToolsConfig;
   disableTools?: boolean;
 }
 
@@ -118,11 +119,13 @@ export interface InlineCoreToolRegistry {
     context?: { signal?: AbortSignal },
   ): Promise<{ allowed: boolean; reason?: string }>;
   recordThirdPartyMcpToolActivity(input: {
+    toolCallId?: string;
     serverName: string;
     toolName: string;
     toolInput: unknown;
     outcome: 'attempt' | 'success' | 'failure';
     latencyMs: number;
+    result?: unknown;
     error?: unknown;
   }): Promise<void>;
 }

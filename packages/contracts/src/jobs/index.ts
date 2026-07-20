@@ -6,12 +6,42 @@ import {
   IsoDateTimeSchema,
 } from '../contract-primitives.js';
 import { AgentPersonaSchema } from '../agents/index.js';
+import { JobAgentTaskSchema } from './agent-task.js';
+
+export { JobAgentTaskSchema } from './agent-task.js';
+export type { JobAgentTask } from './agent-task.js';
 
 export const JobScheduleSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('manual') }),
   z.object({ type: z.literal('once'), runAt: IsoDateTimeSchema }),
-  z.object({ type: z.literal('cron'), value: z.string().min(1) }),
-  z.object({ type: z.literal('interval'), value: z.string().min(1) }),
+  z.object({
+    type: z.literal('cron'),
+    value: z.string().min(1),
+    timezone: z.string().min(1).optional(),
+    misfirePolicy: z.literal('coalesce').optional(),
+    overlapPolicy: z.literal('skip').optional(),
+    metadata: z
+      .object({
+        scheduleId: z.string().min(1),
+        generation: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
+  }),
+  z.object({
+    type: z.literal('interval'),
+    value: z.string().min(1),
+    timezone: z.string().min(1).optional(),
+    misfirePolicy: z.literal('coalesce').optional(),
+    overlapPolicy: z.literal('skip').optional(),
+    metadata: z
+      .object({
+        scheduleId: z.string().min(1),
+        generation: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
+  }),
 ]);
 export type JobSchedule = z.infer<typeof JobScheduleSchema>;
 
@@ -328,9 +358,21 @@ export const CreateJobRequestSchema = z
       .object({
         type: z.enum(['cron', 'interval']).optional(),
         value: z.string().optional(),
+        timezone: z.string().min(1).optional(),
+        misfirePolicy: z.literal('coalesce').optional(),
+        overlapPolicy: z.literal('skip').optional(),
+        metadata: z
+          .object({
+            scheduleId: z.string().min(1),
+            generation: z.number().int().positive(),
+          })
+          .strict()
+          .optional(),
       })
+      .strict()
       .optional(),
     modelAlias: z.string().optional(),
+    agentTask: JobAgentTaskSchema.optional(),
     dryRun: z.boolean().optional(),
   })
   .strict();
@@ -362,7 +404,22 @@ export const JobResponseSchema = z
       .union([
         z.null(),
         z.object({ type: z.literal('once'), runAt: IsoDateTimeSchema }),
-        z.object({ type: z.enum(['cron', 'interval']), value: z.string() }),
+        z
+          .object({
+            type: z.enum(['cron', 'interval']),
+            value: z.string(),
+            timezone: z.string().optional(),
+            misfirePolicy: z.literal('coalesce').optional(),
+            overlapPolicy: z.literal('skip').optional(),
+            metadata: z
+              .object({
+                scheduleId: z.string(),
+                generation: z.number().int().positive(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
       ])
       .nullable(),
     executionContext: JobExecutionContextSchema,

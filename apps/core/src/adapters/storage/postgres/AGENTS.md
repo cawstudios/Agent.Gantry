@@ -1,5 +1,9 @@
 # Postgres Adapter Notes
 
+- Every valid `appId` declared by `GANTRY_CONTROL_API_KEYS_JSON` must have an
+  idempotently seeded `apps` row before app-scoped credentials, MCP servers,
+  skills, sessions, or jobs can be provisioned. The control-key declaration is
+  the bootstrap authority; client applications must not write Gantry tables.
 - Provider session resume lookup must be scoped by the resolved canonical
   `agentId` plus route scope. Route-only keys can leak provider session or
   digest continuity after conversation or thread rebinding.
@@ -53,6 +57,9 @@
   Do not add Compose hostnames to global local-host detection; pass the same
   allowlist through URL validation, runtime config, doctor/readiness checks, and
   migration/storage construction.
+- Gantry's pg-boss tables live in `gantry_pgboss`, not the generic `pgboss`
+  schema. Applications may share the database server and database with Gantry
+  while owning a different pg-boss version in their own schema.
 - Conversation route projection must preserve the canonical conversation kind:
   `direct`/`dm` rows return runtime `conversationKind: "dm"` and group/channel
   rows return `conversationKind: "channel"`. Do not infer DM-vs-group memory

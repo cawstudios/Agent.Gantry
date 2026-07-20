@@ -143,6 +143,7 @@ describe('RuntimeEventExchange', () => {
       async (input, admission) => {
         const event = await repository.appendRuntimeEvent(input);
         return {
+          outcome: 'accepted' as const,
           event,
           liveAdmissionResult: {
             outcome: 'enqueued',
@@ -180,11 +181,54 @@ describe('RuntimeEventExchange', () => {
     expect(
       repository.appendRuntimeEventAndStoreLiveAdmission,
     ).toHaveBeenCalledOnce();
+    expect(result.outcome).toBe('accepted');
+    if (result.outcome !== 'accepted') return;
     expect(result.liveAdmissionResult?.item).toMatchObject({
       id: 'admission:message-1',
       state: 'queued',
     });
     expect(notifier.notifiedEvents).toEqual([result.event]);
+  });
+
+  it('does not notify subscribers for an idempotent admission replay', async () => {
+    const repository =
+      new MemoryRuntimeEventRepository() as MemoryRuntimeEventRepository & {
+        appendRuntimeEventAndStoreLiveAdmission: ReturnType<typeof vi.fn>;
+      };
+    repository.appendRuntimeEventAndStoreLiveAdmission = vi.fn(async () => ({
+      outcome: 'replayed' as const,
+      messageId: 'original-message',
+      acceptedEventId: 41,
+    }));
+    const notifier = new InMemoryRuntimeEventNotifier();
+    const exchange = new RuntimeEventExchange(repository, notifier);
+
+    await expect(
+      exchange.publishWithLiveAdmissionMessage(
+        {
+          appId: 'app:test' as never,
+          eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
+          actor: 'sdk',
+          payload: { text: 'duplicate' },
+        },
+        {
+          message: {
+            id: 'duplicate-message',
+            chat_jid: 'app:test:conversation',
+            sender: 'sdk',
+            sender_name: 'SDK',
+            content: 'duplicate',
+            timestamp: '2026-04-29T00:00:00.000Z',
+          },
+          liveAdmission: { appId: 'default' },
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'replayed',
+      messageId: 'original-message',
+      acceptedEventId: 41,
+    });
+    expect(notifier.notifiedEvents).toEqual([]);
   });
 
   it('returns the durable event when the live wakeup notifier fails', async () => {

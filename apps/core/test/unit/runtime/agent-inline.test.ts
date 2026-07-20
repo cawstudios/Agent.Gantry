@@ -263,6 +263,27 @@ describe('runInlineAgent', () => {
     expect(output.error).toContain('Inline agent timed out after');
   });
 
+  it('does not wait for or accept late output from a timeout-ignoring lane', async () => {
+    let emitLate: ((output: AgentOutput) => Promise<void>) | undefined;
+    const lane: InlineAgentLoopLane = ({ emitOutput }) => {
+      emitLate = emitOutput;
+      return new Promise<AgentOutput>(() => undefined);
+    };
+    const onOutput = vi.fn(async () => undefined);
+
+    const output = await runInlineAgent(group, agentInput, vi.fn(), onOutput, {
+      ...options(lane),
+      timeoutMs: 5,
+    });
+
+    expect(output).toMatchObject({
+      status: 'error',
+      failure: { type: 'timeout' },
+    });
+    await emitLate?.({ status: 'success', result: 'late result' });
+    expect(onOutput).not.toHaveBeenCalled();
+  });
+
   it('returns a structured unavailable error from the unimplemented lane seam', async () => {
     const output = await runInlineAgent(
       group,

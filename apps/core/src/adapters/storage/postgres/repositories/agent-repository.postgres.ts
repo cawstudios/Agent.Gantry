@@ -50,7 +50,9 @@ export class PostgresAgentRepository implements AgentRepository {
         set: {
           name: agent.name,
           status: agent.status,
-          currentConfigVersionId: agent.currentConfigVersionId ?? null,
+          ...(agent.currentConfigVersionId !== undefined
+            ? { currentConfigVersionId: agent.currentConfigVersionId }
+            : {}),
           updatedAt: agent.updatedAt,
         },
       });

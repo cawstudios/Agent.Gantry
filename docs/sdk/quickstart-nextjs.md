@@ -92,8 +92,8 @@ on the server.
 ## Structured workflow step
 
 Sessions also work as typed pipeline steps, no chat UI involved: send
-`response_schema` and the inline-runtime agent must return JSON matching it
-(validated with one corrective retry server-side).
+`response_schema` and a compatible agent engine must return JSON matching it.
+Gantry validates the structured result before emitting the outbound message.
 
 ```ts
 // app/api/triage/route.ts
@@ -110,7 +110,10 @@ export async function POST(req: Request) {
       type: 'object',
       required: ['category', 'priority', 'summary'],
       properties: {
-        category: { type: 'string', enum: ['billing', 'bug', 'account', 'other'] },
+        category: {
+          type: 'string',
+          enum: ['billing', 'bug', 'account', 'other'],
+        },
         priority: { type: 'string', enum: ['p0', 'p1', 'p2'] },
         summary: { type: 'string' },
       },

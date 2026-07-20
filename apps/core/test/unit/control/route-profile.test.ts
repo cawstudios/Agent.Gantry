@@ -80,6 +80,45 @@ describe('control server route profile', () => {
     expect((await send(server, 'POST', '/v1/jobs')).status).toBe(404);
   });
 
+  it('reports channel health without changing global health readiness', async () => {
+    server = await startTestControlServer({
+      token: TOKEN,
+      appId: APP_ID,
+      scopes: ['sessions:read'],
+      routeProfile: 'ops',
+      getChannelTransportHealth: () => [
+        {
+          providerId: 'teams',
+          configured: true,
+          connected: false,
+          configuredAccountCount: 1,
+          connectedAccountCount: 0,
+          authenticatedConversationRegistrationCount: 0,
+          authenticatedConversationRegistrationAvailable: false,
+        },
+      ],
+    });
+
+    const health = await get(server, '/v1/health', true);
+    expect(health.status).toBe(200);
+    await expect(health.json()).resolves.toMatchObject({
+      status: 'ok',
+      features: {
+        channels: [
+          {
+            providerId: 'teams',
+            configured: true,
+            connected: false,
+            authenticatedConversationRegistrationAvailable: false,
+          },
+        ],
+      },
+    });
+    await expect((await get(server, '/healthz')).json()).resolves.toEqual({
+      status: 'ok',
+    });
+  });
+
   it('full profile mounts admin routes (no blanket 404)', async () => {
     server = await startTestControlServer({
       token: TOKEN,

@@ -22,6 +22,7 @@ import type { RuntimeSettings } from '../config/settings/runtime-settings.js';
 import type { RuntimeLeasePort } from '../domain/ports/runtime-lease.js';
 import type { RuntimeSecretProvider } from '../domain/ports/runtime-secret-provider.js';
 import type { AgentTodoSink } from '../domain/ports/task-lifecycle.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   ConversationContextHydrationRequest,
   ConversationContextHydrationResult,
@@ -68,6 +69,14 @@ export interface ChannelOpts {
 
 export type MaybePromise<T> = T | Promise<T>;
 
+export interface ChannelOperationalSnapshot {
+  authenticatedConversationRegistrationCount?: number;
+}
+
+export interface ChannelOperationalSnapshotSource {
+  getOperationalSnapshot(): ChannelOperationalSnapshot;
+}
+
 export type ChannelAdapter = ChannelLifecyclePort &
   ChannelOwnershipPort &
   MessageSink &
@@ -82,8 +91,18 @@ export type ChannelAdapter = ChannelLifecyclePort &
       RichInteractionSurface &
       PlanReviewSurface &
       AgentTodoSink &
-      ConversationContextHydrationSink
+      ConversationContextHydrationSink &
+      ChannelHttpIngressSink &
+      ChannelOperationalSnapshotSource
   >;
+
+export interface ChannelHttpIngressSink {
+  handleHttpIngress(
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: Record<string, unknown>,
+  ): Promise<void>;
+}
 
 export interface ConversationContextHydrationSink {
   hydrateConversationContext(

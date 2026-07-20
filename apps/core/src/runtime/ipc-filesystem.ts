@@ -16,6 +16,8 @@ interface IpcRootLockDetails {
   startedAt?: string;
 }
 
+const CURRENT_PROCESS_STARTED_AT_MS = Date.now() - process.uptime() * 1000;
+
 export function isTrustedDirectory(dirPath: string): boolean {
   try {
     const stat = fs.lstatSync(dirPath);
@@ -136,13 +138,20 @@ export function recoverStaleIpcRootLock(
       recoveryReason: 'invalid_or_missing_pid',
     };
   }
-  if (details.pid === process.pid) {
+  const lockStartedAtMs = details.startedAt
+    ? Date.parse(details.startedAt)
+    : Number.NaN;
+  const reusedPid =
+    details.pid === process.pid &&
+    Number.isFinite(lockStartedAtMs) &&
+    lockStartedAtMs < CURRENT_PROCESS_STARTED_AT_MS - 1000;
+  if (details.pid === process.pid && !reusedPid) {
     return { ...details, recovered: false, recoveryReason: 'same_process' };
   }
-  if (isProcessAlive(details.pid)) {
+  if (!reusedPid && isProcessAlive(details.pid)) {
     return { ...details, recovered: false, recoveryReason: 'pid_alive' };
   }
-  const recoveryReason = 'pid_not_running';
+  const recoveryReason = reusedPid ? 'pid_reused' : 'pid_not_running';
   try {
     fs.rmSync(lockPath, { force: true });
     return { ...details, recovered: true, recoveryReason };

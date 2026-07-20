@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { logger } from '../infrastructure/logging/logger.js';
 import type {
+  AppMessageResponseRoute,
   MessageSendOptions,
   ProgressUpdateOptions,
   RichInteractionRequest,
@@ -42,11 +43,16 @@ async function emitSessionEvent(
   chatJid: string,
   eventType: RuntimeEventType,
   payload: Record<string, unknown>,
+  turn?: { runId?: string; appResponseRoute?: AppMessageResponseRoute },
 ): Promise<{ emitted: boolean; eventId?: number }> {
   const result = await createSessionInteractionModule().publishOutboundEvent({
     conversationJid: chatJid,
     eventType,
     payload,
+    ...(turn?.runId ? { runId: turn.runId } : {}),
+    ...(turn?.appResponseRoute
+      ? { appResponseRoute: turn.appResponseRoute }
+      : {}),
   });
   if (!result.emitted) {
     logger.warn(
@@ -96,6 +102,12 @@ export async function createAppChannel(
         orderedEnvelope: orderedEnvelope('outbound'),
         canonicalText: canonicalTextMetadata(text),
       },
+      {
+        ...(options?.runId ? { runId: options.runId } : {}),
+        ...(options?.appResponseRoute
+          ? { appResponseRoute: options.appResponseRoute }
+          : {}),
+      },
     );
     return result.eventId !== undefined
       ? { externalMessageId: String(result.eventId) }
@@ -132,6 +144,12 @@ export async function createAppChannel(
           generation: options?.generation ?? null,
           orderedEnvelope: orderedEnvelope('streaming'),
           canonicalText: canonicalTextMetadata(text),
+        },
+        {
+          ...(options?.runId ? { runId: options.runId } : {}),
+          ...(options?.appResponseRoute
+            ? { appResponseRoute: options.appResponseRoute }
+            : {}),
         },
       );
       return result.emitted;

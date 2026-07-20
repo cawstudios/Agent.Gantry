@@ -21,6 +21,7 @@ type ConnectMcpServerInput = {
     target: 'env' | 'header';
     key: string;
   }>;
+  networkHosts?: string[];
   sandboxProfileId?: string;
   riskClass?: 'low' | 'medium' | 'high';
   createdBy?: string;
@@ -81,6 +82,27 @@ export function createMcpServersClient(transport: TransportLike) {
         path: `/v1/mcp-servers/${encodeURIComponent(serverId)}/test`,
         body: input,
       }),
+    credentials: {
+      get: (name: string) =>
+        transport.request<Record<string, unknown>>({
+          method: 'GET',
+          path: `/v1/credentials/capabilities/${encodeURIComponent(name)}`,
+        }),
+      set: (
+        name: string,
+        input: { value: string; allowedCapabilityIds?: string[] },
+      ) =>
+        transport.request<Record<string, unknown>>({
+          method: 'PUT',
+          path: `/v1/credentials/capabilities/${encodeURIComponent(name)}`,
+          body: input,
+        }),
+      unset: (name: string) =>
+        transport.request<Record<string, unknown>>({
+          method: 'DELETE',
+          path: `/v1/credentials/capabilities/${encodeURIComponent(name)}`,
+        }),
+    },
   };
 }
 
@@ -98,6 +120,7 @@ export function createAgentMcpServersClient(transport: TransportLike) {
         appId?: string;
         required?: boolean;
         permissionPolicyIds?: string[];
+        allowedToolPatterns?: string[];
       } = {},
     ) =>
       transport.request<Record<string, unknown>>({
@@ -112,6 +135,7 @@ export function createAgentMcpServersClient(transport: TransportLike) {
         appId?: string;
         required?: boolean;
         permissionPolicyIds?: string[];
+        allowedToolPatterns?: string[];
       },
     ) =>
       transport.request<Record<string, unknown>>({

@@ -11,6 +11,9 @@ import {
 import type { RuntimeApp } from './runtime-app.js';
 import type { AsyncTaskQueue } from './async-task-queue.js';
 import type { ChannelWiringDeps } from './channel-wiring-types.js';
+import { RUNTIME_EVENT_TYPES } from '../../domain/events/runtime-event-types.js';
+import type { AppId } from '../../domain/app/app.js';
+import type { ConversationId } from '../../domain/conversation/conversation.js';
 
 type ChannelPersistenceRepository = RuntimeChatMetadataRepository &
   RuntimeMessageRepository;
@@ -143,7 +146,9 @@ export function createChannelPersistenceHandlers({
   return {
     ensureMessageRoute: ensureConfiguredConversationRoute,
     onMessage: async (chatJid: string, msg: NewMessage) => {
-      const canRoute = await ensureConfiguredConversationRoute(chatJid, msg);
+      const canRoute =
+        msg.admissionMode === 'event_only' ||
+        (await ensureConfiguredConversationRoute(chatJid, msg));
       if (!canRoute) return;
       let routes = routesForChat(chatJid, msg.thread_id, msg.providerAccountId);
       if (!msg.is_from_me && !msg.is_bot_message && routes.length > 0) {
@@ -171,6 +176,63 @@ export function createChannelPersistenceHandlers({
       const persistMessage = async () => {
         try {
           const repository = ops();
+          if (msg.admissionMode === 'event_only') {
+            if (!resolved.publishRuntimeEvent) {
+              throw new Error(
+                'Event-only provider ingress requires durable runtime events.',
+              );
+            }
+            const conversationId = canonicalConversationId(
+              chatJid,
+              msg.providerAccountId,
+            );
+            if (msg.providerAccountId) {
+              const providerExternalRef =
+                msg.providerData?.conversationExternalRef;
+              await resolved.ensureEventOnlyConversation?.({
+                appId: resolved.appId,
+                conversationId,
+                providerAccountId: msg.providerAccountId,
+                externalConversationId: chatJid.replace(/^[^:]+:/u, ''),
+                ...(msg.thread_id ? { threadId: msg.thread_id } : {}),
+                ...(providerExternalRef &&
+                typeof providerExternalRef === 'object' &&
+                !Array.isArray(providerExternalRef)
+                  ? {
+                      providerExternalRef: providerExternalRef as Record<
+                        string,
+                        unknown
+                      >,
+                    }
+                  : {}),
+                timestamp: msg.timestamp,
+              });
+            }
+            await repository.storeMessage(msg);
+            await resolved.publishRuntimeEvent({
+              appId: resolved.appId as AppId,
+              ...(msg.agentId ? { agentId: msg.agentId as never } : {}),
+              conversationId,
+              eventType: RUNTIME_EVENT_TYPES.CONVERSATION_MESSAGE_INBOUND,
+              actor: msg.sender,
+              correlationId: msg.id,
+              responseMode: 'none',
+              payload: {
+                messageId: msg.id,
+                conversationId,
+                externalConversationId: chatJid.replace(/^[^:]+:/u, ''),
+                providerId: msg.provider ?? chatJid.split(':', 1)[0],
+                providerAccountId: msg.providerAccountId ?? null,
+                threadId: msg.thread_id ?? null,
+                replyToId: msg.reply_to_message_id ?? null,
+                sender: { id: msg.sender, name: msg.sender_name },
+                text: msg.content,
+                providerData: msg.providerData ?? {},
+              },
+              createdAt: msg.timestamp as never,
+            });
+            return;
+          }
           const shouldEnqueueLiveAdmission =
             routes.length > 0 && !msg.is_from_me && !msg.is_bot_message;
           let stored = false;
@@ -230,7 +292,10 @@ export function createChannelPersistenceHandlers({
       name?: string,
       channel?: string,
       isGroup?: boolean,
-      options?: { providerAccountId?: string },
+      options?: {
+        providerAccountId?: string;
+        externalRef?: Record<string, unknown>;
+      },
     ) => {
       if (isGroup !== undefined) chatIsGroup.set(chatJid, Boolean(isGroup));
       const persistMetadata = async () => {
@@ -259,4 +324,15 @@ export function createChannelPersistenceHandlers({
       );
     },
   };
+}
+
+function canonicalConversationId(
+  jid: string,
+  providerAccountId?: string,
+): ConversationId {
+  return (
+    providerAccountId
+      ? `conversation:${providerAccountId}:${jid}`
+      : `conversation:${jid}`
+  ) as ConversationId;
 }

@@ -56,6 +56,15 @@ import { asyncCommandPrivateCorrelation } from './async-task-execution-payload.j
 import { recoverQueuedAsyncTasks } from './async-command-queue-recovery.js';
 import { createAdmittedAsyncTask } from './async-task-admission.js';
 import { evaluateAsyncCommandStartPolicy } from './async-command-start-policy.js';
+import {
+  type AsyncTaskListInput,
+  type AsyncTaskWaitInput,
+  getScopedAsyncTask,
+  isAgentFacingTask,
+  listVisibleAsyncTasks,
+  type ScopedAsyncTaskInput,
+  waitForAsyncTasks,
+} from './async-task-visibility.js';
 
 const MAX_ACTIVE_ASYNC_COMMANDS_PER_APP = 4;
 const MAX_ACTIVE_ASYNC_COMMANDS_PER_AGENT = 2;
@@ -169,6 +178,9 @@ export class AsyncCommandTaskService {
   private readonly createRecoveredDelegatedAgentRun:
     | AsyncCommandTaskServiceOptions['createRecoveredDelegatedAgentRun']
     | undefined;
+  private readonly onDelegatedTaskTerminal:
+    | AsyncCommandTaskServiceOptions['onDelegatedTaskTerminal']
+    | undefined;
 
   constructor(
     private readonly repository: AsyncTaskRepository,
@@ -180,6 +192,7 @@ export class AsyncCommandTaskService {
     this.prepareRun = options.prepareRun ?? (async () => undefined);
     this.createRecoveredDelegatedAgentRun =
       options.createRecoveredDelegatedAgentRun;
+    this.onDelegatedTaskTerminal = options.onDelegatedTaskTerminal;
   }
 
   async start(
@@ -253,7 +266,10 @@ export class AsyncCommandTaskService {
 
   async startDelegatedAgent(input: StartDelegatedAgentTaskInput) {
     return startDelegatedAgentTask({
-      taskInput: input,
+      taskInput: {
+        ...input,
+        onTerminal: this.onDelegatedTaskTerminal ?? input.onTerminal,
+      },
       repository: this.repository,
       active: this.active,
       createTask: (createInput) => this.repository.createTask(createInput),
@@ -280,34 +296,18 @@ export class AsyncCommandTaskService {
     const task = await this.repository.getTask(taskId);
     return task && isAgentFacingTask(task) ? toPublicAsyncTaskDto(task) : null;
   }
-  async getScoped(input: {
-    taskId: string;
-    appId: string;
-    agentId: string;
-    conversationId?: string | null;
-    providerAccountId?: string | null;
-    threadId?: string | null;
-    parentTaskId?: string | null;
-  }): Promise<PublicAsyncTaskDto | null> {
-    const task = await this.repository.getTask(input.taskId);
-    return task && isAgentFacingTask(task) && taskInScope(task, input)
-      ? toPublicAsyncTaskDto(task)
-      : null;
+  async getScoped(input: ScopedAsyncTaskInput) {
+    return getScopedAsyncTask(this.repository, input);
   }
-  async list(input: {
-    appId: string;
-    agentId?: string;
-    conversationId?: string | null;
-    providerAccountId?: string | null;
-    threadId?: string | null;
-    parentRunId?: string | null;
-    parentTaskId?: string | null;
-    limit?: number;
-  }): Promise<PublicAsyncTaskDto[]> {
-    const tasks = await this.repository.listTasks(input);
-    return tasks
-      .filter((task) => isAgentFacingTask(task) && taskInScope(task, input))
-      .map(toPublicAsyncTaskDto);
+  async list(input: AsyncTaskListInput) {
+    return listVisibleAsyncTasks(this.repository, input);
+  }
+  async wait(input: AsyncTaskWaitInput) {
+    return waitForAsyncTasks({
+      request: input,
+      repository: this.repository,
+      changes: this.taskChanges,
+    });
   }
   async message(input: {
     taskId: string;
@@ -398,6 +398,7 @@ export class AsyncCommandTaskService {
       repository: this.repository,
       pending: this.pending,
       createDelegatedRun: this.createRecoveredDelegatedAgentRun,
+      onDelegatedTaskTerminal: this.onDelegatedTaskTerminal,
       cancelLinkedChildTasks: async (parent) => {
         const result = await this.cancelChildTasks(parent);
         return result.ok ? result.cancelled : 0;
@@ -693,8 +694,4 @@ export class AsyncCommandTaskService {
         this.execute(task, command, input, controller, launchControl),
     });
   }
-}
-
-function isAgentFacingTask(task: AsyncTaskRecord): boolean {
-  return task.kind !== 'session_compaction';
 }

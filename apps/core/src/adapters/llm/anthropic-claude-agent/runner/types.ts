@@ -58,6 +58,9 @@ export interface AgentRunnerInput {
   configuredThinking?:
     | { mode: 'off'; budgetTokens?: never }
     | { mode: 'on'; budgetTokens?: number };
+  responseSchema?: Record<string, unknown>;
+  callerResolvedTools?: import('../../../../domain/types.js').CallerResolvedToolsConfig;
+  maxOutputTokens?: number;
 }
 
 export interface AgentRunnerOutput {
@@ -101,6 +104,7 @@ export interface RunnerCapabilitiesForPermission {
 export interface AgentRunnerRuntimeEventOutput {
   appId?: string;
   agentId?: string;
+  sessionId?: string;
   runId?: string;
   jobId?: string;
   conversationId?: string;

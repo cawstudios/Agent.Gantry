@@ -1,4 +1,10 @@
-import type { AgentControlOverrides, NewMessage } from '../../domain/types.js';
+import type {
+  AgentControlOverrides,
+  AppMessageResponseRoute,
+  CallerResolvedToolsConfig,
+  NewMessage,
+  SessionContinuityMode,
+} from '../../domain/types.js';
 import type {
   RuntimeEvent,
   RuntimeEventFilter,
@@ -12,7 +18,9 @@ import type {
   RuntimeMessageRepository,
 } from '../../domain/repositories/ops-repo.js';
 import type { LiveAdmissionWorkItemEnqueueResult } from '../../domain/ports/live-turns.js';
+import type { SdkSessionQueuePolicy } from '../../domain/ports/live-turns.js';
 import type {
+  AgentRepository,
   AgentRunRepository,
   AgentSessionRepository,
   MessageRepository,
@@ -23,12 +31,16 @@ import type { AgentRuntime } from '../../shared/agent-runtime.js';
 import { ApplicationError } from '../common/application-error.js';
 import { isValidControlId } from '../../shared/control-id.js';
 import { nowMs as currentTimeMs } from '../../shared/time/datetime.js';
+import { MAX_WORKSPACE_FOLDER_LENGTH } from '../../shared/workspace-folder-policy.js';
+import { folderForAgentId } from '../../domain/agent/agent-folder-id.js';
+import { canonicalJson } from '../../shared/canonical-json.js';
 
 type ControlResponseMode = Exclude<RuntimeResponseMode, 'sse'> | 'sse';
 
 export type SessionAppRecord = {
   sessionId: string;
   appId: string;
+  agentId?: string | null;
   conversationId: string;
   conversationJid: string;
   workspaceKey: string;
@@ -49,6 +61,7 @@ export interface SessionControlPort {
     conversationId: string;
     conversationJid: string;
     folder: string;
+    agentId?: string;
     title?: string | null;
     defaultResponseMode?: ControlResponseMode;
     defaultWebhookId?: string | null;
@@ -78,6 +91,7 @@ export type SessionInteractionDeps = {
   control: SessionControlPort;
   ops: RuntimeChatMetadataRepository & RuntimeMessageRepository;
   repositories: {
+    agents: AgentRepository;
     agentSessions: AgentSessionRepository;
     providerSessions: ProviderSessionRepository;
     messages: MessageRepository;
@@ -104,6 +118,8 @@ export class SessionInteractionModule {
   async ensureSession(input: {
     appId: string;
     assertedAppId?: string | null;
+    agentId?: string | null;
+    agentName?: string | null;
     conversationId: string;
     title?: string | null;
     responseMode?: unknown;
@@ -127,6 +143,11 @@ export class SessionInteractionModule {
       );
     }
     const conversationJid = `app:${input.appId}:${conversationId}`;
+    const selectedAgent = await this.resolveSessionAgent({
+      appId: input.appId,
+      agentId: input.agentId ?? null,
+      agentName: input.agentName ?? null,
+    });
     const group = makeAppGroup({
       appId: input.appId,
       conversationId,
@@ -136,6 +157,7 @@ export class SessionInteractionModule {
         .slice(0, 12),
       addedAt: this.deps.now(),
     });
+    if (selectedAgent) group.folder = selectedAgent.folder;
     const defaultWebhookId = await this.resolveOwnedWebhookId(
       input.appId,
       input.webhookId ?? null,
@@ -145,11 +167,52 @@ export class SessionInteractionModule {
       conversationId,
       conversationJid,
       folder: group.folder,
+      agentId: selectedAgent?.id,
       title: input.title ?? null,
       defaultResponseMode: normalizeResponseMode(input.responseMode, 'sse'),
       defaultWebhookId,
     });
     return { session, registerGroup: { conversationJid, group } };
+  }
+
+  private async resolveSessionAgent(input: {
+    appId: string;
+    agentId: string | null;
+    agentName: string | null;
+  }): Promise<{ id: string; folder: string } | null> {
+    const agentId = input.agentId?.trim() ?? '';
+    const agentName = input.agentName?.trim() ?? '';
+    if (agentId && agentName) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        'Specify either agentId or agentName, not both',
+      );
+    }
+    if (!agentId && !agentName) return null;
+    const matches = agentId
+      ? [await this.deps.repositories.agents.getAgent(agentId as never)].filter(
+          Boolean,
+        )
+      : (
+          await this.deps.repositories.agents.listAgents(input.appId as never)
+        ).filter((agent) => agent.name === agentName);
+    if (matches.length !== 1) {
+      throw new ApplicationError(
+        'NOT_FOUND',
+        agentId ? 'Agent not found' : 'Exactly one matching agent is required',
+      );
+    }
+    const agent = matches[0]!;
+    if (String(agent.appId) !== input.appId || agent.status !== 'active') {
+      throw new ApplicationError('NOT_FOUND', 'Active agent not found');
+    }
+    const folder = folderForAgentId(agent.id);
+    if (!folder)
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        'Agent has no workspace folder',
+      );
+    return { id: String(agent.id), folder };
   }
 
   async getSessionDetails(input: {
@@ -212,9 +275,21 @@ export class SessionInteractionModule {
     return { runs };
   }
 
+  /** Verifies app ownership and returns the queue key for cancellation. */
+  async getQueueKey(input: {
+    appId: string;
+    sessionId: string;
+    threadId?: string | null;
+  }): Promise<string> {
+    const session = await this.requireSession(input);
+    return makeSessionQueueKey(session.conversationJid, input.threadId ?? null);
+  }
+
   async acceptMessage(input: {
     appId: string;
     sessionId: string;
+    idempotencyKey?: string;
+    queuePolicy?: SdkSessionQueuePolicy;
     message: string;
     senderId?: string;
     senderName?: string;
@@ -224,26 +299,37 @@ export class SessionInteractionModule {
     webhookId?: string | null;
     responseSchema?: Record<string, unknown>;
     agentControls?: AgentControlOverrides;
+    callerResolvedTools?: CallerResolvedToolsConfig;
+    continuityMode?: SessionContinuityMode;
     durableLiveAdmission?: boolean;
     beforeDurableAdmission?: () => Promise<void> | void;
   }): Promise<{
     accepted: true;
+    replayed: boolean;
     messageId: string;
     acceptedEventId: number;
     enqueue: SessionQueueIntent;
   }> {
     const session = await this.requireSession(input);
+    const agentSession =
+      await this.deps.repositories.agentSessions.getAgentSession(
+        session.sessionId as never,
+      );
+    if (!agentSession) {
+      throw new ApplicationError('NOT_FOUND', 'Session not found');
+    }
+    if (agentSession.status === 'archived') {
+      throw new ApplicationError('CONFLICT', 'Session is archived');
+    }
     const text = input.message.trim();
     if (!text) {
       throw new ApplicationError('INVALID_REQUEST', 'message is required');
     }
-    if (
-      input.responseSchema &&
-      this.deps.getConfiguredAgentRuntime?.(session.workspaceKey) !== 'inline'
-    ) {
+    const idempotencyKey = input.idempotencyKey?.trim() ?? '';
+    if (idempotencyKey.length > 200) {
       throw new ApplicationError(
         'INVALID_REQUEST',
-        'response_schema requires an inline agent runtime',
+        'idempotencyKey must contain at most 200 characters',
       );
     }
     const threadId = input.threadId?.trim() || null;
@@ -255,6 +341,26 @@ export class SessionInteractionModule {
       input.appId,
       input.webhookId ?? session.defaultWebhookId,
     );
+    const requestFingerprint = idempotencyKey
+      ? this.deps.stableHash(
+          canonicalJson({
+            appId: input.appId,
+            sessionId: input.sessionId,
+            message: text,
+            senderId: input.senderId ?? 'sdk',
+            senderName: input.senderName ?? 'SDK',
+            threadId,
+            correlationId: input.correlationId ?? null,
+            responseMode,
+            webhookId,
+            responseSchema: input.responseSchema ?? null,
+            agentControls: input.agentControls ?? null,
+            callerResolvedTools: input.callerResolvedTools ?? null,
+            continuityMode: input.continuityMode ?? 'provider',
+            queuePolicy: input.queuePolicy ?? null,
+          }),
+        )
+      : null;
     const now = this.deps.now();
     const messageId = this.deps.createId();
     const message: NewMessage = {
@@ -271,6 +377,15 @@ export class SessionInteractionModule {
       thread_id: threadId ?? undefined,
       responseSchema: input.responseSchema,
       agentControls: input.agentControls,
+      callerResolvedTools: input.callerResolvedTools,
+      continuityMode: input.continuityMode,
+      appResponseRoute: {
+        sessionId: session.sessionId,
+        threadId,
+        responseMode,
+        webhookId,
+        correlationId: input.correlationId ?? null,
+      },
     };
     await this.deps.ops.storeChatMetadata(
       session.conversationJid,
@@ -279,13 +394,6 @@ export class SessionInteractionModule {
       'app',
       true,
     );
-    await this.deps.control.upsertAppResponseRoute({
-      sessionId: session.sessionId,
-      threadId,
-      responseMode,
-      webhookId,
-      correlationId: input.correlationId ?? null,
-    });
     const acceptedEvent: RuntimeEventPublishInput = {
       appId: session.appId as never,
       eventType: RUNTIME_EVENT_TYPES.SESSION_MESSAGE_INBOUND,
@@ -296,6 +404,7 @@ export class SessionInteractionModule {
       },
       actor: 'sdk',
       sessionId: session.sessionId as never,
+      conversationId: session.conversationJid as never,
       threadId: threadId ? (threadId as never) : undefined,
       correlationId: input.correlationId ?? null,
       responseMode,
@@ -322,6 +431,18 @@ export class SessionInteractionModule {
         message,
         liveAdmission: {
           appId: liveAdmissionAppId,
+          agentId: session.agentId,
+          agentSessionId: session.sessionId,
+          ...(idempotencyKey && requestFingerprint
+            ? {
+                sdkSessionAdmissionRequest: {
+                  requestMessageId: messageId,
+                  idempotencyKey,
+                  requestFingerprint,
+                  queuePolicy: input.queuePolicy,
+                },
+              }
+            : {}),
           triggerDecision: {
             source: 'sdk_session',
             responseMode,
@@ -329,6 +450,32 @@ export class SessionInteractionModule {
           now,
         },
       });
+      if (result.outcome === 'replayed') {
+        return {
+          accepted: true,
+          replayed: true,
+          messageId: result.messageId,
+          acceptedEventId: result.acceptedEventId,
+          enqueue: {
+            conversationJid: session.conversationJid,
+            threadId,
+            queueKey: makeSessionQueueKey(session.conversationJid, threadId),
+            durableAdmissionCreated: true,
+          },
+        };
+      }
+      if (result.outcome === 'fingerprint_conflict') {
+        throw new ApplicationError(
+          'SESSION_IDEMPOTENCY_CONFLICT',
+          'The idempotency key was already used for a different session message.',
+        );
+      }
+      if (result.outcome === 'capacity_exceeded') {
+        throw new ApplicationError(
+          'SESSION_QUEUE_FULL',
+          'The private session already has the maximum number of active and waiting messages.',
+        );
+      }
       accepted = result.event;
       admissionResult = result.liveAdmissionResult;
       durableAdmissionCreated = !!admissionResult;
@@ -341,6 +488,7 @@ export class SessionInteractionModule {
     }
     return {
       accepted: true,
+      replayed: false,
       messageId,
       acceptedEventId: accepted.eventId,
       enqueue: {
@@ -349,6 +497,58 @@ export class SessionInteractionModule {
         queueKey: makeSessionQueueKey(session.conversationJid, threadId),
         durableAdmissionCreated,
       },
+    };
+  }
+
+  async archiveSession(input: { appId: string; sessionId: string }): Promise<{
+    archived: true;
+    alreadyArchived: boolean;
+    queueKey: string;
+    queueKeys: string[];
+  }> {
+    const appSession = await this.requireSession(input);
+    const session = await this.deps.repositories.agentSessions.getAgentSession(
+      appSession.sessionId as never,
+    );
+    if (!session) {
+      throw new ApplicationError('NOT_FOUND', 'Session not found');
+    }
+    const alreadyArchived = session.status === 'archived';
+    const updatedAt = this.deps.now();
+    if (!alreadyArchived) {
+      await this.deps.repositories.agentSessions.saveAgentSession({
+        ...session,
+        status: 'archived',
+        updatedAt,
+      });
+    }
+    const providerSession =
+      await this.deps.repositories.providerSessions.getLatestProviderSession({
+        agentSessionId: session.id,
+      });
+    if (providerSession && providerSession.status !== 'expired') {
+      await this.deps.repositories.providerSessions.markProviderSessionStatus(
+        providerSession.id,
+        'expired',
+        updatedAt,
+      );
+    }
+    const threadIds = await this.deps.ops.getMessageThreadIds(
+      appSession.conversationJid,
+    );
+    const queueKeys = Array.from(
+      new Set([
+        makeSessionQueueKey(appSession.conversationJid),
+        ...threadIds.map((threadId) =>
+          makeSessionQueueKey(appSession.conversationJid, threadId),
+        ),
+      ]),
+    );
+    return {
+      archived: true,
+      alreadyArchived,
+      queueKey: queueKeys[0]!,
+      queueKeys,
     };
   }
 
@@ -401,6 +601,8 @@ export class SessionInteractionModule {
     conversationJid: string;
     eventType: RuntimeEventPublishInput['eventType'];
     payload: Record<string, unknown>;
+    runId?: string;
+    appResponseRoute?: AppMessageResponseRoute;
   }): Promise<{ emitted: boolean; eventId?: number }> {
     const session = await this.deps.control.getAppSessionByChatJid(
       input.conversationJid,
@@ -410,16 +612,29 @@ export class SessionInteractionModule {
       typeof input.payload.threadId === 'string'
         ? input.payload.threadId
         : null;
-    const route = await this.deps.control.getAppResponseRoute({
-      sessionId: session.sessionId,
-      threadId,
-    });
+    if (
+      input.appResponseRoute &&
+      input.appResponseRoute.sessionId !== session.sessionId
+    ) {
+      throw new ApplicationError(
+        'INVALID_REQUEST',
+        'App response route does not match the outbound session',
+      );
+    }
+    const route =
+      input.appResponseRoute ??
+      (await this.deps.control.getAppResponseRoute({
+        sessionId: session.sessionId,
+        threadId,
+      }));
     const event = await this.deps.runtimeEvents.publish({
       appId: session.appId as never,
       eventType: input.eventType,
       payload: input.payload,
       actor: 'agent',
       sessionId: session.sessionId as never,
+      ...(input.runId ? { runId: input.runId as never } : {}),
+      conversationId: session.conversationJid as never,
       threadId: threadId ? (threadId as never) : undefined,
       correlationId: route?.correlationId ?? null,
       responseMode: route?.responseMode ?? session.defaultResponseMode,
@@ -514,7 +729,7 @@ export function makeAppGroup(input: {
   const app = sanitizeSegment(input.appId) || 'app';
   const conversation = sanitizeSegment(input.conversationId) || 'session';
   const prefix = `app_${input.identityHash}_`;
-  const remaining = 96 - prefix.length;
+  const remaining = MAX_WORKSPACE_FOLDER_LENGTH - prefix.length;
   const appPart = app.slice(0, Math.max(8, Math.floor(remaining * 0.4)));
   const conversationPart = conversation.slice(
     0,
@@ -522,7 +737,10 @@ export function makeAppGroup(input: {
   );
   return {
     name: `${input.appId}:${input.conversationId}`,
-    folder: `${prefix}${appPart}_${conversationPart}`.slice(0, 96),
+    folder: `${prefix}${appPart}_${conversationPart}`.slice(
+      0,
+      MAX_WORKSPACE_FOLDER_LENGTH,
+    ),
     trigger: '',
     added_at: input.addedAt,
     requiresTrigger: false,

@@ -1560,6 +1560,43 @@ describe('Postgres migration journal', () => {
     expect(schema).toContain('idx_live_admission_work_items_claimed_expired');
   });
 
+  it('registers SDK-session admission receipt lifecycle columns and indexes', () => {
+    const journalPath = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',
+    );
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    expect(
+      journal.entries.find(
+        (entry) => entry.tag === '0102_sdk_session_message_admission',
+      ),
+    ).toMatchObject({ idx: 102 });
+
+    const migration = fs.readFileSync(
+      path.resolve(
+        'apps/core/src/adapters/storage/postgres/schema/migrations/0102_sdk_session_message_admission.sql',
+      ),
+      'utf8',
+    );
+    for (const column of [
+      'request_message_id',
+      'request_fingerprint',
+      'accepted_event_id',
+      'turn_state',
+      'queue_deadline_at',
+      'execution_timeout_ms',
+      'execution_deadline_at',
+      'turn_started_at',
+      'turn_ended_at',
+      'terminal_code',
+    ]) {
+      expect(migration).toContain(`"${column}"`);
+    }
+    expect(migration).toContain('idx_live_admission_sdk_session_turns');
+    expect(migration).toContain('idx_live_admission_sdk_queue_deadline');
+  });
+
   it('registers live turn recoverable sweep index migration and schema', () => {
     const journalPath = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations/meta/_journal.json',

@@ -113,6 +113,13 @@ describe('CanonicalMessageOpsService', () => {
         thinking: { mode: 'on', budgetTokens: 2048 },
         maxOutputTokens: 4096,
       },
+      appResponseRoute: {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        responseMode: 'sse',
+        webhookId: null,
+        correlationId: 'corr-1',
+      },
       attachments: [
         {
           id: 'attachment-1',
@@ -133,6 +140,13 @@ describe('CanonicalMessageOpsService', () => {
       effort: 'high',
       thinking: { mode: 'on', budgetTokens: 2048 },
       max_output_tokens: 4096,
+      app_response_route: {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        responseMode: 'sse',
+        webhookId: null,
+        correlationId: 'corr-1',
+      },
     });
     expect(ref).not.toHaveProperty('content');
     expect(ref).not.toHaveProperty('reply_to_message_content');
@@ -176,6 +190,7 @@ describe('CanonicalMessageOpsService', () => {
     expect(result).toMatchObject([
       {
         id: 'provider-message-1',
+        canonicalMessageId: 'message:tg:one:provider-message-1',
         chat_jid: 'tg:one',
         content: 'sensitive body',
         thread_id: 'thread-1',
@@ -185,6 +200,13 @@ describe('CanonicalMessageOpsService', () => {
           effort: 'high',
           thinking: { mode: 'on', budgetTokens: 2048 },
           maxOutputTokens: 4096,
+        },
+        appResponseRoute: {
+          sessionId: 'session-1',
+          threadId: 'thread-1',
+          responseMode: 'sse',
+          webhookId: null,
+          correlationId: 'corr-1',
         },
         attachments: [
           {
@@ -1049,6 +1071,36 @@ describe('CanonicalMessageOpsService', () => {
         'sl:C123::thread:thread-1::agent:agent%3Aalpha::provider_account:channel-providerAccount%3Adefault%3Aslack',
       idempotencyKey:
         'live-admission:app-one:agent:alpha:channel-providerAccount:default:slack:sl:C123:thread-1:1710000001.000100',
+    });
+
+    await repository.saveMessageWithExecutor(
+      tx as never,
+      {
+        id: 'sdk-message-1',
+        chat_jid: 'app:app-one:conversation-1',
+        provider: 'app',
+        sender: 'user-1',
+        sender_name: 'Ravi',
+        content: 'hello from sdk',
+        timestamp: '2026-05-06T00:00:01.000Z',
+        thread_id: 'thread-1',
+      },
+      { liveAdmission: { appId: 'app-one', agentId: 'alpha' } },
+    );
+
+    const appAdmissionRow = insertedValues.find(
+      (value): value is Record<string, unknown> =>
+        !!value &&
+        typeof value === 'object' &&
+        String((value as Record<string, unknown>).id).startsWith(
+          'live-admission:',
+        ) &&
+        String((value as Record<string, unknown>).id).includes('sdk-message-1'),
+    );
+    expect(appAdmissionRow).toMatchObject({
+      agentId: 'agent:alpha',
+      queueJid:
+        'app:app-one:conversation-1::thread:thread-1::agent:agent%3Aalpha',
     });
   });
 

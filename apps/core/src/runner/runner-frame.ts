@@ -16,6 +16,7 @@ export const OUTPUT_END_MARKER = '---GANTRY_OUTPUT_END---';
 export interface RunnerRuntimeEventFrame {
   appId?: string;
   agentId?: string;
+  sessionId?: string;
   runId?: string;
   jobId?: string;
   conversationId?: string;

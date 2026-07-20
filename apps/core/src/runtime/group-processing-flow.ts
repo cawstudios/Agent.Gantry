@@ -1,6 +1,6 @@
 import type { FinalProgressState } from './progress-updates.js';
 
-type GroupTurnRunResult = 'success' | 'error' | 'stopped';
+type GroupTurnRunResult = 'success' | 'error' | 'stopped' | 'timed_out';
 
 export async function handleFailure(input: {
   outputSentToUser: boolean;
@@ -8,6 +8,7 @@ export async function handleFailure(input: {
   groupName: string;
   queueJid: string;
   previousCursor: string;
+  processedCursor: string;
   deps: {
     setCursor: (chatJid: string, timestamp: string) => void;
     saveState: () => Promise<void> | void;
@@ -24,6 +25,7 @@ export async function handleFailure(input: {
     return true;
   }
   if (input.acknowledgeFailedTurn) {
+    input.deps.setCursor(input.queueJid, input.processedCursor);
     await input.deps.saveState();
     input.logger.warn(
       { group: input.groupName },
@@ -92,7 +94,7 @@ export function resolveGroupTurnFinalProgressState(input: {
   outputSentToUser: boolean;
 }): FinalProgressState {
   if (input.output === 'stopped') return 'stopped';
-  if (input.output === 'error') return 'failed';
+  if (input.output === 'error' || input.output === 'timed_out') return 'failed';
   if (input.hadError && !input.outputSentToUser) return 'failed';
   if (
     input.sawDeliveryIncomplete ||

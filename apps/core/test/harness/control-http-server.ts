@@ -29,6 +29,15 @@ export async function startTestControlServer(input: {
   processRole?: 'all' | 'control' | 'live-worker' | 'job-worker';
   liveExecution?: boolean;
   liveTurnsEnabled?: boolean;
+  getChannelTransportHealth?: () => Array<{
+    providerId: string;
+    configured: boolean;
+    connected: boolean;
+    configuredAccountCount: number;
+    connectedAccountCount: number;
+    authenticatedConversationRegistrationCount: number;
+    authenticatedConversationRegistrationAvailable: boolean;
+  }>;
 }) {
   const port = await reserveControlPort();
   process.env.GANTRY_CONTROL_PORT = String(port);
@@ -52,6 +61,7 @@ export async function startTestControlServer(input: {
     ...(input.liveTurnsEnabled !== undefined
       ? { liveTurnsEnabled: input.liveTurnsEnabled }
       : {}),
+    getChannelTransportHealth: input.getChannelTransportHealth,
   });
   await waitForControlPort(port);
   return {

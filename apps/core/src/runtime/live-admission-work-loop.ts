@@ -96,21 +96,49 @@ export function startLiveAdmissionWorkLoop(
   };
 
   const failClaim = async (
-    itemId: string,
+    item: LiveAdmissionWorkItem,
     claimToken: string,
     reason: string,
   ): Promise<void> => {
+    if (item.requestFingerprint) {
+      const rejectClaim =
+        input.liveAdmissions.rejectClaimedSdkSessionAdmission?.bind(
+          input.liveAdmissions,
+        );
+      if (!rejectClaim) {
+        input.warn(
+          { itemId: item.id, reason },
+          'Cannot atomically reject claimed SDK admission',
+        );
+        return;
+      }
+      const rejected = await rejectClaim({
+        id: item.id,
+        claimToken,
+        workerInstanceId: input.workerInstanceId,
+        code: 'admission_failed',
+        retryable: true,
+      });
+      if (!rejected) {
+        input.warn(
+          { itemId: item.id, reason },
+          'Failed to atomically reject claimed SDK admission',
+        );
+      }
+      return;
+    }
     const ok = await input.liveAdmissions.settleLiveAdmissionWorkItem({
-      id: itemId,
+      id: item.id,
       claimToken,
       workerInstanceId: input.workerInstanceId,
       state: 'failed',
     });
     if (!ok) {
       input.warn(
-        { itemId, reason },
+        { itemId: item.id, reason },
         'Failed to dead-letter live admission work item claim',
       );
+      return;
     }
   };
 
@@ -267,7 +295,7 @@ export function startLiveAdmissionWorkLoop(
             continue;
           }
           if (shouldFailClaim(item.failureCount, result)) {
-            await failClaim(item.id, claimToken, result);
+            await failClaim(item, claimToken, result);
             continue;
           }
           await deferClaim(item.id, claimToken, result);
@@ -277,7 +305,7 @@ export function startLiveAdmissionWorkLoop(
             'Live admission work item processing failed; deferring retry',
           );
           if (shouldFailClaim(item.failureCount, 'retry')) {
-            await failClaim(item.id, claimToken, 'retry');
+            await failClaim(item, claimToken, 'retry');
           } else {
             await deferClaim(item.id, claimToken, 'retry');
           }

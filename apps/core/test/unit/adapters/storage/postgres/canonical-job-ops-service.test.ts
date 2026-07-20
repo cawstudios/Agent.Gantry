@@ -13,6 +13,7 @@ describe('CanonicalJobOpsService', () => {
 
     await service.upsertJob({
       id: 'job-1',
+      app_id: 'app-one',
       name: 'Job',
       prompt: 'Run',
       schedule_type: 'interval',
@@ -36,8 +37,10 @@ describe('CanonicalJobOpsService', () => {
     });
 
     const stored = vi.mocked(repository.upsertJob).mock.calls[0]?.[0] as {
+      appId: string;
       targetJson: string;
     };
+    expect(stored.appId).toBe('app-one');
     const target = JSON.parse(stored.targetJson) as Record<string, unknown>;
     expect(target.capabilityPolicy).toBeUndefined();
     expect(target.executionContext).toEqual({
@@ -57,6 +60,51 @@ describe('CanonicalJobOpsService', () => {
     expect(target.accessRequirements).toEqual([
       { target: { kind: 'tool_rule', rule: 'Browser' } },
     ]);
+  });
+
+  it('round-trips recurring cron schedule semantics through upsert', async () => {
+    let stored:
+      | Parameters<PostgresCanonicalJobRepository['upsertJob']>[0]
+      | undefined;
+    const repository = {
+      findJobById: vi.fn(async () => stored ?? null),
+      upsertJob: vi.fn(
+        async (
+          record: Parameters<PostgresCanonicalJobRepository['upsertJob']>[0],
+        ) => {
+          stored = record;
+        },
+      ),
+    } as unknown as PostgresCanonicalJobRepository;
+    const service = new CanonicalJobOpsService(repository);
+
+    await service.upsertJob({
+      id: 'job-cron',
+      name: 'Recurring job',
+      prompt: 'Run discovery',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      schedule_timezone: 'Asia/Kolkata',
+      misfire_policy: 'coalesce',
+      overlap_policy: 'skip',
+      schedule_metadata: { scheduleId: 'source-discovery', generation: 3 },
+      execution_context: {
+        conversationJid: 'app:session-1',
+        threadId: null,
+        workspaceKey: 'agent_one',
+        sessionId: 'session-1',
+      },
+      workspace_key: 'agent_one',
+    });
+
+    await expect(service.getJobById('job-cron')).resolves.toMatchObject({
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      schedule_timezone: 'Asia/Kolkata',
+      misfire_policy: 'coalesce',
+      overlap_policy: 'skip',
+      schedule_metadata: { scheduleId: 'source-discovery', generation: 3 },
+    });
   });
 
   it('merges canonical session_id into executionContext when target sessionId is missing', async () => {
@@ -104,6 +152,7 @@ describe('CanonicalJobOpsService', () => {
     const repository = {
       findJobById: vi.fn(async () => ({
         id: 'job-1',
+        appId: 'app-one',
         agentId: 'agent:agent_one',
         name: 'Job',
         prompt: 'Run',
@@ -144,6 +193,7 @@ describe('CanonicalJobOpsService', () => {
 
     await expect(service.getJobById('job-1')).resolves.toMatchObject({
       session_id: 'session-1',
+      app_id: 'app-one',
       thread_id: null,
       workspace_key: 'agent_one',
       execution_context: {

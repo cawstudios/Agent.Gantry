@@ -298,6 +298,8 @@ async function processQueueMessages(
     cursorAfter: string | null;
     responseSchema?: Record<string, unknown>;
     agentControls?: AgentControlOverrides;
+    callerResolvedTools?: import('../domain/types.js').CallerResolvedToolsConfig;
+    appResponseRoute?: import('../domain/types.js').AppMessageResponseRoute;
   },
 ): Promise<MessageAdmissionProcessingResult> {
   const opsRepository = resolveMessageRepository(deps);
@@ -387,7 +389,9 @@ async function processQueueMessages(
   }
   if (
     replay.responseSchema !== undefined ||
-    replay.agentControls !== undefined
+    replay.agentControls !== undefined ||
+    replay.callerResolvedTools !== undefined ||
+    replay.appResponseRoute !== undefined
   ) {
     await deps.queue.closeStdin(queueJid);
     return enqueueMessageCheck(deps, queueJid);

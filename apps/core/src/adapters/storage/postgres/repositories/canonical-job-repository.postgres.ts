@@ -7,7 +7,8 @@ import type { RuntimeEventType } from '../../../../domain/events/runtime-event-t
 import { nowIso as currentIso } from '../../../../shared/time/datetime.js';
 import * as pgSchema from '../schema/schema.js';
 // prettier-ignore
-import { CANONICAL_APP_ID, type CanonicalDb, PostgresCanonicalGraphRepository, configVersionIdForAgent, jsonb, jsonText, parseJson } from './canonical-graph-repository.postgres.js';
+import { CANONICAL_APP_ID, type CanonicalDb, PostgresCanonicalGraphRepository, jsonb, jsonText } from './canonical-graph-repository.postgres.js';
+import { resolveCanonicalJobRunGraph } from './canonical-job-run-graph.postgres.js';
 import { CANONICAL_JOB_EVENT_TYPES } from './canonical-job-event-types.postgres.js';
 import { releaseStaleCanonicalJobLeases } from './canonical-job-lease-release.postgres.js';
 import { insertCanonicalJobRun } from './canonical-job-run-insert.postgres.js';
@@ -23,6 +24,7 @@ import {
 
 export interface CanonicalJobRecord {
   id: string;
+  appId: string;
   agentId: string | null;
   name: string;
   prompt: string;
@@ -44,6 +46,7 @@ export interface CanonicalJobRecord {
 
 export interface JobRecordInput {
   id: string;
+  appId: string;
   agentId: string;
   name: string;
   prompt: string;
@@ -144,11 +147,17 @@ function ownedByAppClause(jobId: unknown, ownerAppId?: string) {
     ? sql`exists (
         select 1
         from ${pgSchema.canonicalJobsPostgres} owned_job
-        join ${pgSchema.controlHttpSessionsPostgres} app_session
-          on ((owned_job.target_json #>> '{executionContext,sessionId}' is not null and app_session.session_id = owned_job.target_json #>> '{executionContext,sessionId}')
-            or (owned_job.target_json #>> '{executionContext,sessionId}' is null and app_session.external_ref_json->>'chatJid' = owned_job.target_json #>> '{executionContext,conversationJid}'))
         where owned_job.id = ${jobId}
-          and app_session.app_id = ${ownerAppId}
+          and (
+            owned_job.app_id = ${ownerAppId}
+            or exists (
+              select 1
+              from ${pgSchema.controlHttpSessionsPostgres} app_session
+              where ((owned_job.target_json #>> '{executionContext,sessionId}' is not null and app_session.session_id = owned_job.target_json #>> '{executionContext,sessionId}')
+                or (owned_job.target_json #>> '{executionContext,sessionId}' is null and app_session.external_ref_json->>'chatJid' = owned_job.target_json #>> '{executionContext,conversationJid}'))
+                and app_session.app_id = ${ownerAppId}
+            )
+          )
       )`
     : undefined;
 }
@@ -206,7 +215,7 @@ export class PostgresCanonicalJobRepository {
       .$dynamic();
     const clauses = [
       filters?.appId
-        ? sql`exists (
+        ? sql`(${pgSchema.canonicalJobsPostgres.appId} = ${filters.appId} or exists (
             select 1
             from ${pgSchema.controlHttpSessionsPostgres} app_session
             where (
@@ -214,7 +223,7 @@ export class PostgresCanonicalJobRepository {
               or (${canonicalJobSessionId()} is null and app_session.external_ref_json->>'chatJid' = ${canonicalJobConversationJid()})
             )
               and app_session.app_id = ${filters.appId}
-          )`
+          ))`
         : undefined,
       filters?.statuses?.length
         ? inArray(pgSchema.canonicalJobsPostgres.status, filters.statuses)
@@ -257,7 +266,6 @@ export class PostgresCanonicalJobRepository {
     await this.db
       .insert(pgSchema.canonicalJobsPostgres)
       .values({
-        appId: CANONICAL_APP_ID,
         createdByActorId: 'runtime',
         createdBySource: 'runtime',
         ...record,
@@ -345,7 +353,11 @@ export class PostgresCanonicalJobRepository {
       | CanonicalDb
       | Parameters<Parameters<CanonicalDb['transaction']>[0]>[0] = this.db,
   ): Promise<boolean> {
-    const graph = await this.ensureJobRunGraph(run.job_id, executor);
+    const graph = await resolveCanonicalJobRunGraph({
+      jobId: run.job_id,
+      executor,
+      graph: this.graph,
+    });
     return insertCanonicalJobRun({
       run,
       executor,
@@ -816,39 +828,6 @@ export class PostgresCanonicalJobRepository {
     }));
   }
 
-  private async ensureJobRunGraph(
-    jobId: string,
-    executor:
-      | CanonicalDb
-      | Parameters<Parameters<CanonicalDb['transaction']>[0]>[0],
-  ): Promise<{ agentId: string; configVersionId: string }> {
-    const rows = await executor
-      .select()
-      .from(pgSchema.canonicalJobsPostgres)
-      .where(eq(pgSchema.canonicalJobsPostgres.id, jobId))
-      .limit(1);
-    const row = rows[0];
-    const target = row
-      ? parseJson<Record<string, unknown>>(row.targetJson, {})
-      : {};
-    const executionContext =
-      target.executionContext &&
-      typeof target.executionContext === 'object' &&
-      !Array.isArray(target.executionContext)
-        ? (target.executionContext as Record<string, unknown>)
-        : undefined;
-    const folder = row
-      ? ((executionContext?.workspaceKey as string | undefined) ??
-        row.agentId?.replace(/^agent:/, '') ??
-        'system')
-      : 'system';
-    const agentId = await this.graph.ensureAgentExists(
-      folder,
-      folder,
-      executor,
-    );
-    return { agentId, configVersionId: configVersionIdForAgent(agentId) };
-  }
   private async nextRunShortId(
     jobId: string,
     executor:
@@ -866,9 +845,11 @@ export class PostgresCanonicalJobRepository {
   }
 
   private async ensureAgentForRecord(input: {
+    appId: string;
     agentId: string;
     name?: string;
   }): Promise<void> {
+    if (input.appId !== CANONICAL_APP_ID) return;
     const folder = input.agentId.replace(/^agent:/, '');
     await this.graph.ensureAgentExists(folder, folder);
   }

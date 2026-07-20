@@ -11,6 +11,7 @@ function adaptAppSession(session: RuntimeAppSession) {
   return {
     sessionId: session.sessionId,
     appId: session.appId,
+    agentId: session.agentId,
     conversationId: session.conversationId,
     conversationJid: session.chatJid,
     workspaceKey: session.workspaceKey,
@@ -30,6 +31,7 @@ export function adaptSessionControlPort(
         conversationId: input.conversationId,
         chatJid: input.conversationJid,
         workspaceFolder: input.folder,
+        agentId: input.agentId,
         title: input.title,
         defaultResponseMode: input.defaultResponseMode,
         defaultWebhookId: input.defaultWebhookId,

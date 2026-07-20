@@ -20,6 +20,7 @@ describe('control-plane canonical mappers', () => {
         updated_at: '2026-04-24T00:00:00.000Z',
       }),
     ).toMatchObject({
+      agentId: 'agent:fallback-folder',
       workspaceFolder: 'agent-folder',
       workspaceKey: 'agent-folder',
     });
@@ -52,6 +53,7 @@ describe('control-plane canonical mappers', () => {
         updatedAt: '2026-04-24T00:00:00.000Z',
       }),
     ).toMatchObject({
+      agentId: 'agent:fallback-folder',
       chatJid: 'conv-3',
       conversationId: 'conv-3',
     });

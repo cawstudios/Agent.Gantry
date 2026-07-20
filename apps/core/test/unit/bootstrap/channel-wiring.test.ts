@@ -399,6 +399,49 @@ describe('createChannelWiring', () => {
 
     expect(wiring.hasConnectedChannels()).toBe(false);
     expect(warn).toHaveBeenCalledOnce();
+    expect(wiring.getChannelTransportHealth()).toEqual([
+      expect.objectContaining({
+        providerId: 'telegram',
+        configured: true,
+        connected: false,
+        configuredAccountCount: 1,
+        connectedAccountCount: 0,
+        authenticatedConversationRegistrationAvailable: false,
+      }),
+    ]);
+  });
+
+  it('reports redacted operational channel counts', async () => {
+    const channel = makeChannel({
+      name: 'slack',
+      getOperationalSnapshot: () => ({
+        authenticatedConversationRegistrationCount: 2,
+      }),
+    });
+    const wiring = createChannelWiring(makeApp(), {
+      providerIds: [
+        makeProvider(
+          'slack',
+          vi.fn(() => channel),
+        ),
+      ],
+    });
+
+    await wiring.connectEnabledChannels(
+      makeRuntimeSettings({ telegram: false, slack: true }),
+    );
+
+    expect(wiring.getChannelTransportHealth()).toEqual([
+      {
+        providerId: 'slack',
+        configured: true,
+        connected: true,
+        configuredAccountCount: 1,
+        connectedAccountCount: 1,
+        authenticatedConversationRegistrationCount: 2,
+        authenticatedConversationRegistrationAvailable: true,
+      },
+    ]);
   });
 
   it('connects channels without inbound messages or callbacks when live turns are disabled', async () => {
@@ -1082,6 +1125,109 @@ describe('createChannelWiring', () => {
       expect.objectContaining({
         agentId: 'agent:alpha',
         providerAccountId: 'slack_alpha',
+      }),
+    );
+  });
+
+  it('publishes event-only provider messages without admitting an agent run', async () => {
+    const app = makeApp({
+      [makeAgentThreadQueueKey(
+        'teams:conversation-1',
+        'agent:tender',
+        undefined,
+        'teams-account-1',
+      )]: {
+        name: 'Tender',
+        folder: 'tender',
+        providerAccountId: 'teams-account-1',
+        agentId: 'agent:tender',
+        trigger: '@TenderBot',
+        added_at: '2026-01-01T00:00:00.000Z',
+        requiresTrigger: true,
+        conversationKind: 'channel',
+      },
+    });
+    const storeMessage = vi.fn(async () => undefined);
+    const storeMessageWithLiveAdmission = vi.fn(async () => undefined);
+    const publishRuntimeEvent = vi.fn(async () => ({ eventId: 1 }));
+    const ensureEventOnlyConversation = vi.fn(async () => undefined);
+    const handlers = createChannelPersistenceHandlers({
+      app,
+      resolved: {
+        appId: 'manipal-tender-copilot',
+        providerIds: [],
+        loadSenderAllowlist: vi.fn(() => ({}) as any),
+        loadSenderControlAllowlist: vi.fn(() => ({}) as any),
+        shouldDropMessage: vi.fn(() => false),
+        isSenderAllowed: vi.fn(() => true),
+        isSenderControlAllowed: vi.fn(() => true),
+        shouldLogDenied: vi.fn(() => false),
+        publishRuntimeEvent,
+        ensureEventOnlyConversation,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          debug: vi.fn(),
+          error: vi.fn(),
+        },
+      } as any,
+      ops: () =>
+        ({
+          storeMessage,
+          storeChatMetadata: vi.fn(),
+          storeMessageWithLiveAdmission,
+        }) as any,
+      persistenceQueue: new AsyncTaskQueue(4, 5_000),
+      runtimeSettings: () => ({}) as any,
+    });
+
+    await handlers.onMessage('teams:conversation-1', {
+      id: 'teams-message-1',
+      chat_jid: 'teams:conversation-1',
+      provider: 'teams',
+      providerAccountId: 'teams-account-1',
+      agentId: 'agent:tender',
+      admissionMode: 'event_only',
+      sender: 'aad-user-1',
+      sender_name: 'User',
+      content: '<at>TenderBot</at> status?',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      thread_id: 'root-message-1',
+      providerData: {
+        tenantId: 'tenant-1',
+        channelId: 'channel-1',
+        conversationExternalRef: {
+          microsoftConversationReference: { serviceUrl: 'https://teams.test' },
+        },
+      },
+    });
+
+    expect(storeMessage).toHaveBeenCalledOnce();
+    expect(storeMessageWithLiveAdmission).not.toHaveBeenCalled();
+    expect(ensureEventOnlyConversation).toHaveBeenCalledWith({
+      appId: 'manipal-tender-copilot',
+      conversationId: 'conversation:teams-account-1:teams:conversation-1',
+      providerAccountId: 'teams-account-1',
+      externalConversationId: 'conversation-1',
+      threadId: 'root-message-1',
+      providerExternalRef: {
+        microsoftConversationReference: { serviceUrl: 'https://teams.test' },
+      },
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+    expect(publishRuntimeEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'manipal-tender-copilot',
+        conversationId: 'conversation:teams-account-1:teams:conversation-1',
+        eventType: 'conversation.message.inbound',
+        payload: expect.objectContaining({
+          externalConversationId: 'conversation-1',
+          threadId: 'root-message-1',
+          providerData: expect.objectContaining({
+            tenantId: 'tenant-1',
+            channelId: 'channel-1',
+          }),
+        }),
       }),
     );
   });
@@ -2137,16 +2283,20 @@ describe('createChannelWiring', () => {
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         appId: 'default',
-        conversationId: 'sl:C123',
-        threadId: '1700.1',
+        conversationId: 'conversation:slack_default:sl:C123',
+        threadId: 'thread:slack_default:sl:C123:1700.1',
         eventType: 'conversation.message.outbound',
         actor: 'agent',
         responseMode: 'none',
         payload: expect.objectContaining({
           conversationId: 'conversation:slack_default:sl:C123',
           threadId: 'thread:slack_default:sl:C123:1700.1',
+          providerId: 'slack',
+          providerAccountId: 'slack_default',
           direction: 'outbound',
           deliveryStatus: 'sent',
+          attemptCount: 1,
+          terminal: true,
           externalMessageId: '171.123',
           sender: { id: 'gantry', name: 'Gantry' },
           text: 'done',

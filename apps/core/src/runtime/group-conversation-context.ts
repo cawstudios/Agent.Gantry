@@ -1,7 +1,7 @@
 import { logger } from '../infrastructure/logging/logger.js';
 import { formatConversationContextMessages } from '../messaging/router.js';
 import { buildMemoryRecallQueryFromMessages } from '../memory/app-memory-recall-query.js';
-import type { NewMessage } from '../domain/types.js';
+import type { NewMessage, SessionContinuityMode } from '../domain/types.js';
 import {
   isSenderAllowed,
   loadSenderAllowlist,
@@ -17,6 +17,7 @@ import {
   buildConversationContextPacket,
   CONVERSATION_CONTEXT_LIMITS,
 } from './conversation-context.js';
+import { boundSessionConversationContext } from './bounded-session-continuity.js';
 
 const CONVERSATION_CONTEXT_HYDRATION_TIMEOUT_MS = 2_500;
 
@@ -30,6 +31,7 @@ export async function buildGroupTurnConversationContext(input: {
   latestMessage: NewMessage;
   currentMessages: NewMessage[];
   timezone: string;
+  continuityMode?: SessionContinuityMode;
 }) {
   let conversationContext = await buildConversationContextPacket({
     conversationJid: input.chatJid,
@@ -110,18 +112,22 @@ export async function buildGroupTurnConversationContext(input: {
       repository: input.repository,
     });
   }
+  const effectiveConversationContext =
+    input.continuityMode === 'bounded'
+      ? boundSessionConversationContext(conversationContext)
+      : conversationContext;
   return {
     prompt: formatConversationContextMessages(
-      conversationContext,
+      effectiveConversationContext,
       input.timezone,
     ),
     recallQuery: buildMemoryRecallQueryFromMessages([
-      ...conversationContext.recentChannelContext,
-      ...conversationContext.activeThreadContext,
-      ...conversationContext.currentMessages,
+      ...effectiveConversationContext.recentChannelContext,
+      ...effectiveConversationContext.activeThreadContext,
+      ...effectiveConversationContext.currentMessages,
     ]),
     logContext: {
-      context: conversationContext.metadata,
+      context: effectiveConversationContext.metadata,
       hydration: hydration
         ? {
             providerId: hydration.providerId,

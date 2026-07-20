@@ -113,6 +113,37 @@ describe('AgentCapabilityAdministrationService', () => {
     ]);
   });
 
+  it('materializes app-scoped Gantry facade tools from access selections', async () => {
+    const state = createState();
+    const service = new AgentCapabilityAdministrationService(
+      state.repositories,
+      { now: () => '2026-05-01T00:00:00.000Z' },
+    );
+
+    const response = await service.replaceAccessDocument({
+      appId: 'app:one' as never,
+      agentId: 'agent:one' as never,
+      sources: { skills: [], mcpServers: [], tools: [] },
+      capabilities: [{ id: 'AgentDelegation', version: 'builtin' }],
+    });
+
+    expect(response.capabilities).toEqual([
+      { id: 'AgentDelegation', version: 'builtin' },
+    ]);
+    expect(state.toolBindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          appId: 'app:one',
+          toolId: expect.stringMatching(/^tool:permission-rule:/),
+          status: 'active',
+        }),
+      ]),
+    );
+    expect(
+      [...state.tools.values()].find((tool) => tool.name === 'AgentDelegation'),
+    ).toMatchObject({ appId: 'app:one', selectable: true });
+  });
+
   it('round-trips scoped MCP source tools through the full access document', async () => {
     const state = createState();
     const service = new AgentCapabilityAdministrationService(

@@ -254,6 +254,7 @@ describe('startLiveAdmissionWorkLoop', () => {
   it('settles poison work items as failed after the retry limit', async () => {
     const settleLiveAdmissionWorkItem = vi.fn(async () => true);
     const deferLiveAdmissionWorkItem = vi.fn(async () => true);
+    const rejectClaimedSdkSessionAdmission = vi.fn(async () => true);
     const loop = startLiveAdmissionWorkLoop({
       liveAdmissions: {
         claimLiveAdmissionWorkItems: vi.fn(async () => [
@@ -261,11 +262,13 @@ describe('startLiveAdmissionWorkLoop', () => {
             ...baseItem,
             queueJid: 'other@g.us',
             failureCount: 2,
+            requestFingerprint: 'sdk-request-fingerprint',
           },
         ]),
         renewLiveAdmissionWorkItemClaim: vi.fn(async () => true),
         deferLiveAdmissionWorkItem,
         settleLiveAdmissionWorkItem,
+        rejectClaimedSdkSessionAdmission,
         enqueueLiveAdmissionWorkItem: vi.fn(),
       },
       appId: 'default',
@@ -278,14 +281,16 @@ describe('startLiveAdmissionWorkLoop', () => {
     });
 
     await vi.waitFor(() =>
-      expect(settleLiveAdmissionWorkItem).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'admission-1',
-          state: 'failed',
-        }),
-      ),
+      expect(rejectClaimedSdkSessionAdmission).toHaveBeenCalledWith({
+        id: 'admission-1',
+        claimToken: expect.any(String),
+        workerInstanceId: 'worker-1',
+        code: 'admission_failed',
+        retryable: true,
+      }),
     );
     expect(deferLiveAdmissionWorkItem).not.toHaveBeenCalled();
+    expect(settleLiveAdmissionWorkItem).not.toHaveBeenCalled();
     loop.stop();
     await loop.done;
   });

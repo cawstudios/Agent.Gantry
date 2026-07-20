@@ -840,6 +840,10 @@ describe('agent-spawn timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
+    expect(result.failure).toEqual({
+      type: 'timeout',
+      attemptedAction: 'Execute agent turn within configured timeout',
+    });
     expect(onOutput).not.toHaveBeenCalled();
   });
 
@@ -4349,20 +4353,23 @@ describe('agent-spawn timeout behavior', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('rejects response schemas for worker runtime before spawning', async () => {
-    const result = await spawnTestAgent(
+  it('runs response schemas with the Anthropic worker runtime', async () => {
+    const resultPromise = spawnTestAgent(
       testGroup,
       { ...testInput, responseSchema: { type: 'object' } },
       vi.fn(),
     );
+    emitOutputMarker(fakeProc, { status: 'success', result: '{"ok":true}' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
 
-    expect(result).toMatchObject({
-      status: 'error',
-      result: null,
-      error: 'response_schema requires an inline agent runtime',
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'success',
+      result: '{"ok":true}',
     });
     expect(getSelectedAgentRuntime).toHaveBeenCalledOnce();
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledOnce();
   });
 
   it('uses an explicit worker runtime for worker admission and spawning', async () => {

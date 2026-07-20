@@ -771,6 +771,49 @@ describe('GantryModelGatewayBroker', () => {
     }
   });
 
+  it('revokes only the completed execution when concurrent agents share a run', async () => {
+    const repo = new MutableModelCredentialRepository();
+    repo.set('anthropic', 'sk-ant-upstream');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"ok":true}')),
+    );
+    const broker = new GantryModelGatewayBroker(repo);
+    const binding = (apiRequestId: string) => ({
+      profile: 'gantry' as const,
+      purpose: 'model_runtime' as const,
+      appId,
+      runId: 'run:shared-parent' as never,
+      apiRequestId,
+      modelRouteId: 'anthropic',
+    });
+    try {
+      const first = await broker.getInjection({ binding: binding('child-1') });
+      const second = await broker.getInjection({ binding: binding('child-2') });
+
+      await broker.revokeInjection({ binding: binding('child-1') });
+
+      expect(
+        (
+          await gatewayRequest({
+            url: `${first.env[anthropicBaseUrlKey]}/v1/messages`,
+            token: first.env[anthropicApiKeyKey]!,
+          })
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await gatewayRequest({
+            url: `${second.env[anthropicBaseUrlKey]}/v1/messages`,
+            token: second.env[anthropicApiKeyKey]!,
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it.each([
     [
       'Anthropic',

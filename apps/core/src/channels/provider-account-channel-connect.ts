@@ -12,6 +12,7 @@ interface ProviderAccountRuntimeSettings {
       agentId: string;
       status?: 'active' | 'disabled';
       runtimeSecretRefs?: Record<string, string>;
+      config?: Record<string, string>;
     }
   >;
   runtime: { deploymentMode?: string };
@@ -54,6 +55,7 @@ export async function connectProviderAccountChannels(input: {
         agentId: string;
         status?: 'active' | 'disabled';
         runtimeSecretRefs?: Record<string, string>;
+        config?: Record<string, string>;
       },
     ]
   > = input.provider.internal
@@ -141,6 +143,11 @@ export async function connectProviderAccountChannels(input: {
                 input.channelOpts.onMessage(chatJid, {
                   ...msg,
                   providerAccountId: targetProviderAccountId,
+                  ...(accounts.find(
+                    ([id]) => id === targetProviderAccountId,
+                  )?.[1].config?.inbound_mode === 'event_only'
+                    ? { admissionMode: 'event_only' as const }
+                    : {}),
                   agentId: agentIdForFolder(
                     accounts.find(([id]) => id === targetProviderAccountId)?.[1]
                       .agentId ?? agentId,

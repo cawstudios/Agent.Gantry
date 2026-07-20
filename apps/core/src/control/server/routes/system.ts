@@ -150,6 +150,7 @@ export async function handleSystemRoutes(
         jobs: true,
         events: true,
         webhooks: true,
+        channels: ctx.getChannelTransportHealth?.() ?? [],
       },
     });
     return true;

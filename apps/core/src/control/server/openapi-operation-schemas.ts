@@ -5,6 +5,9 @@ const ref = (name: string): JsonSchema => ({
 });
 
 export const openApiResponseSchemas: Record<string, JsonSchema> = {
+  getCapabilityCredential: ref('CapabilityCredentialResponse'),
+  putCapabilityCredential: ref('CapabilityCredentialResponse'),
+  deleteCapabilityCredential: ref('CapabilityCredentialResponse'),
   bindMcpServerToAgent: ref('AgentMcpServerBindingResponse'),
   bindSkillToAgent: ref('AgentSkillBindingResponse'),
   connectMcpServer: ref('McpServerResponse'),
@@ -59,6 +62,7 @@ export const openApiResponseSchemas: Record<string, JsonSchema> = {
   listCapabilities: ref('CapabilityListResponse'),
   listConversationApprovers: ref('ConversationApproversResponse'),
   listConversationMessages: ref('ConversationMessageListResponse'),
+  sendConversationMessage: ref('ConversationMessageSendResponse'),
   listConversationThreads: ref('ConversationThreadListResponse'),
   listConversations: ref('ConversationListResponse'),
   listExternalIngresses: ref('ExternalIngressListResponse'),
@@ -69,6 +73,7 @@ export const openApiResponseSchemas: Record<string, JsonSchema> = {
   listModelCredentials: ref('ModelCredentialListResponse'),
   listModels: ref('ModelListResponse'),
   listOrStreamSessionEvents: ref('SessionRuntimeEventListResponse'),
+  listOrStreamRuntimeEvents: ref('AppRuntimeEventListResponse'),
   listProviderAccounts: ref('ProviderAccountListResponse'),
   listProviders: ref('ProviderListResponse'),
   listRunEvents: ref('RuntimeEventListResponse'),
@@ -94,6 +99,10 @@ export const openApiResponseSchemas: Record<string, JsonSchema> = {
   rotateExternalIngressSecret: ref('ExternalIngress'),
   searchMemory: ref('MemorySearchResponse'),
   sendSessionMessage: ref('SendSessionMessageResponse'),
+  resolveSessionInteraction: ref('SessionInteractionSettlementResponse'),
+  rejectSessionInteraction: ref('SessionInteractionSettlementResponse'),
+  cancelSessionTurn: ref('CancelSessionTurnResponse'),
+  archiveSession: ref('ArchiveSessionResponse'),
   testMcpServer: ref('McpServerTestResponse'),
   testWebhook: ref('WebhookTestResponse'),
   triggerJob: ref('JobTriggerResponse'),
@@ -117,6 +126,7 @@ export const openApiResponseSchemas: Record<string, JsonSchema> = {
 };
 
 export const openApiRequestSchemas: Record<string, JsonSchema> = {
+  putCapabilityCredential: ref('CapabilityCredentialWriteRequest'),
   bindMcpServerToAgent: ref('AgentMcpServerBindingRequest'),
   bindSkillToAgent: ref('AgentSkillBindingRequest'),
   connectMcpServer: ref('McpServerRequest'),
@@ -148,6 +158,10 @@ export const openApiRequestSchemas: Record<string, JsonSchema> = {
   replaceConversationApprovers: ref('ConversationApproversRequest'),
   searchMemory: ref('MemorySearchRequest'),
   sendSessionMessage: ref('SendSessionMessageRequest'),
+  sendConversationMessage: ref('ConversationMessageSendRequest'),
+  resolveSessionInteraction: ref('ResolveSessionInteractionRequest'),
+  rejectSessionInteraction: ref('RejectSessionInteractionRequest'),
+  cancelSessionTurn: ref('CancelSessionTurnRequest'),
   testMcpServer: ref('McpServerTestRequest'),
   triggerMemoryDreaming: ref('MemoryDreamingTriggerRequest'),
   updateAgent: ref('AgentUpdateRequest'),

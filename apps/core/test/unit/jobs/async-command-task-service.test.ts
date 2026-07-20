@@ -217,6 +217,41 @@ describe('AsyncCommandTaskService', () => {
     });
   });
 
+  it('returns durable terminal task state from task_wait without polling a model', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const service = new AsyncCommandTaskService(repository, {
+      run: async () => ({}),
+    });
+    await repository.createTask({
+      id: 'task-research-complete',
+      appId: 'app-1',
+      agentId: 'agent-1',
+      conversationId: 'conversation-1',
+      kind: 'delegated_agent',
+      status: 'completed',
+      admissionClass: 'agent',
+      authoritySnapshotJson: {},
+      privateCorrelationJson: { taskKey: 'research_bid_commercial' },
+      leaseToken: 'lease-1',
+      fencingVersion: 1,
+      now: new Date().toISOString(),
+    });
+
+    await expect(
+      service.wait({
+        taskIds: ['task-research-complete'],
+        appId: 'app-1',
+        agentId: 'agent-1',
+        conversationId: 'conversation-1',
+        timeoutMs: 100,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      timedOut: false,
+      tasks: [{ id: 'task-research-complete', status: 'completed' }],
+    });
+  });
+
   it('redacts command text before persisting durable task metadata', async () => {
     const repository = new MemoryAsyncTaskRepository();
     const runner: AsyncCommandRunner = {
@@ -1492,6 +1527,82 @@ describe('AsyncCommandTaskService', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('publishes a terminal receipt only after delegated task state is durable', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const onDelegatedTaskTerminal = vi.fn();
+    const service = new AsyncCommandTaskService(
+      repository,
+      { run: async () => ({}) },
+      { onDelegatedTaskTerminal },
+    );
+    const started = await service.startDelegatedAgent({
+      appId: 'app-1',
+      agentId: 'agent-1',
+      conversationId: 'conversation-1',
+      parentJobId: 'job-1',
+      parentJobRunId: 'run-1',
+      taskKey: 'research-workstream',
+      objective: 'Research evidence',
+      workspaceFolder: 'main_agent',
+      run: async () => ({ outputSummary: 'done' }),
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    await waitForStatus(repository, started.task.id, 'completed');
+    expect(onDelegatedTaskTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: started.task.id,
+        parentJobId: 'job-1',
+        parentJobRunId: 'run-1',
+        status: 'completed',
+        privateCorrelationJson: expect.objectContaining({
+          taskKey: 'research-workstream',
+        }),
+      }),
+    );
+  });
+
+  it('preserves a complete delegated result through task_wait while keeping its receipt bounded', async () => {
+    const repository = new MemoryAsyncTaskRepository();
+    const service = new AsyncCommandTaskService(repository, {
+      run: async () => ({}),
+    });
+    const citationId = 'evidence_search_chunk_701d788e6845';
+    const delegatedResult = `${'research '.repeat(140)}${citationId}`;
+    expect(delegatedResult.indexOf(citationId)).toBeGreaterThan(1_000);
+
+    const started = await service.startDelegatedAgent({
+      appId: 'app-1',
+      agentId: 'agent-1',
+      conversationId: 'conversation-1',
+      objective: 'Return complete cited research',
+      workspaceFolder: 'main_agent',
+      run: async () => ({ outputSummary: delegatedResult }),
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    await waitForStatus(repository, started.task.id, 'completed');
+    const waited = await service.wait({
+      taskIds: [started.task.id],
+      appId: 'app-1',
+      agentId: 'agent-1',
+      conversationId: 'conversation-1',
+      timeoutMs: 100,
+    });
+
+    expect(waited).toMatchObject({
+      ok: true,
+      timedOut: false,
+      tasks: [{ outputSummary: delegatedResult }],
+    });
+    expect(waited.tasks?.[0]?.outputSummary).toContain(citationId);
+    expect(
+      repository.tasks.get(started.task.id)?.receiptJson?.completed,
+    ).not.toContain(citationId);
   });
 
   it('wakes delegated task waits when async MCP child tasks finish', async () => {

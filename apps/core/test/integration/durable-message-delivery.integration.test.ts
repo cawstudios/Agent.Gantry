@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 
+import * as pgSchema from '@core/adapters/storage/postgres/schema/schema.js';
 import type { AppId } from '@core/domain/app/app.js';
 import type { AgentId } from '@core/domain/agent/agent.js';
 import type {
@@ -261,6 +263,54 @@ maybeDescribe('durable message delivery persistence', () => {
     ).resolves.toMatchObject({
       externalRef: { kind: 'message', value: '1710000000.201' },
       deliveryStatus: 'sent',
+    });
+  });
+
+  it('preserves provider conversation references while projecting outbound messages', async () => {
+    const chatJid = 'sl:C-reference';
+    const referenceConversationId =
+      `conversation:${providerAccountId}:${chatJid}` as ConversationId;
+    await runtime.ops.storeChatMetadata(
+      chatJid,
+      '2026-04-28T00:04:30.000Z',
+      'reference-test',
+      'slack',
+      true,
+      {
+        providerAccountId,
+        externalRef: {
+          microsoftConversationReference: {
+            serviceUrl: 'https://teams.example.test/',
+          },
+        },
+      },
+    );
+
+    await runtime.ops.storeMessage({
+      id: 'message:durable:reference' as never,
+      chat_jid: chatJid,
+      provider: 'slack',
+      providerAccountId,
+      sender: 'gantry',
+      sender_name: 'Gantry',
+      content: 'outbound reference test',
+      timestamp: '2026-04-28T00:04:31.000Z',
+      is_from_me: true,
+      is_bot_message: true,
+      delivery_status: 'pending',
+    });
+
+    const [conversation] = await runtime.service.db
+      .select({
+        externalRefJson: pgSchema.conversationsPostgres.externalRefJson,
+      })
+      .from(pgSchema.conversationsPostgres)
+      .where(eq(pgSchema.conversationsPostgres.id, referenceConversationId))
+      .limit(1);
+    expect(JSON.parse(conversation?.externalRefJson ?? '{}')).toMatchObject({
+      microsoftConversationReference: {
+        serviceUrl: 'https://teams.example.test/',
+      },
     });
   });
 

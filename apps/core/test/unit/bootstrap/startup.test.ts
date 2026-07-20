@@ -379,6 +379,7 @@ describe('runStartup', () => {
     );
 
     const result = await runStartup(makeApp(), {
+      appId: 'app-one' as never,
       ensureRuntimeLayoutDirectories: vi.fn(),
       initializeRuntimeStorage,
       settingsAuthority: 'revision',
@@ -390,14 +391,17 @@ describe('runStartup', () => {
     });
 
     expect(importWorkstationSettings).toHaveBeenCalledWith(
-      expect.any(Object),
+      expect.objectContaining({ appId: 'app-one' }),
       expect.objectContaining({
         agent: expect.objectContaining({ name: 'Revision Agent' }),
       }),
     );
     expect(warn).toHaveBeenCalledWith(
-      { appId: 'default', revision: 1 },
+      { appId: 'app-one', revision: 1 },
       'settings.yaml differs from latest settings revision; restoring revision-authority mirror',
+    );
+    expect(settingsRevisions.getLatestSettingsRevision).toHaveBeenCalledWith(
+      'app-one',
     );
     expect(initializeRuntimeStorage).toHaveBeenCalledTimes(2);
     expect(initializeRuntimeStorage).toHaveBeenLastCalledWith(

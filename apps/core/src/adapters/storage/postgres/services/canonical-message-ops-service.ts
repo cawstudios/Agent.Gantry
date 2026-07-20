@@ -12,6 +12,7 @@ import type {
 
 type NewMessageAttachment = NonNullable<NewMessage['attachments']>[number];
 type AgentControls = NonNullable<NewMessage['agentControls']>;
+type AppMessageResponseRoute = NonNullable<NewMessage['appResponseRoute']>;
 
 function hasCursorBoundary(cursor: { timestamp: string }): boolean {
   return cursor.timestamp.trim().length > 0;
@@ -54,6 +55,7 @@ function toStringValue(value: unknown): string | undefined {
 function agentControlsFromExternalRef(
   ref: Record<string, unknown>,
 ): AgentControls | undefined {
+  const modelAlias = toStringValue(ref.model_alias);
   const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(
     String(ref.effort),
   )
@@ -90,13 +92,39 @@ function agentControlsFromExternalRef(
     ref.max_output_tokens > 0
       ? ref.max_output_tokens
       : undefined;
-  return effort || thinking || maxOutputTokens
+  return modelAlias || effort || thinking || maxOutputTokens
     ? {
+        ...(modelAlias ? { modelAlias } : {}),
         ...(effort ? { effort } : {}),
         ...(thinking ? { thinking } : {}),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       }
     : undefined;
+}
+
+function appResponseRouteFromExternalRef(
+  ref: Record<string, unknown>,
+): AppMessageResponseRoute | undefined {
+  const raw = ref.app_response_route;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  if (
+    typeof value.sessionId !== 'string' ||
+    value.sessionId.length === 0 ||
+    (value.threadId !== null && typeof value.threadId !== 'string') ||
+    !['sse', 'webhook', 'both', 'none'].includes(String(value.responseMode)) ||
+    (value.webhookId !== null && typeof value.webhookId !== 'string') ||
+    (value.correlationId !== null && typeof value.correlationId !== 'string')
+  ) {
+    return undefined;
+  }
+  return {
+    sessionId: value.sessionId,
+    threadId: value.threadId as string | null,
+    responseMode: value.responseMode as AppMessageResponseRoute['responseMode'],
+    webhookId: value.webhookId as string | null,
+    correlationId: value.correlationId as string | null,
+  };
 }
 
 function toAttachmentKind(
@@ -328,8 +356,16 @@ export class CanonicalMessageOpsService {
       (externalRef.provider_account_id as string | undefined);
     const responseSchema = externalRef.response_schema;
     const agentControls = agentControlsFromExternalRef(externalRef);
+    const callerResolvedTools = externalRef.caller_resolved_tools;
+    const appResponseRoute = appResponseRouteFromExternalRef(externalRef);
+    const continuityMode =
+      externalRef.continuity_mode === 'bounded' ||
+      externalRef.continuity_mode === 'provider'
+        ? externalRef.continuity_mode
+        : undefined;
     return {
       id: ref.id || row.id,
+      canonicalMessageId: row.id,
       chat_jid: chatJid,
       sender: row.sender_user_id || ref.sender || '',
       sender_name: row.sender_display_name || ref.sender_name || '',
@@ -349,6 +385,17 @@ export class CanonicalMessageOpsService {
         ? { responseSchema: responseSchema as Record<string, unknown> }
         : {}),
       ...(agentControls ? { agentControls } : {}),
+      ...(appResponseRoute ? { appResponseRoute } : {}),
+      ...(continuityMode ? { continuityMode } : {}),
+      ...(callerResolvedTools &&
+      typeof callerResolvedTools === 'object' &&
+      !Array.isArray(callerResolvedTools)
+        ? {
+            callerResolvedTools: callerResolvedTools as NonNullable<
+              NewMessage['callerResolvedTools']
+            >,
+          }
+        : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       delivery_status:
         ref.delivery_status ??

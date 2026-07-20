@@ -127,13 +127,17 @@ export function createStorageRuntime(
   const liveTurnCommandNotifier = new PostgresLiveTurnCommandNotifier(
     service.pool,
   );
+  const runtimeEventNotifier = new PostgresRuntimeEventNotifier(service.pool);
+  const liveAdmissionNotifier = new PostgresLiveAdmissionNotifier(service.pool);
   const repositories = createPostgresDomainRepositories(
     service.db,
     service.pool,
-    { liveTurnCommandNotifier },
+    {
+      liveTurnCommandNotifier,
+      runtimeEventNotifier,
+      liveAdmissionNotifier,
+    },
   );
-  const runtimeEventNotifier = new PostgresRuntimeEventNotifier(service.pool);
-  const liveAdmissionNotifier = new PostgresLiveAdmissionNotifier(service.pool);
   const liveAdmissionWakeupSource = new PostgresLiveAdmissionWakeupSource(
     service.pool,
   );

@@ -195,6 +195,130 @@ describe('Teams Adaptive Card payloads', () => {
 });
 
 describe('TeamsChannel adapter scaffold', () => {
+  it('reports authenticated conversation registrations without exposing references', () => {
+    const sdkClient: TeamsSdkClient = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => ({})),
+      getAuthenticatedConversationRegistrationCount: () => 2,
+    };
+    const channel = new TeamsChannel(
+      {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tenantId: 'tenant-id',
+      },
+      makeOpts(),
+      sdkClient,
+    );
+
+    expect(channel.getOperationalSnapshot()).toEqual({
+      authenticatedConversationRegistrationCount: 2,
+    });
+  });
+
+  it('forwards an unhandled application action to provider ingress', async () => {
+    let startInput:
+      | Parameters<NonNullable<TeamsSdkClient['start']>>[0]
+      | undefined;
+    const sdkClient: TeamsSdkClient = {
+      start: vi.fn(async (input) => {
+        startInput = input;
+      }),
+      stop: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => ({})),
+    };
+    const opts = makeOpts();
+    const channel = new TeamsChannel(
+      {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tenantId: 'tenant-id',
+      },
+      opts,
+      sdkClient,
+    );
+    await channel.connect();
+
+    await startInput?.onMessage({
+      conversationId: 'conversation-1',
+      id: 'action-activity-1',
+      senderId: 'aad-user-1',
+      senderName: 'User',
+      threadId: 'notice-message-1',
+      value: {
+        action: 'application_action',
+        eventId: 'outbox-1',
+        actionId: 'outbox-1:request_analysis',
+      },
+      providerData: {
+        tenantId: 'tenant-1',
+        actionValue: {
+          action: 'application_action',
+          eventId: 'outbox-1',
+          actionId: 'outbox-1:request_analysis',
+        },
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'teams:conversation-1',
+      expect.objectContaining({
+        id: 'action-activity-1',
+        content: '[application_action]',
+        thread_id: 'notice-message-1',
+        providerData: expect.objectContaining({ tenantId: 'tenant-1' }),
+      }),
+    );
+  });
+
+  it('sends an application-provided Adaptive Card using the durable conversation reference', async () => {
+    const sdkClient: TeamsSdkClient = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => ({ externalMessageId: 'text-1' })),
+      sendAdaptiveCard: vi.fn(async () => ({ externalMessageId: 'card-1' })),
+    };
+    const channel = new TeamsChannel(
+      {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tenantId: 'tenant-id',
+      },
+      makeOpts(),
+      sdkClient,
+    );
+    await channel.connect();
+    const adaptiveCard = {
+      type: 'AdaptiveCard',
+      version: '1.5',
+      body: [{ type: 'TextBlock', text: 'Tender notice' }],
+    };
+
+    await expect(
+      channel.sendMessage('teams:conversation-1', 'Tender notice fallback', {
+        threadId: 'root-1',
+        adaptiveCard,
+        providerData: {
+          microsoftConversationReference: {
+            channelId: 'msteams',
+            conversation: { id: 'conversation-1' },
+          },
+        },
+      }),
+    ).resolves.toEqual({ externalMessageId: 'card-1' });
+    expect(sdkClient.sendAdaptiveCard).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      threadId: 'root-1',
+      card: adaptiveCard,
+      conversationReference: {
+        channelId: 'msteams',
+        conversation: { id: 'conversation-1' },
+      },
+    });
+    expect(sdkClient.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('does not post visible Teams reaction text', async () => {
     const sdkClient: TeamsSdkClient = {
       start: vi.fn(async () => {}),

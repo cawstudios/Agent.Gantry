@@ -110,6 +110,7 @@ describe('connectProviderAccountChannels', () => {
           slack_one: {
             provider: 'slack',
             agentId: 'agent:one',
+            config: { inbound_mode: 'event_only' },
             runtimeSecretRefs: { app_token: 'same', bot_token: 'same-bot' },
           },
           slack_two: {
@@ -142,6 +143,7 @@ describe('connectProviderAccountChannels', () => {
       expect.objectContaining({
         providerAccountId: 'slack_one',
         agentId: 'agent:one',
+        admissionMode: 'event_only',
       }),
     );
     expect(onMessage).toHaveBeenNthCalledWith(

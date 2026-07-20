@@ -23,6 +23,30 @@ export interface JobNotificationRoute {
   label: string;
 }
 
+export interface JobAgentTask {
+  responseSchema?: Record<string, unknown>;
+  callerResolvedTools?: {
+    tools: Array<{
+      name: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+    }>;
+    maxInteractions: number;
+    interactionTimeoutMs: number;
+  };
+  executionPolicy: { totalTimeoutMs: number };
+  modelControls?: {
+    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    thinking?: { mode: 'off' } | { mode: 'on'; budgetTokens?: number };
+    maxOutputTokens?: number;
+  };
+  requiredSkill?: { name: string; contentHash: string };
+  interactionBudget?: {
+    maxTotal: number;
+    scopes: Record<string, number>;
+  };
+}
+
 export type JobCapabilityRequirementImplementationKind =
   | 'configured_access'
   | 'local_cli'
@@ -76,6 +100,7 @@ export interface JobSetupBlocker {
   requirementType:
     | 'tool'
     | 'semantic_capability'
+    | 'skill'
     | 'browser'
     | 'mcp_server'
     | 'credential'
@@ -121,11 +146,16 @@ export interface JobRecoveryIntent {
 
 export interface Job {
   id: string;
+  app_id?: string;
   name: string;
   prompt: string;
   model?: string | null;
   schedule_type: JobScheduleType;
   schedule_value: string;
+  schedule_timezone?: string;
+  misfire_policy?: 'coalesce';
+  overlap_policy?: 'skip';
+  schedule_metadata?: { scheduleId: string; generation: number };
   status: JobStatus;
   session_id: string | null;
   thread_id: string | null;
@@ -151,6 +181,7 @@ export interface Job {
   setup_state?: JobSetupState;
   recovery_intent?: JobRecoveryIntent | null;
   required_capabilities?: string[];
+  agent_task?: JobAgentTask;
 }
 
 export type JobRunStatus =

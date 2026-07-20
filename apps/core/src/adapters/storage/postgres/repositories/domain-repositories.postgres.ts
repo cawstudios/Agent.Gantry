@@ -879,6 +879,7 @@ export class PostgresConversationRepository implements ConversationRepository {
       .onConflictDoUpdate({
         target: pgSchema.conversationsPostgres.id,
         set: {
+          appId: conversation.appId,
           providerAccountId: conversation.providerAccountId,
           externalRefJson: encodeJsonOrNull(conversation.externalRef),
           kind: conversation.kind,
@@ -904,6 +905,8 @@ export class PostgresConversationRepository implements ConversationRepository {
       .onConflictDoUpdate({
         target: pgSchema.conversationThreadsPostgres.id,
         set: {
+          appId: thread.appId,
+          conversationId: thread.conversationId,
           externalRefJson: encodeJsonOrNull(thread.externalRef),
           title: thread.title ?? null,
           status: thread.status,
@@ -1707,7 +1710,15 @@ export class PostgresSandboxRepository implements SandboxRepository {
 export function createPostgresDomainRepositories(
   db: CanonicalDb,
   _pool?: Pool,
-  options: { liveTurnCommandNotifier?: LiveTurnCommandNotifier } = {},
+  options: {
+    liveTurnCommandNotifier?: LiveTurnCommandNotifier;
+    runtimeEventNotifier?: {
+      notify(
+        event: import('../../../../domain/events/events.js').RuntimeEvent,
+      ): Promise<void>;
+    };
+    liveAdmissionNotifier?: import('../../../../domain/ports/live-turns.js').LiveAdmissionWorkItemNotifier;
+  } = {},
 ): PostgresDomainRepositoryBundle {
   return {
     apps: new PostgresAppRepository(db),
@@ -1735,6 +1746,9 @@ export function createPostgresDomainRepositories(
     liveTurns: new PostgresLiveTurnRepository(
       db,
       options.liveTurnCommandNotifier,
+      undefined,
+      options.runtimeEventNotifier,
+      options.liveAdmissionNotifier,
     ),
     runtimeDependencies: new PostgresRuntimeDependencyRepository(db),
     settingsRevisions: new PostgresSettingsRevisionRepository(db),

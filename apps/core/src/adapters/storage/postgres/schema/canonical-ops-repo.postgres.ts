@@ -11,6 +11,7 @@ import type {
 } from '../../../../domain/repositories/domain-types.js';
 import type {
   AgentSession,
+  AgentSessionSummary,
   ExecutionProviderId,
 } from '../../../../domain/sessions/sessions.js';
 import { assertSafeExecutionProviderId } from '../../../../domain/sessions/execution-provider-id.js';
@@ -33,6 +34,7 @@ import type {
   RuntimeRouterStateRepository,
 } from '../../../../domain/repositories/ops-repo.js';
 import type { RuntimeEventPublishInput } from '../../../../domain/events/events.js';
+import type { AppMessageResponseRoute } from '../../../../domain/types.js';
 import { PostgresCanonicalBindingRepository } from '../repositories/canonical-binding-repository.postgres.js';
 import {
   type CanonicalDb,
@@ -135,7 +137,10 @@ export class PostgresRuntimeRepositoryBundle
     name?: string,
     channel?: string,
     isGroup?: boolean,
-    options: { providerAccountId?: string | null } = {},
+    options: {
+      providerAccountId?: string | null;
+      externalRef?: Record<string, unknown>;
+    } = {},
   ): Promise<void> {
     await this.graph.ensureConversation(chatJid, {
       name,
@@ -143,6 +148,7 @@ export class PostgresRuntimeRepositoryBundle
       isGroup,
       timestamp,
       providerAccountId: options.providerAccountId,
+      externalRef: options.externalRef,
     });
   }
 
@@ -505,6 +511,16 @@ export class PostgresRuntimeRepositoryBundle
     });
   }
 
+  async getLatestAgentSessionSummary(
+    agentSessionId: string,
+  ): Promise<AgentSessionSummary | null> {
+    return this.sessions.getLatestAgentSessionSummary(agentSessionId);
+  }
+
+  async saveAgentSessionSummary(summary: AgentSessionSummary): Promise<void> {
+    await this.sessions.saveAgentSessionSummary(summary);
+  }
+
   async expireProviderSession(input: {
     providerSessionId: string;
     agentSessionId: string;
@@ -549,6 +565,8 @@ export class PostgresRuntimeRepositoryBundle
     agentSessionId: string;
     executionProviderId: ExecutionProviderId;
     providerSessionId?: string | null;
+    messageId?: string;
+    appResponseRoute?: AppMessageResponseRoute;
     cause: 'message' | 'job' | 'control' | 'manual';
   }): Promise<string | undefined> {
     assertSafeExecutionProviderId(input.executionProviderId);
@@ -557,6 +575,12 @@ export class PostgresRuntimeRepositoryBundle
       input.agentSessionId as never,
     );
     if (!session) return undefined;
+    if (
+      input.appResponseRoute &&
+      input.appResponseRoute.sessionId !== String(session.id)
+    ) {
+      throw new Error('App response route does not match the agent session');
+    }
     const runId = `agent-run:${randomUUID()}`;
     const now = nowIso();
     const jobId = input.cause === 'job' ? undefined : session.jobId;
@@ -568,6 +592,7 @@ export class PostgresRuntimeRepositoryBundle
       sessionId: session.id,
       conversationId: session.conversationId,
       threadId: session.threadId,
+      messageId: input.messageId as never,
       jobId,
       llmProfileId: DEFAULT_LLM_PROFILE_ID,
       executionProviderId: input.executionProviderId,
@@ -582,14 +607,24 @@ export class PostgresRuntimeRepositoryBundle
       appId: session.appId,
       runId: runId as never,
       sessionId: session.id,
+      conversationId: session.conversationId,
+      ...(input.appResponseRoute?.threadId
+        ? { threadId: input.appResponseRoute.threadId as never }
+        : session.threadId
+          ? { threadId: session.threadId }
+          : {}),
       eventType: RUNTIME_EVENT_TYPES.RUN_STARTED,
       actor: 'runtime',
+      correlationId: input.appResponseRoute?.correlationId ?? null,
+      responseMode: input.appResponseRoute?.responseMode ?? 'none',
+      webhookId: input.appResponseRoute?.webhookId ?? null,
       // Resolved-run diagnostics for the live lane: the inherited agent engine
       // (derived from the diagnostic executionProviderId) and the diagnostic id
       // itself. No secrets. The DB-layer emit does not have the modelAlias /
       // sandbox provider at this point; those live on the scheduled-lane payload.
       payload: {
         cause: input.cause,
+        messageId: input.messageId ?? null,
         agent_engine:
           engineForExecutionProviderId(input.executionProviderId) ?? null,
         execution_provider_id: input.executionProviderId,
@@ -615,12 +650,21 @@ export class PostgresRuntimeRepositoryBundle
   async completeSessionAgentRun(input: {
     runId: string;
     status: 'completed' | 'failed' | 'canceled';
+    appResponseRoute?: AppMessageResponseRoute;
     resultSummary?: string | null;
     errorSummary?: string | null;
   }): Promise<void> {
     const repositories = createPostgresDomainRepositories(this.db, this.pool);
     const run = await repositories.agentRuns.getAgentRun(input.runId as never);
     if (!run) return;
+    if (
+      input.appResponseRoute &&
+      input.appResponseRoute.sessionId !== String(run.sessionId)
+    ) {
+      throw new Error(
+        'App response route does not match the agent run session',
+      );
+    }
     const resultSummary =
       input.resultSummary == null
         ? input.resultSummary
@@ -641,6 +685,12 @@ export class PostgresRuntimeRepositoryBundle
       appId: run.appId,
       runId: run.id,
       sessionId: run.sessionId,
+      conversationId: run.conversationId,
+      ...(input.appResponseRoute?.threadId
+        ? { threadId: input.appResponseRoute.threadId as never }
+        : run.threadId
+          ? { threadId: run.threadId }
+          : {}),
       eventType:
         input.status === 'completed'
           ? RUNTIME_EVENT_TYPES.RUN_COMPLETED
@@ -648,7 +698,11 @@ export class PostgresRuntimeRepositoryBundle
             ? RUNTIME_EVENT_TYPES.RUN_FAILED
             : RUNTIME_EVENT_TYPES.RUN_CANCELED,
       actor: 'runtime',
+      correlationId: input.appResponseRoute?.correlationId ?? null,
+      responseMode: input.appResponseRoute?.responseMode ?? 'none',
+      webhookId: input.appResponseRoute?.webhookId ?? null,
       payload: {
+        messageId: run.messageId ?? null,
         resultSummary: resultSummary ?? null,
         errorSummary: errorSummary ?? null,
       },

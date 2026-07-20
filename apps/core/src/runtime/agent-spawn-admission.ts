@@ -105,8 +105,12 @@ function inlineRuntimePreSpawnAdmissionError(input: {
   stdioMcpSourceIds?: readonly string[];
 }): string | null {
   const runtime = input.agentRuntime ?? input.agentInput.runtime ?? 'worker';
-  if (input.agentInput.responseSchema && runtime === 'worker') {
-    return 'response_schema requires an inline agent runtime';
+  if (
+    input.agentInput.responseSchema &&
+    runtime === 'worker' &&
+    input.agentEngine === DEEPAGENTS_ENGINE
+  ) {
+    return 'response_schema is not supported by the selected worker agent harness';
   }
   if (runtime !== 'inline') return null;
   const labels = new Set<string>();

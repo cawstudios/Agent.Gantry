@@ -22,6 +22,7 @@ import { handleModelRoutes } from '@core/control/server/routes/models.js';
 import { handleOpenApiRoutes } from '@core/control/server/routes/openapi.js';
 import { handleProviderConversationRoutes } from '@core/control/server/routes/provider-conversation-routes.js';
 import { handleRunRoutes } from '@core/control/server/routes/runs.js';
+import { handleRuntimeEventRoutes } from '@core/control/server/routes/runtime-events.js';
 import { handleSessionRoutes } from '@core/control/server/routes/sessions.js';
 import { handleSettingsRoutes } from '@core/control/server/routes/settings.js';
 import { handleSkillRoutes } from '@core/control/server/routes/skills.js';
@@ -63,8 +64,12 @@ const expectedControlRoutes = [
   'GET /v1/conversations/{conversationId}/approvers',
   'PUT /v1/conversations/{conversationId}/approvers',
   'GET /v1/conversations/{conversationId}/messages',
+  'POST /v1/conversations/{conversationId}/messages',
   'GET /v1/conversations/{conversationId}/threads',
   'GET /v1/credentials/models',
+  'GET /v1/credentials/capabilities/{name}',
+  'DELETE /v1/credentials/capabilities/{name}',
+  'PUT /v1/credentials/capabilities/{name}',
   'DELETE /v1/credentials/models/{providerId}',
   'PATCH /v1/credentials/models/{providerId}',
   'PUT /v1/credentials/models/{providerId}',
@@ -117,12 +122,17 @@ const expectedControlRoutes = [
   'GET /v1/runs',
   'GET /v1/runs/{runId}',
   'GET /v1/runs/{runId}/events',
+  'GET /v1/runtime-events',
   'GET /v1/sessions/{sessionId}',
+  'POST /v1/sessions/{sessionId}/archive',
   'GET /v1/sessions/{sessionId}/events',
   'GET /v1/sessions/{sessionId}/messages',
+  'POST /v1/sessions/{sessionId}/interactions/{interactionId}/reject',
+  'POST /v1/sessions/{sessionId}/interactions/{interactionId}/resolve',
   'POST /v1/sessions/{sessionId}/messages',
   'GET /v1/sessions/{sessionId}/runs',
   'GET /v1/sessions/{sessionId}/wait',
+  'POST /v1/sessions/{sessionId}/turns/current/cancel',
   'POST /v1/sessions/ensure',
   'GET /v1/settings',
   'PATCH /v1/settings',
@@ -284,6 +294,7 @@ async function isRecognizedByRuntime(method: string, pathname: string) {
     () => handleJobRoutes(req, res, ctx, url, pathname),
     () => handleExternalIngressRoutes(req, res, ctx, pathname),
     () => handleRunRoutes(req, res, ctx, url, pathname),
+    () => handleRuntimeEventRoutes(req, res, ctx, url, pathname),
     () => handleUsageRoutes(req, res, ctx, url, pathname),
     () => handleSettingsRoutes(req, res, ctx, pathname),
     () => handleSkillRoutes(req, res, ctx, url, pathname),
@@ -638,6 +649,24 @@ describe('control OpenAPI documentation', () => {
     expect(
       spec.components.schemas.SendSessionMessageRequest.properties.responseMode,
     ).toEqual({ type: 'string', enum: responseModes });
+    expect(spec.components.schemas.SendSessionMessageRequest).toMatchObject({
+      required: expect.arrayContaining(['message', 'idempotencyKey']),
+      properties: {
+        idempotencyKey: { type: 'string', minLength: 1, maxLength: 200 },
+        queuePolicy: {
+          required: [
+            'maxWaitingMessages',
+            'maxQueueWaitMs',
+            'executionTimeoutMs',
+          ],
+          additionalProperties: false,
+        },
+      },
+    });
+    expect(spec.components.schemas.SendSessionMessageResponse).toMatchObject({
+      required: expect.arrayContaining(['replayed']),
+      properties: { replayed: { type: 'boolean' } },
+    });
     expect(spec.paths['/v1/webhooks']?.post.requestBody).toMatchObject({
       content: {
         'application/json': {
@@ -672,6 +701,9 @@ describe('control OpenAPI documentation', () => {
         jobId: { type: ['string', 'null'] },
       },
     });
+    expect(
+      spec.components.schemas.Webhook.properties.eventTypes.items.enum,
+    ).toContain('session.message.rejected');
     expect(spec.components.schemas.SessionMessage).toMatchObject({
       required: [
         'id',
@@ -707,6 +739,8 @@ describe('control OpenAPI documentation', () => {
         'eventId',
         'eventType',
         'sessionId',
+        'runId',
+        'conversationId',
         'threadId',
         'correlationId',
         'createdAt',
@@ -714,6 +748,8 @@ describe('control OpenAPI documentation', () => {
       ]),
       properties: {
         sessionId: { type: ['string', 'null'] },
+        runId: { type: ['string', 'null'] },
+        conversationId: { type: ['string', 'null'] },
         threadId: { type: ['string', 'null'] },
         correlationId: { type: ['string', 'null'] },
       },

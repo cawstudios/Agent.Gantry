@@ -70,6 +70,112 @@ describe('syncRuntimeSettingsFromProjection fleet mode', () => {
     );
   });
 
+  it('uses a non-default app latest revision as the projection baseline', async () => {
+    const diskSettings = { runtime: { deploymentMode: 'workstation' } };
+    const revisionSettings = {
+      runtime: { deploymentMode: 'workstation' },
+      agents: { tender: { name: 'Manipal Tender Agent' } },
+    };
+    const exportCurrent = vi.fn(async (settings) => settings);
+    const importWorkstationSettings = vi.fn(async () => ({ revision: 2 }));
+    vi.doMock('@core/config/settings/desired-state-service.js', () => ({
+      SettingsDesiredStateService: class {
+        exportCurrent(settings: unknown) {
+          return exportCurrent(settings);
+        }
+      },
+    }));
+    vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+      loadRuntimeSettings: vi.fn(() => diskSettings),
+      saveRuntimeSettings: vi.fn(),
+      activateRuntimeModelAliases: vi.fn(),
+      addAgentToolRulesToRuntimeSettings: vi.fn(),
+      removeAgentToolRulesFromRuntimeSettings: vi.fn(),
+      withRuntimeModelAliases: vi.fn((_settings, fn) => fn()),
+    }));
+    vi.doMock('@core/config/settings/settings-import-service.js', () => ({
+      importWorkstationSettings,
+      settingsFromRevisionDocument: vi.fn(() => revisionSettings),
+    }));
+    vi.doMock(
+      '@core/config/settings/configured-capability-normalization.js',
+      () => ({ normalizeConfiguredCapabilitiesInSettings: vi.fn() }),
+    );
+    vi.doMock('@core/config/settings/runtime-settings-validation.js', () => ({
+      validateLoadedRuntimeSettings: vi.fn(),
+    }));
+
+    const { syncRuntimeSettingsFromProjection } =
+      await import('@core/config/settings/restart-sync.js');
+    const settingsRevisions = {
+      getLatestSettingsRevision: vi.fn(async () => ({
+        revision: 1,
+        settingsDocument: { version: 1 },
+      })),
+    } as never;
+    await syncRuntimeSettingsFromProjection({
+      runtimeHome: '/tmp/gantry-test',
+      ops: {} as never,
+      repositories: {} as never,
+      appId: 'manipal-tender-copilot' as never,
+      settingsRevisions,
+    });
+
+    expect(exportCurrent).toHaveBeenCalledWith(revisionSettings);
+    expect(importWorkstationSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ previousSettings: revisionSettings }),
+      revisionSettings,
+    );
+  });
+
+  it('does not overwrite the default local projection for another app', async () => {
+    const saveRuntimeSettings = vi.fn();
+    const activateRuntimeModelAliases = vi.fn();
+    const reconcile = vi.fn(async () => ({ invalidReferences: [] }));
+    vi.doMock('@core/config/settings/desired-state-service.js', () => ({
+      SettingsDesiredStateService: class {
+        reconcile(settings: unknown) {
+          return reconcile(settings);
+        }
+      },
+    }));
+    vi.doMock('@core/config/settings/runtime-settings.js', () => ({
+      loadRuntimeSettings: vi.fn(),
+      saveRuntimeSettings,
+      activateRuntimeModelAliases,
+      addAgentToolRulesToRuntimeSettings: vi.fn(),
+      removeAgentToolRulesFromRuntimeSettings: vi.fn(),
+      withRuntimeModelAliases: vi.fn((_settings, fn) => fn()),
+    }));
+    vi.doMock(
+      '@core/config/settings/configured-capability-normalization.js',
+      () => ({
+        normalizeConfiguredCapabilitiesInSettings: vi.fn(
+          async ({ settings }) => ({ settings, changed: false }),
+        ),
+      }),
+    );
+    vi.doMock('@core/config/settings/runtime-settings-validation.js', () => ({
+      validateLoadedRuntimeSettings: vi.fn(() => ({ ok: true })),
+    }));
+
+    const { applyRuntimeSettingsDesiredState } =
+      await import('@core/config/settings/restart-sync.js');
+    const settings = { runtime: { deploymentMode: 'workstation' } } as never;
+    await applyRuntimeSettingsDesiredState({
+      runtimeHome: '/tmp/gantry-test',
+      settings,
+      previousSettings: settings,
+      ops: {} as never,
+      repositories: {} as never,
+      appId: 'manipal-tender-copilot' as never,
+    });
+
+    expect(reconcile).toHaveBeenCalledWith(settings);
+    expect(saveRuntimeSettings).not.toHaveBeenCalled();
+    expect(activateRuntimeModelAliases).not.toHaveBeenCalled();
+  });
+
   it('mirrors persistent tool-rule grants through fleet settings revisions', async () => {
     const previousSettings = {
       runtime: { deploymentMode: 'fleet' },

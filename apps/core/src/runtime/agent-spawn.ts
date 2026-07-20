@@ -685,6 +685,7 @@ export async function spawnAgent(
       threadId: input.threadId,
       runId: input.runId,
       jobId: input.jobId,
+      callerResolvedTools: input.callerResolvedTools,
       protectedReadPaths: protectedFilesystemDenyReadPaths,
       protectedWritePaths: protectedFilesystemDenyWritePaths,
       gatewayAllowedNetworkHosts:

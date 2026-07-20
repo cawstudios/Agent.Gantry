@@ -85,6 +85,7 @@ export async function resolveOutboundDeliveryDestination(
       threadId: threadDestinationId,
       providerId: row.providerId as never,
       providerAccountId: row.providerAccountId as never,
+      providerData: parseJsonRecord(row.conversationExternalRefJson),
     };
   }
 
@@ -130,6 +131,7 @@ export async function resolveOutboundDeliveryDestination(
     conversationJid,
     providerId: row.providerId as never,
     providerAccountId: row.providerAccountId as never,
+    providerData: parseJsonRecord(row.conversationExternalRefJson),
   };
 }
 

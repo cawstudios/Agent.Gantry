@@ -34,10 +34,11 @@ import {
   type CoreTaskLifecycleErrorCode,
   type CoreTaskLifecycleName,
 } from '../../application/core-tools/task-lifecycle.js';
-import type {
-  CoreToolInputByName,
-  CoreToolInputSchema,
-  CoreToolSchemas,
+import {
+  coreTaskDescription,
+  type CoreToolInputByName,
+  type CoreToolInputSchema,
+  type CoreToolSchemas,
 } from './schemas.js';
 
 type CoreToolRule =
@@ -68,6 +69,7 @@ export const CORE_TOOL_NAMES = [
   'task_get',
   'task_list',
   'task_cancel',
+  'task_wait',
   'task_message',
 ] as const;
 export type CoreToolName = (typeof CORE_TOOL_NAMES)[number];
@@ -295,6 +297,7 @@ export function createCoreToolRegistry(deps: CoreToolRegistryDeps): {
         task_get: deps.schemas.task_get,
         task_list: deps.schemas.task_list,
         task_cancel: deps.schemas.task_cancel,
+        task_wait: deps.schemas.task_wait,
         task_message: deps.schemas.task_message,
       }) as Array<
         [
@@ -303,7 +306,7 @@ export function createCoreToolRegistry(deps: CoreToolRegistryDeps): {
         ]
       >
     ).map(([name, schema]) =>
-      define(name, taskDescription(name), schema, async (args) => {
+      define(name, coreTaskDescription(name), schema, async (args) => {
         if (!deps.taskLifecycleBackend) {
           return errorResult(
             'Async task runtime is unavailable.',
@@ -572,7 +575,9 @@ async function gateCoreTool(
 }
 
 function coreToolGateName(name: CoreToolName): 'AgentDelegation' | null {
-  return name === 'delegate_task' || name === 'task_message'
+  return name === 'delegate_task' ||
+    name === 'task_wait' ||
+    name === 'task_message'
     ? 'AgentDelegation'
     : null;
 }
@@ -643,21 +648,6 @@ function formatQuestionAnswers(
   );
   if (answeredBy?.trim()) lines.push(`(answered by ${answeredBy.trim()})`);
   return lines.join('\n') || 'No answer received.';
-}
-
-function taskDescription(name: CoreTaskLifecycleName): string {
-  switch (name) {
-    case 'delegate_task':
-      return 'Start a durable child Gantry agent task.';
-    case 'task_get':
-      return 'Read one durable task.';
-    case 'task_list':
-      return 'List recent durable tasks.';
-    case 'task_cancel':
-      return 'Cancel one running durable task.';
-    case 'task_message':
-      return 'Send a steering message to a delegated task.';
-  }
 }
 
 function textResult(text: string): McpCompatibleToolResult {

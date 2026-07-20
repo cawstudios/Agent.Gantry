@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { materializeMcpRecord } from '@core/application/mcp/mcp-server-materialization.js';
 
-function recordWithTemplate(templateId: string | undefined) {
+function recordWithTemplate(
+  templateId: string | undefined,
+  args: string[] = [],
+) {
   return {
     definition: {
       name: 'github',
-      config: { transport: 'stdio_template', templateId },
+      config: { transport: 'stdio_template', templateId, args },
       credentialRefs: [],
       allowedToolPatterns: ['search'],
       autoApproveToolPatterns: [],
@@ -52,6 +55,19 @@ describe('materializeMcpRecord', () => {
     } catch (error) {
       expect(error).toMatchObject({ code: 'INVALID_REQUEST' });
     }
+  });
+
+  it('materializes an image-bundled MCP package without npx', () => {
+    expect(
+      materializeMcpRecord(
+        recordWithTemplate('installed-package', ['firecrawl-mcp']),
+        {},
+      ).config,
+    ).toEqual({
+      type: 'stdio',
+      command: 'firecrawl-mcp',
+      args: [],
+    });
   });
 
   it('materializes remote MCP servers for the guarded proxy transport', () => {

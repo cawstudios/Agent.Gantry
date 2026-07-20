@@ -1,6 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, asc, eq, gt, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 
 import type {
   EventBusPublisherPort,
@@ -14,7 +25,10 @@ import type {
   UsageAggregate,
   UsageQuery,
 } from '../../../../domain/events/events.js';
-import type { LiveAdmissionWorkItemEnqueueResult } from '../../../../domain/ports/live-turns.js';
+import type {
+  LiveAdmissionWorkItemEnqueueResult,
+  SdkSessionQueuePolicy,
+} from '../../../../domain/ports/live-turns.js';
 import {
   requireRuntimeEventType,
   RUNTIME_EVENT_TYPES,
@@ -32,6 +46,10 @@ import {
   type MessageLiveAdmissionInput,
   PostgresCanonicalMessageRepository,
 } from './canonical-message-repository.postgres.js';
+import {
+  linkSdkSessionAcceptedEventWithExecutor,
+  preflightSdkSessionAdmissionWithExecutor,
+} from './live-admission-work-item-repository.postgres.js';
 
 type RuntimeEventRow = typeof pgSchema.runtimeEventsPostgres.$inferSelect;
 
@@ -100,35 +118,123 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
   async appendRuntimeEvent(
     input: RuntimeEventPublishInput,
   ): Promise<RuntimeEvent> {
-    return this.db.transaction(async (tx) => {
-      const event = await this.insertRuntimeEvent(tx, input);
-      await this.eventBus.publish(eventBusInputForRuntimeEvent(event), tx);
-      await this.enqueueWebhookDeliveryIfNeeded(tx, event);
-      return event;
-    });
+    return this.db.transaction((tx) =>
+      this.appendRuntimeEventWithExecutor(tx, input),
+    );
+  }
+
+  /** Append an event and its outbox/webhook rows inside the caller's transaction. */
+  async appendRuntimeEventWithExecutor(
+    db: CanonicalExecutor,
+    input: RuntimeEventPublishInput,
+  ): Promise<RuntimeEvent> {
+    const event = await this.insertRuntimeEvent(db, input);
+    await this.eventBus.publish(eventBusInputForRuntimeEvent(event), db);
+    await this.enqueueWebhookDeliveryIfNeeded(db, event);
+    return event;
   }
 
   async appendRuntimeEventAndStoreLiveAdmission(
     input: RuntimeEventPublishInput,
     admission: {
       message: NewMessage;
-      liveAdmission: MessageLiveAdmissionInput;
+      liveAdmission: MessageLiveAdmissionInput & {
+        sdkSessionAdmissionRequest?: {
+          requestMessageId: string;
+          idempotencyKey: string;
+          requestFingerprint: string;
+          queuePolicy?: SdkSessionQueuePolicy;
+        };
+      };
     },
-  ): Promise<{
-    event: RuntimeEvent;
-    liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
-  }> {
+  ): Promise<
+    | {
+        outcome: 'accepted';
+        event: RuntimeEvent;
+        liveAdmissionResult: LiveAdmissionWorkItemEnqueueResult | undefined;
+      }
+    | {
+        outcome: 'replayed';
+        messageId: string;
+        acceptedEventId: number;
+      }
+    | { outcome: 'fingerprint_conflict' }
+    | {
+        outcome: 'capacity_exceeded';
+        activeAndWaiting: number;
+        capacity: number;
+      }
+  > {
     const messages = new PostgresCanonicalMessageRepository(this.db);
     return this.db.transaction(async (tx) => {
+      const sdkAdmission = admission.liveAdmission.sdkSessionAdmissionRequest;
+      let preparedLiveAdmission = admission.liveAdmission;
+      if (sdkAdmission) {
+        const agentSessionId = admission.liveAdmission.agentSessionId?.trim();
+        if (!agentSessionId) {
+          throw new Error('SDK session admission requires agentSessionId.');
+        }
+        const preflight = await preflightSdkSessionAdmissionWithExecutor(tx, {
+          appId: admission.liveAdmission.appId,
+          agentSessionId,
+          idempotencyKey: sdkAdmission.idempotencyKey,
+          requestFingerprint: sdkAdmission.requestFingerprint,
+          queuePolicy: sdkAdmission.queuePolicy,
+          now: admission.liveAdmission.now,
+        });
+        if (preflight.outcome === 'replayed') {
+          const messageId = preflight.item.requestMessageId;
+          const acceptedEventId = preflight.item.acceptedEventId;
+          if (!messageId || !acceptedEventId) {
+            throw new Error('SDK session replay receipt is incomplete.');
+          }
+          return { outcome: 'replayed', messageId, acceptedEventId };
+        }
+        if (preflight.outcome === 'fingerprint_conflict') {
+          return { outcome: 'fingerprint_conflict' };
+        }
+        if (preflight.outcome === 'capacity_exceeded') {
+          return preflight;
+        }
+        preparedLiveAdmission = {
+          ...admission.liveAdmission,
+          sdkSessionAdmission: {
+            requestMessageId: sdkAdmission.requestMessageId,
+            preflight: preflight.preflight,
+          },
+        };
+      }
       const liveAdmissionResult = await messages.saveMessageWithExecutor(
         tx,
         admission.message,
-        { liveAdmission: admission.liveAdmission },
+        { liveAdmission: preparedLiveAdmission },
       );
       const event = await this.insertRuntimeEvent(tx, input);
       await this.eventBus.publish(eventBusInputForRuntimeEvent(event), tx);
       await this.enqueueWebhookDeliveryIfNeeded(tx, event);
-      return { event, liveAdmissionResult };
+      let linkedAdmissionResult = liveAdmissionResult;
+      if (sdkAdmission) {
+        if (
+          !liveAdmissionResult ||
+          liveAdmissionResult.outcome !== 'enqueued'
+        ) {
+          throw new Error('SDK session admission was not created atomically.');
+        }
+        const linked = await linkSdkSessionAcceptedEventWithExecutor(tx, {
+          id: liveAdmissionResult.item.id,
+          acceptedEventId: event.eventId,
+          now: admission.liveAdmission.now,
+        });
+        if (!linked) {
+          throw new Error('SDK session accepted event could not be linked.');
+        }
+        linkedAdmissionResult = { outcome: 'enqueued', item: linked };
+      }
+      return {
+        outcome: 'accepted',
+        event,
+        liveAdmissionResult: linkedAdmissionResult,
+      };
     });
   }
 
@@ -136,6 +242,7 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
     db: CanonicalExecutor,
     input: RuntimeEventPublishInput,
   ): Promise<RuntimeEvent> {
+    const conversationId = await this.resolveConversationId(db, input);
     const rows = await db
       .insert(pgSchema.runtimeEventsPostgres)
       .values({
@@ -145,7 +252,7 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
         runId: optionalId(input.runId),
         jobId: optionalId(input.jobId),
         triggerId: optionalId(input.triggerId),
-        conversationId: optionalId(input.conversationId),
+        conversationId,
         threadId: optionalId(input.threadId),
         eventType: requireRuntimeEventType(input.eventType),
         actor: input.actor,
@@ -157,6 +264,37 @@ export class PostgresRuntimeEventRepository implements RuntimeEventRepository {
       })
       .returning();
     return this.eventFromRow(rows[0]!);
+  }
+
+  private async resolveConversationId(
+    db: CanonicalExecutor,
+    input: RuntimeEventPublishInput,
+  ): Promise<string | null> {
+    const conversationId = optionalId(input.conversationId);
+    const sessionId = optionalId(input.sessionId);
+    if (!conversationId) return null;
+    const externalConversationJid = conversationId.startsWith('conversation:')
+      ? conversationId.slice('conversation:'.length)
+      : conversationId;
+
+    const [session] = await db
+      .select({
+        conversationId: pgSchema.controlHttpSessionsPostgres.conversationId,
+      })
+      .from(pgSchema.controlHttpSessionsPostgres)
+      .where(
+        and(
+          eq(pgSchema.controlHttpSessionsPostgres.appId, input.appId),
+          or(
+            sessionId
+              ? eq(pgSchema.controlHttpSessionsPostgres.sessionId, sessionId)
+              : undefined,
+            sql`${pgSchema.controlHttpSessionsPostgres.externalRefJson} ->> 'chatJid' = ${externalConversationJid}`,
+          ),
+        ),
+      )
+      .limit(1);
+    return session?.conversationId ?? conversationId;
   }
 
   private async enqueueWebhookDeliveryIfNeeded(

@@ -779,6 +779,18 @@ describe('createGroupProcessor', () => {
       expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({ responseSchema });
     });
 
+    it('passes a persisted live-turn execution budget to the runner', async () => {
+      const { deps } = setupHappyPath();
+      const { processGroupMessages } = createGroupProcessor(deps);
+
+      await processGroupMessages('group1@g.us', { timeoutMs: 90_000 });
+
+      const timeoutMs = mockSpawnAgent.mock.calls[0][4]?.timeoutMs;
+      expect(timeoutMs).toBeTypeOf('number');
+      expect(timeoutMs).toBeGreaterThan(0);
+      expect(timeoutMs).toBeLessThanOrEqual(90_000);
+    });
+
     it('runs multiple schema messages as separate turns', async () => {
       const firstSchema = { type: 'object', title: 'first' };
       const secondSchema = { type: 'object', title: 'second' };
@@ -832,6 +844,169 @@ describe('createGroupProcessor', () => {
         'group1@g.us',
       );
       expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it('activates each queued app message response route for its own turn', async () => {
+      const firstRoute = {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        responseMode: 'sse' as const,
+        webhookId: null,
+        correlationId: 'corr-1',
+      };
+      const secondRoute = {
+        ...firstRoute,
+        correlationId: 'corr-2',
+      };
+      const messages = [
+        makeMessage({
+          id: '1',
+          canonicalMessageId: 'message:canonical:1',
+          timestamp: '1',
+          content: 'first',
+          appResponseRoute: firstRoute,
+        }),
+        makeMessage({
+          id: '2',
+          canonicalMessageId: 'message:canonical:2',
+          timestamp: '2',
+          content: 'second',
+          appResponseRoute: secondRoute,
+        }),
+      ];
+      const { deps, channel } = setupHappyPath({ messages });
+      const activateTurnResponseRoute = vi.fn();
+      deps.activateTurnResponseRoute = activateTurnResponseRoute;
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'session-1',
+          providerSessionAccessFingerprint: EMPTY_ACCESS_FINGERPRINT,
+        });
+      (deps.opsRepository as any).createSessionAgentRun = vi
+        .fn()
+        .mockResolvedValueOnce('run-1')
+        .mockResolvedValueOnce('run-2');
+      (deps.opsRepository as any).completeSessionAgentRun = vi.fn();
+      let cursor = '0';
+      deps.getCursor = vi.fn(() => cursor);
+      deps.setCursor = vi.fn((_queueJid, nextCursor) => {
+        cursor = nextCursor;
+      });
+      mockGetMessagesSince.mockImplementation((_jid, currentCursor) => {
+        const afterTimestamp = decodeGroupMessageCursor(
+          String(currentCursor),
+        ).timestamp;
+        return messages.filter(
+          (message) => Number(message.timestamp) > Number(afterTimestamp),
+        );
+      });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+      await processGroupMessages('group1@g.us');
+
+      expect(
+        activateTurnResponseRoute.mock.calls.map(([route]) => route),
+      ).toEqual([firstRoute, secondRoute]);
+      expect(
+        mockFormatConversationContextMessages.mock.calls.map((call) =>
+          call[0].currentMessages.map((message: NewMessage) => message.id),
+        ),
+      ).toEqual([['1'], ['2']]);
+      expect(
+        (deps.opsRepository as any).createSessionAgentRun.mock.calls.map(
+          ([input]: [Record<string, unknown>]) => input,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          messageId: 'message:canonical:1',
+          appResponseRoute: firstRoute,
+        }),
+        expect.objectContaining({
+          messageId: 'message:canonical:2',
+          appResponseRoute: secondRoute,
+        }),
+      ]);
+      expect(
+        (deps.opsRepository as any).completeSessionAgentRun.mock.calls.map(
+          ([input]: [Record<string, unknown>]) => input,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          runId: 'run-1',
+          appResponseRoute: firstRoute,
+        }),
+        expect.objectContaining({
+          runId: 'run-2',
+          appResponseRoute: secondRoute,
+        }),
+      ]);
+      expect(
+        (channel.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map(
+          (call) => call[2],
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          runId: 'run-1',
+          appResponseRoute: firstRoute,
+        }),
+        expect.objectContaining({
+          runId: 'run-2',
+          appResponseRoute: secondRoute,
+        }),
+      ]);
+      expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates the active run and immutable response route to streaming output', async () => {
+      const route = {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        responseMode: 'sse' as const,
+        webhookId: null,
+        correlationId: 'corr-stream',
+      };
+      const messages = [
+        makeMessage({
+          id: '1',
+          canonicalMessageId: 'message:canonical:stream',
+          timestamp: '1',
+          content: 'stream this',
+          appResponseRoute: route,
+        }),
+      ];
+      const streamingChannel = makeChannel({
+        sendStreamingChunk: vi.fn().mockResolvedValue(true),
+      });
+      const { deps } = setupHappyPath({ messages });
+      deps.channelRuntime = streamingChannel;
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'session-1',
+          providerSessionAccessFingerprint: EMPTY_ACCESS_FINGERPRINT,
+        });
+      (deps.opsRepository as any).createSessionAgentRun = vi
+        .fn()
+        .mockResolvedValue('run-stream');
+      (deps.opsRepository as any).completeSessionAgentRun = vi.fn();
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(streamingChannel.sendStreamingChunk).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Agent reply text',
+        expect.objectContaining({
+          runId: 'run-stream',
+          appResponseRoute: route,
+        }),
+      );
     });
 
     it('ends a turn at the first schema message and drains trailing plain messages', async () => {
@@ -2148,6 +2323,9 @@ describe('createGroupProcessor', () => {
         executionProviderId: 'anthropic:claude-agent-sdk',
         providerSessionId: undefined,
         cause: 'message',
+      });
+      expect(mockSpawnAgent.mock.calls[0][1]).toMatchObject({
+        runId: 'agent-run:message-1',
       });
       expect(deps.opsRepository.setSession).toHaveBeenCalledWith(
         group.folder,
@@ -4997,6 +5175,7 @@ describe('createGroupProcessor', () => {
         threadId: null,
         conversationKind: 'channel',
         memoryUserId: 'user1@s.whatsapp.net',
+        hydrateMemory: true,
         hydrationMode: 'first_visible',
         promoteReadyProviderSession: true,
         query: 'hello',

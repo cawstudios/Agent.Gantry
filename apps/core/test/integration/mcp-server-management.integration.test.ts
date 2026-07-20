@@ -11,6 +11,7 @@ import type {
   McpServerId,
 } from '@core/domain/mcp/mcp-servers.js';
 import type { McpServerRepository } from '@core/domain/ports/repositories.js';
+import type { CapabilitySecretRepository } from '@core/domain/ports/repositories.js';
 import { syncRuntimeSettingsFromProjection } from '@core/config/index.js';
 import { createClient } from '../../../../packages/sdk/src/index.js';
 import { startTestControlServer } from '../harness/control-http-server.js';
@@ -175,6 +176,7 @@ class InMemoryMcpServerRepository implements McpServerRepository {
 
 const state = vi.hoisted(() => ({
   mcpServers: undefined as unknown as InMemoryMcpServerRepository,
+  capabilitySecrets: undefined as unknown as CapabilitySecretRepository,
 }));
 
 vi.mock('@core/config/index.js', () => ({
@@ -241,9 +243,11 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => {
       storeMessage: vi.fn(async () => undefined),
     }),
     getRuntimeStorage: () => ({
+      runtimeEvents: { publish: vi.fn(async () => undefined) },
       repositories: {
         agents,
         mcpServers: state.mcpServers,
+        capabilitySecrets: state.capabilitySecrets,
         tools: {
           listTools: vi.fn(async () => []),
           listAgentToolBindingsForAgents: vi.fn(async () => []),
@@ -267,6 +271,37 @@ vi.mock('@core/adapters/storage/postgres/runtime-store.js', () => {
 
 beforeEach(() => {
   state.mcpServers = new InMemoryMcpServerRepository();
+  const values = new Map<string, { value: string; updatedAt: string }>();
+  state.capabilitySecrets = {
+    getSecret: async ({ appId, name }) => {
+      const stored = values.get(`${appId}:${name}`);
+      return stored
+        ? ({
+            id: `capability-secret:${appId}:${name}`,
+            appId,
+            name,
+            value: stored.value,
+            allowedCapabilityIds: [],
+            createdAt: stored.updatedAt,
+            updatedAt: stored.updatedAt,
+          } as never)
+        : null;
+    },
+    listSecrets: async () => [],
+    upsertSecret: async ({ appId, name, value, now }) => {
+      const updatedAt = now ?? new Date().toISOString();
+      values.set(`${appId}:${name}`, { value, updatedAt });
+      return {
+        id: `capability-secret:${appId}:${name}`,
+        appId,
+        name,
+        allowedCapabilityIds: [],
+        createdAt: updatedAt,
+        updatedAt,
+      } as never;
+    },
+    deleteSecret: async ({ appId, name }) => values.delete(`${appId}:${name}`),
+  };
   vi.clearAllMocks();
 });
 
@@ -291,7 +326,13 @@ describe('MCP server management integration', () => {
     const server = await startTestControlServer({
       token: 'token-mcp',
       appId: 'app-one',
-      scopes: ['mcp:read', 'mcp:admin', 'agents:admin'],
+      scopes: [
+        'mcp:read',
+        'mcp:admin',
+        'agents:admin',
+        'credentials:read',
+        'credentials:admin',
+      ],
     });
     const client = createClient({
       apiKey: server.token,
@@ -300,6 +341,22 @@ describe('MCP server management integration', () => {
     });
 
     try {
+      await expect(
+        client.mcpServers.credentials.set('FIRECRAWL_API_KEY', {
+          value: 'fc-test-secret',
+        }),
+      ).resolves.toEqual({
+        credential: expect.objectContaining({
+          name: 'FIRECRAWL_API_KEY',
+          status: 'ready',
+          fingerprint: expect.stringMatching(/^sha256:/),
+        }),
+      });
+      await expect(
+        client.mcpServers.credentials.get('FIRECRAWL_API_KEY'),
+      ).resolves.toEqual({
+        credential: expect.not.objectContaining({ value: expect.anything() }),
+      });
       const connected = await client.mcpServers.connect(githubConnectInput);
       const definition = (connected as any).server as McpServerDefinition;
       expect(definition).toMatchObject({
@@ -387,6 +444,11 @@ describe('MCP server management integration', () => {
           'disable',
         ]),
       );
+      await expect(
+        client.mcpServers.credentials.unset('FIRECRAWL_API_KEY'),
+      ).resolves.toEqual({
+        credential: expect.objectContaining({ status: 'needs_secret' }),
+      });
     } finally {
       await server.close();
     }
