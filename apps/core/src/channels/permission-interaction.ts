@@ -199,7 +199,7 @@ export function formatPermissionReceiptText(
   request: PermissionApprovalRequest | undefined,
   decision: PermissionApprovalDecision,
 ): string {
-  const summary = formatPermissionReceiptActionSummary(request);
+  const summary = formatPermissionReceiptActionSummary(request); // Existing-prompt settlement, not a new chat receipt.
   if (!decision.approved || decision.mode === 'cancel') {
     return limitPermissionMessage(`Canceled: ${summary}. Nothing changed.`);
   }

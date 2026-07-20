@@ -8,10 +8,7 @@ import type {
 import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
 import { PermissionManagementService } from '../application/permissions/permission-management-service.js';
 import type { PausedJobCapabilityRecheckResult } from '../application/jobs/job-permission-recovery.js';
-import {
-  formatDurableAccessRuleForEvent,
-  formatDurableAccessRulesForUser,
-} from '../shared/durable-access-policy.js';
+import { formatDurableAccessRuleForEvent } from '../shared/durable-access-policy.js';
 import {
   permissionUpdateAllowedToolRules,
   persistentPermissionUpdates,
@@ -251,16 +248,12 @@ export async function processPermissionInteractionIpc(input: {
             payload: persistedContext,
           },
         );
-        await sendPermissionOutcomeMessage(input.deps, input.request, {
-          text: formatPersistentPermissionOutcome({
-            rules: permissionUpdateAllowedToolRules(
-              claimedDecision.updatedPermissions,
-            ),
-            semanticCapabilityDefinitions:
-              input.request.semanticCapabilityDefinitions,
-            recovery,
-          }),
-        });
+        const outcomeMessage = formatPersistentPermissionOutcome(recovery);
+        if (outcomeMessage) {
+          await sendPermissionOutcomeMessage(input.deps, input.request, {
+            text: outcomeMessage,
+          });
+        }
       },
     });
     if (!applied) {
@@ -541,37 +534,14 @@ function persistentPermissionScopeRequest(
   return parentConversationRequest;
 }
 
-function formatPersistentPermissionOutcome(input: {
-  rules: string[];
-  semanticCapabilityDefinitions?: PermissionApprovalRequest['semanticCapabilityDefinitions'];
-  recovery: PausedJobCapabilityRecheckResult;
-}): string {
-  const lines = [
-    `Allowed for future: ${formatDurableAccessRulesForUser(input.rules, {
-      semanticCapabilityDefinitions: input.semanticCapabilityDefinitions,
-    })}.`,
-  ];
-  if (input.recovery.queued.length > 0) {
-    lines.push(
-      `Job ready: ${input.recovery.queued
-        .map((job) => job.name || job.jobId)
-        .join(', ')}. It will run now.`,
-    );
-  }
-  if (input.recovery.stillBlocked.length > 0) {
-    const blocker = input.recovery.stillBlocked[0];
-    lines.push(
-      `Still needs setup: ${blocker.nextAction ?? 'review job setup'}.`,
-    );
-  }
-  if (
-    input.recovery.checked === 0 &&
-    input.recovery.queued.length === 0 &&
-    input.recovery.stillBlocked.length === 0
-  ) {
-    lines.push('No paused setup jobs needed retry.');
-  }
-  return lines.join('\n');
+function formatPersistentPermissionOutcome(
+  recovery: PausedJobCapabilityRecheckResult,
+): string | undefined {
+  const blocker = recovery.stillBlocked[0];
+  if (!blocker) return undefined;
+  const nextAction = blocker.nextAction ?? 'review job setup';
+  const punctuation = /[.!?]$/.test(nextAction) ? '' : '.';
+  return `Still needs setup: ${nextAction}${punctuation}`;
 }
 
 async function sendPermissionOutcomeMessage(
