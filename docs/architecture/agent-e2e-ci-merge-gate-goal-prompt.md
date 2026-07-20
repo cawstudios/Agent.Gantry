@@ -141,9 +141,12 @@ capability grant, permission decisions, and the agent turn are ALL driven by API
 calls. For each step assert BOTH the API contract (status code, response shape)
 AND the persisted/runtime effect (settings revision appended, Postgres
 projection, post-restart survival, the turn's actual behavior). Reuse existing
-endpoints; no production-only test routes. Any operation lacking an API is a
-finding: either it gets an API or the gate documents the CLI/desired-state path
-it must use and why.
+endpoints; no production-only test routes. **Any operation lacking an API gets
+the API IMPLEMENTED as part of this lane** (user directive 2026-07-20) — a
+first-class, reviewed, documented endpoint (contracts-first if it needs a public
+DTO, honoring the ponytail Phase-4 collision rules), not a test-only backdoor.
+The gate then consumes the new API like any client. CLI/desired-state
+workarounds are not acceptable substitutes.
 - **Onboarding via API:** create agent + binding via the supported endpoints;
   assert contract + persisted revision + post-restart survival.
 - **Model selection via API:** select the `haiku` alias / default slot / per-agent
