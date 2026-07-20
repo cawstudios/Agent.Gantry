@@ -1070,7 +1070,6 @@ describe('TelegramChannel', () => {
       threadId: '42',
       headline: 'Searching the web',
       status: 'running',
-      elapsed: '2m 14s',
       stop: { label: 'Stop', actionToken: 'stop-token-1' },
       items: [{ id: '1', title: 'First', status: 'pending' }],
     });
@@ -1088,7 +1087,7 @@ describe('TelegramChannel', () => {
     expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
       1,
       '-100123',
-      expect.stringContaining('⏳ Searching the web · 2m 14s'),
+      expect.stringContaining('⏳ Searching the web'),
       expect.objectContaining({
         message_thread_id: 42,
       }),
@@ -3984,7 +3983,7 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       await channel.sendProgressUpdate('tg:100200300', 'Working on it...');
-      await channel.sendProgressUpdate('tg:100200300', 'Done in 10s.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Finished.', {
         done: true,
       });
 
@@ -3999,7 +3998,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
         '100200300',
         987,
-        'Done in 10s.',
+        'Finished.',
         expect.objectContaining({ parse_mode: 'MarkdownV2' }),
       );
 
@@ -4020,7 +4019,7 @@ describe('TelegramChannel', () => {
       await channel.sendProgressUpdate('tg:100200300', 'Working on it...', {
         generation: 1,
       });
-      await channel.sendProgressUpdate('tg:100200300', 'Done in 10s.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Done.', {
         done: true,
         generation: 1,
       });
@@ -4134,7 +4133,7 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      await channel.sendProgressUpdate('tg:100200300', 'Done in 1s.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Done.', {
         done: true,
         replaceOnly: true,
       });
@@ -4157,14 +4156,14 @@ describe('TelegramChannel', () => {
           },
         ],
       });
-      await channel.sendProgressUpdate('tg:100200300', 'Done in 1s.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Finished.', {
         done: true,
         replaceOnly: true,
       });
       expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
         '100200300',
         987,
-        'Done in 1s.',
+        'Finished.',
         expect.objectContaining({
           parse_mode: 'MarkdownV2',
           reply_markup: { inline_keyboard: [] },
@@ -4173,7 +4172,7 @@ describe('TelegramChannel', () => {
       currentBot().api.sendMessage.mockClear();
       currentBot().api.editMessageText.mockClear();
 
-      await channel.sendProgressUpdate('tg:100200300', 'Done in 2s.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Finished again.', {
         done: true,
         replaceOnly: true,
       });
@@ -4197,14 +4196,14 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledTimes(2);
       expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
 
-      await channel.sendProgressUpdate('tg:100200300', 'Done in old turn.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Finished old turn.', {
         done: true,
         replaceOnly: true,
         generation: 1,
       });
       expect(currentBot().api.editMessageText).not.toHaveBeenCalled();
 
-      await channel.sendProgressUpdate('tg:100200300', 'Done in new turn.', {
+      await channel.sendProgressUpdate('tg:100200300', 'Finished new turn.', {
         done: true,
         replaceOnly: true,
         generation: 3,
@@ -4212,7 +4211,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
         '100200300',
         987,
-        'Done in new turn.',
+        'Finished new turn.',
         expect.objectContaining({ parse_mode: 'MarkdownV2' }),
       );
     });

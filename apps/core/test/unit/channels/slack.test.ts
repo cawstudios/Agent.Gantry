@@ -87,6 +87,17 @@ vi.mock('@slack/bolt', () => ({
           .fn()
           .mockResolvedValue({ ok: true, message_ts: '1710000000.100201' }),
       },
+      files: {
+        getUploadURLExternal: vi.fn().mockResolvedValue({
+          ok: true,
+          upload_url: 'https://files.slack.com/upload/v1/test',
+          file_id: 'F123',
+        }),
+        completeUploadExternal: vi.fn().mockResolvedValue({
+          ok: true,
+          files: [{ id: 'F123', title: 'report.txt' }],
+        }),
+      },
       reactions: {
         add: vi.fn().mockResolvedValue({ ok: true }),
       },
@@ -152,6 +163,7 @@ import {
 } from '@core/channels/slack/permission-blocks.js';
 import { SLACK_PERMISSION_DECISION_ACTION_IDS } from '@core/channels/slack/permission-action-id.js';
 import { writeSlackAttachmentResponse } from '@core/channels/slack/attachment-download.js';
+import { asTypingSink } from '@core/app/bootstrap/channel-capability-ports.js';
 import type {
   PermissionApprovalRequest,
   PermissionCallbackClaim,
@@ -688,6 +700,16 @@ describe('Slack channel', () => {
       if (savedApp !== undefined) process.env.SLACK_APP_TOKEN = savedApp;
       else delete process.env.SLACK_APP_TOKEN;
     }
+  });
+
+  it('does not expose Slack as typing-capable', () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOpts() as any,
+    );
+
+    expect(asTypingSink(channel)).toBeUndefined();
   });
 
   it('adds Slack reactions idempotently', async () => {
@@ -2910,6 +2932,126 @@ describe('Slack channel', () => {
     );
   });
 
+  it('uploads outbound file content through the Slack external upload flow', async () => {
+    const uploadFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', uploadFetch);
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U_APPROVER']) as any,
+    );
+    await channel.connect();
+
+    await channel.sendMessage('sl:C1234567890', 'Rendered.', {
+      threadId: '1710000000.000111',
+      files: [
+        {
+          filename: 'clip.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: 4,
+          content: new Uint8Array([0, 1, 2, 3]),
+        },
+      ],
+    });
+
+    expect(
+      appRef.current.client.files.getUploadURLExternal,
+    ).toHaveBeenCalledWith({ filename: 'clip.mp4', length: 4 });
+    expect(uploadFetch).toHaveBeenCalledWith(
+      'https://files.slack.com/upload/v1/test',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+      }),
+    );
+    expect(
+      Buffer.from(uploadFetch.mock.calls[0]?.[1]?.body as Uint8Array),
+    ).toEqual(Buffer.from([0, 1, 2, 3]));
+    expect(
+      appRef.current.client.files.completeUploadExternal,
+    ).toHaveBeenCalledWith({
+      files: [{ id: 'F123', title: 'clip.mp4' }],
+      channel_id: 'C1234567890',
+      thread_ts: '1710000000.000111',
+    });
+  });
+
+  it('posts a visible per-file fallback when Slack upload fails', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U_APPROVER']) as any,
+    );
+    await channel.connect();
+    vi.mocked(
+      appRef.current.client.files.getUploadURLExternal,
+    ).mockRejectedValueOnce(new Error('upload unavailable'));
+
+    const result = await channel.sendMessage('sl:C1234567890', 'Rendered.', {
+      files: [
+        {
+          filename: 'clip.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: 4,
+          content: new Uint8Array([0, 1, 2, 3]),
+        },
+      ],
+    });
+
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledTimes(2);
+    expect(appRef.current.client.chat.postMessage).toHaveBeenNthCalledWith(2, {
+      channel: 'C1234567890',
+      text: 'Attachment unavailable in Slack: clip.mp4 upload failed.',
+    });
+    expect(result).toMatchObject({
+      warnings: ['slack.attachment_upload_failed'],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jid: 'sl:C1234567890',
+        path: 'clip.mp4',
+        reason: 'clip.mp4 upload failed.',
+      }),
+      'Slack attachment upload failed',
+    );
+  });
+
+  it('fails delivery when both Slack upload and visible fallback fail', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook(['U_APPROVER']) as any,
+    );
+    await channel.connect();
+    vi.mocked(
+      appRef.current.client.files.getUploadURLExternal,
+    ).mockRejectedValueOnce(new Error('upload unavailable'));
+    vi.mocked(appRef.current.client.chat.postMessage)
+      .mockResolvedValueOnce({ ok: true, ts: '1710000000.100200' })
+      .mockRejectedValue(new Error('fallback unavailable'));
+
+    await expect(
+      channel.sendMessage('sl:C1234567890', 'Rendered.', {
+        files: [
+          {
+            filename: 'clip.mp4',
+            contentType: 'video/mp4',
+            sizeBytes: 4,
+            content: new Uint8Array([0, 1, 2, 3]),
+          },
+        ],
+      }),
+    ).rejects.toThrow('fallback unavailable');
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jid: 'sl:C1234567890',
+        path: 'clip.mp4',
+        error: expect.objectContaining({ message: 'fallback unavailable' }),
+      }),
+      'Slack attachment fallback message failed',
+    );
+  });
+
   it('renders Slack todo plans inside their source thread', async () => {
     const channel = new SlackChannel(
       'xoxb-token',
@@ -2930,7 +3072,6 @@ describe('Slack channel', () => {
       summary: 'Thread one',
       headline: 'Searching the web',
       status: 'running',
-      elapsed: '2m 14s',
       stop: { label: 'Stop', actionToken: 'stop-token-1' },
       items: [{ id: 'a', title: 'A', status: 'pending' }],
     });
@@ -2955,7 +3096,7 @@ describe('Slack channel', () => {
       }),
     );
     expect(JSON.stringify(postMessage.mock.calls[0]?.[0])).toContain(
-      '⏳ Searching the web · 2m 14s',
+      '⏳ Searching the web',
     );
     expect(JSON.stringify(postMessage.mock.calls[0]?.[0])).not.toContain(
       'stop-token-1',
@@ -3296,7 +3437,7 @@ describe('Slack channel', () => {
       ok: true,
     });
 
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in 1s.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
       replaceOnly: true,
       threadId: '1710000000.000111',
@@ -3641,20 +3782,20 @@ describe('Slack channel', () => {
     await channel.connect();
 
     await channel.sendProgressUpdate('sl:C1234567890', 'Working on it...');
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in 1s.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
       replaceOnly: true,
     });
     expect(appRef.current.client.chat.update).toHaveBeenCalledWith({
       channel: 'C1234567890',
       ts: '1710000000.100200',
-      text: 'Done in 1s.',
+      text: 'Done.',
       blocks: [],
     });
     appRef.current.client.chat.postMessage.mockClear();
     appRef.current.client.chat.update.mockClear();
 
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in 2s.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
       replaceOnly: true,
     });
@@ -3672,7 +3813,7 @@ describe('Slack channel', () => {
     await channel.connect();
 
     await channel.sendProgressUpdate('sl:C1234567890', 'Working on it...');
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in 10s.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
     });
 
@@ -3685,7 +3826,7 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.update).toHaveBeenCalledWith({
       channel: 'C1234567890',
       ts: '1710000000.100200',
-      text: 'Done in 10s.',
+      text: 'Done.',
       blocks: [],
     });
 
@@ -3709,7 +3850,7 @@ describe('Slack channel', () => {
     await channel.sendProgressUpdate('sl:C1234567890', 'Working on it...', {
       generation: 1,
     });
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in 10s.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
       generation: 1,
     });
@@ -3743,14 +3884,14 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.postMessage).toHaveBeenCalledTimes(2);
     expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
 
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in old turn.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
       replaceOnly: true,
       generation: 1,
     });
     expect(appRef.current.client.chat.update).not.toHaveBeenCalled();
 
-    await channel.sendProgressUpdate('sl:C1234567890', 'Done in new turn.', {
+    await channel.sendProgressUpdate('sl:C1234567890', 'Done.', {
       done: true,
       replaceOnly: true,
       generation: 3,
@@ -3758,7 +3899,7 @@ describe('Slack channel', () => {
     expect(appRef.current.client.chat.update).toHaveBeenCalledWith({
       channel: 'C1234567890',
       ts: '1710000000.100200',
-      text: 'Done in new turn.',
+      text: 'Done.',
       blocks: [],
     });
   });

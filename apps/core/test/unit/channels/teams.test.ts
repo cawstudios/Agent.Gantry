@@ -400,10 +400,10 @@ type TeamsSdkClientWithRoot = TeamsSdkClient & {
 };
 
 describe('Teams built-in provider', () => {
-  it('uses the locked no-link copy for unavailable attachments', () => {
+  it('stubs all attachment lines when files are present', () => {
     expect(
       formatTeamsAttachmentUnavailableCopy(
-        'Ship the note.\n\nAttachments:\n- Attachment unavailable.',
+        'Ship the note.\n\nAttachments:\n- Attachment unavailable',
       ),
     ).toBe(
       'Ship the note.\n\nAttachments:\n- Attachment unavailable in Teams until signed artifact links are added.',
@@ -416,6 +416,31 @@ describe('Teams built-in provider', () => {
     ).toBe(
       'Ship the note.\n\nAttachments:\n- Attachment unavailable in Teams until signed artifact links are added.',
     );
+    expect(
+      formatTeamsAttachmentUnavailableCopy(
+        'Ship the note.\n\nAttachments:\n- daily.md (text/markdown, 1024 bytes)\n- Attachment unavailable: exceeds 25 MB',
+        true,
+      ),
+    ).toBe(
+      'Ship the note.\n\nAttachments:\n- Attachment unavailable in Teams until signed artifact links are added.\n- Attachment unavailable in Teams until signed artifact links are added.',
+    );
+  });
+
+  it('does not rewrite attachment-like lines after the section ends', () => {
+    expect(
+      formatTeamsAttachmentUnavailableCopy(
+        'Ship the note.\n\nAttachments:\n- daily.md (text/markdown, 1024 bytes)\n\nFollow-up:\n- Attachment unavailable from the author.',
+      ),
+    ).toBe(
+      'Ship the note.\n\nAttachments:\n- daily.md (text/markdown, 1024 bytes)\n\nFollow-up:\n- Attachment unavailable from the author.',
+    );
+  });
+
+  it('preserves a resolved attachment whose filename starts with the unavailable marker', () => {
+    const text =
+      'Ship the note.\n\nAttachments:\n- Attachment unavailable-report.pdf (application/pdf, 1024 bytes)';
+
+    expect(formatTeamsAttachmentUnavailableCopy(text)).toBe(text);
   });
 
   it('registers Teams provider metadata and ownership prefix', () => {
@@ -574,7 +599,6 @@ describe('TeamsChannel adapter scaffold', () => {
       threadId: 'reply-a',
       headline: 'Searching the web',
       status: 'running',
-      elapsed: '2m 14s',
       stop: { label: 'Stop', actionToken: 'stop-token-1' },
       items: [{ id: '1', title: 'First', status: 'pending' }],
     });
@@ -595,9 +619,7 @@ describe('TeamsChannel adapter scaffold', () => {
     );
     const firstCard = vi.mocked(sdkClient.sendAdaptiveCard).mock.calls[0]?.[0]
       ?.card as any;
-    expect(JSON.stringify(firstCard)).toContain(
-      '⏳ Searching the web · 2m 14s',
-    );
+    expect(JSON.stringify(firstCard)).toContain('⏳ Searching the web');
     expect(JSON.stringify(firstCard.actions)).toContain('stop-token-1');
     expect(JSON.stringify(firstCard.actions)).toContain(
       'teams:19:abc@thread.v2',
