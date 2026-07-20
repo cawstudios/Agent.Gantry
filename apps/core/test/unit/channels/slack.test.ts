@@ -5134,6 +5134,32 @@ describe('Slack channel', () => {
     );
   });
 
+  it('posts a visible Slack notice when no approver can receive a permission prompt', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook([]) as any,
+    );
+    await channel.connect();
+
+    const approvalPromise = requestSlackPermissionApproval(channel, 'sl:C123', {
+      requestId: 'perm-no-approver',
+      sourceAgentFolder: 'slack_main',
+      toolName: 'request_skill_install',
+      title: 'Install skill for this agent',
+    });
+    await flushSlackPromptRegistration();
+
+    await expect(approvalPromise).resolves.toMatchObject({ approved: false });
+    expect(appRef.current.client.chat.postEphemeral).not.toHaveBeenCalled();
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        text: expect.stringContaining('no configured approvers'),
+      }),
+    );
+  });
+
   it('fails closed when a Slack permission batch cannot be bound durably', async () => {
     vi.useFakeTimers();
     configurePendingInteractionDurability({

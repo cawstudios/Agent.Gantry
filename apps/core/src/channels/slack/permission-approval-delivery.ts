@@ -115,10 +115,24 @@ export async function requestSlackPermissionApproval(input: {
   };
   const threadTs = slackThreadTsFromThreadId(input.request.threadId);
   const threadPayload = threadTs ? { thread_ts: threadTs } : {};
+  const userIds = [...new Set(input.approverUserIds || [])].filter(Boolean);
+  const postPromptDeliveryFailureNotice = async (reason: string) => {
+    try {
+      await input.app.client.chat.postMessage({
+        channel: input.channelId,
+        text: reason,
+        ...threadPayload,
+      });
+    } catch (err) {
+      logger.warn(
+        { jid: input.jid, requestId: input.request.requestId, err },
+        'Slack permission prompt failure notice could not be delivered',
+      );
+    }
+  };
   const postPrivatePrompt = async (
     blocks: unknown[],
   ): Promise<{ ts?: string } | null> => {
-    const userIds = [...new Set(input.approverUserIds || [])].filter(Boolean);
     let first: { ts?: string } | null = null;
     let lastError: unknown;
     for (const user of userIds) {
@@ -143,6 +157,12 @@ export async function requestSlackPermissionApproval(input: {
     return first;
   };
   try {
+    if (userIds.length === 0) {
+      const reason =
+        'Approval prompt could not be shown because this Slack conversation has no configured approvers. Add at least one conversation approver and retry.';
+      await postPromptDeliveryFailureNotice(reason);
+      return { approved: false, reason };
+    }
     const binding = {
       request: input.request,
       decisionOptions,
@@ -169,13 +189,22 @@ export async function requestSlackPermissionApproval(input: {
         },
         actionsBlock,
       ];
-      response = await postPrivatePrompt(simpleBlocks);
+      try {
+        response = await postPrivatePrompt(simpleBlocks);
+      } catch (simpleErr) {
+        const reason =
+          'Approval prompt could not be shown to any configured Slack approver. Check that the approver is a member of this conversation and that the Slack app can post ephemeral messages here.';
+        await postPromptDeliveryFailureNotice(reason);
+        throw simpleErr;
+      }
     }
     const messageTs = response?.ts;
     if (!messageTs) {
+      const reason = 'Slack did not accept the approval prompt.';
+      await postPromptDeliveryFailureNotice(reason);
       return {
         approved: false,
-        reason: 'Slack did not accept the approval prompt.',
+        reason,
       };
     }
     let resolveDecision!: (decision: PermissionApprovalDecision) => void;
