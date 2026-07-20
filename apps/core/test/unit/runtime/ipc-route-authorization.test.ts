@@ -144,6 +144,31 @@ describe('resolveRunnerIpcRoute', () => {
     });
   });
 
+  it('prefers provider-qualified aliases over stale bare routes when only one provider matches', () => {
+    const routes = {
+      [makeAgentThreadQueueKey('slack:C123', 'agent:team', null, undefined)]: {
+        ...route('acct:a'),
+        conversationId: 'conversation:stale',
+      },
+      [makeAgentThreadQueueKey('slack:C123', 'agent:team', null, 'acct:a')]: {
+        ...route('acct:a'),
+        conversationId: 'conversation:canonical',
+      },
+    };
+
+    expect(
+      resolveRunnerIpcRoute({
+        routes,
+        sourceAgentFolder: 'team',
+        targetJid: 'slack:C123',
+      }),
+    ).toEqual({
+      targetJid: 'slack:C123',
+      conversationId: 'conversation:canonical',
+      providerAccountId: 'acct:a',
+    });
+  });
+
   it('collapses duplicate same-provider aliases when the request omits provider account', () => {
     const routes = {
       [makeAgentThreadQueueKey('slack:C123', 'agent:team', null, undefined)]: {

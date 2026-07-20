@@ -63,6 +63,22 @@ export function resolveRunnerIpcRoute(input: {
     );
     if (providerAccountIds.size === 1) {
       const [providerAccountId] = providerAccountIds;
+      const qualified = selected.filter(
+        ({ parsed }) => parsed.providerAccountId === providerAccountId,
+      );
+      if (qualified.length > 0 && distinctIdentities(qualified).size === 1) {
+        selected = qualified;
+      }
+    }
+  }
+  if (distinctIdentities(selected).size !== 1) {
+    const providerAccountIds = new Set(
+      selected
+        .map(({ providerAccountId }) => providerAccountId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    if (providerAccountIds.size === 1) {
+      const [providerAccountId] = providerAccountIds;
       const sameProvider = selected.filter(
         (candidate) => candidate.providerAccountId === providerAccountId,
       );
