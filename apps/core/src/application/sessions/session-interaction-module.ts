@@ -218,10 +218,26 @@ export class SessionInteractionModule {
   }): Promise<{ messages: unknown[] }> {
     const session = await this.requireSession(input);
     if (!session.conversationId) return { messages: [] };
-    const messages = await this.deps.repositories.messages.listRecentMessages({
-      conversationId: session.conversationId as never,
-      limit: input.limit,
-    });
+    // The session stores its SHORT conversation id; canonical message rows
+    // key on conversation-row ids, and one jid can map to several rows until
+    // the Phase-8 restamp — resolve by jid and union.
+    const conversationIds =
+      await this.deps.repositories.messages.listConversationIdsForJid(
+        session.conversationJid,
+      );
+    if (conversationIds.length === 0) return { messages: [] };
+    const lists = await Promise.all(
+      conversationIds.map((conversationId) =>
+        this.deps.repositories.messages.listRecentMessages({
+          conversationId,
+          limit: input.limit,
+        }),
+      ),
+    );
+    const messages = lists
+      .flat()
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+      .slice(-input.limit);
     return { messages };
   }
 

@@ -811,6 +811,58 @@ maybeDescribe('live admission work items (Postgres)', () => {
     );
   });
 
+  it('unions message reads across every conversation row for a jid', async () => {
+    const chatJid = 'app:default:session-read-union';
+    // Sessions path creates a legacy-shaped row; a later providerless
+    // admission creates the account-qualified twin. Readers that only know
+    // the jid (GET /v1/sessions/{id}/messages) must see messages from BOTH
+    // until the Phase-8 restamp collapses them.
+    await runtime.ops.storeChatMetadata(
+      chatJid,
+      '2026-06-16T00:00:04.000Z',
+      'Session Read Union',
+      'app',
+    );
+    const result = await runtime.ops.storeMessageWithLiveAdmission?.(
+      {
+        id: 'msg-session-read-union',
+        chat_jid: chatJid,
+        sender: 'api',
+        sender_name: 'API',
+        content: 'hello across rows',
+        timestamp: '2026-06-16T00:00:04.100Z',
+        is_from_me: false,
+        is_bot_message: false,
+      },
+      {
+        appId: 'default',
+        agentId: 'main_agent',
+        triggerDecision: { requiresTrigger: false },
+      },
+    );
+    expect(result?.outcome).toBe('enqueued');
+
+    const conversationIds =
+      await runtime.repositories.messages.listConversationIdsForJid(chatJid);
+    expect(conversationIds.length).toBeGreaterThanOrEqual(1);
+    const lists = await Promise.all(
+      conversationIds.map((conversationId) =>
+        runtime.repositories.messages.listRecentMessages({
+          conversationId,
+          limit: 10,
+        }),
+      ),
+    );
+    const union = lists.flat();
+    expect(
+      union.some((message) =>
+        message.parts.some(
+          (part) => part.kind === 'text' && part.text === 'hello across rows',
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it('stores accepted runtime event and live admission atomically', async () => {
     const message = {
       id: 'msg-event-admission-1',
