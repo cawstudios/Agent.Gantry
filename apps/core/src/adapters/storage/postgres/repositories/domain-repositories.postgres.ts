@@ -72,6 +72,7 @@ import { assertSafeExecutionProviderId } from '../../../../domain/sessions/execu
 import type { ExternalRef } from '../../../../shared/ids/branded-id.js';
 import * as pgSchema from '../schema/schema.js';
 import {
+  CANONICAL_APP_ID,
   jsonb,
   type CanonicalDb,
 } from './canonical-graph-repository.postgres.js';
@@ -1056,6 +1057,20 @@ export class PostgresConversationRepository implements ConversationRepository {
 }
 export class PostgresMessageRepository implements MessageRepository {
   constructor(private readonly db: CanonicalDb) {}
+  async listConversationIdsForJid(jid: string): Promise<Conversation['id'][]> {
+    const c = pgSchema.conversationsPostgres;
+    const rows = await this.db
+      .select({ id: c.id })
+      .from(c)
+      .where(
+        and(
+          eq(c.appId, CANONICAL_APP_ID),
+          eq(sql<string>`${c.externalRefJson}::jsonb->>'jid'`, jid),
+        ),
+      )
+      .orderBy(asc(c.id));
+    return rows.map((row) => row.id as Conversation['id']);
+  }
   async getMessage(id: Message['id']): Promise<Message | null> {
     const m = pgSchema.messagesPostgres;
     const rows = await this.db.select().from(m).where(eq(m.id, id)).limit(1);

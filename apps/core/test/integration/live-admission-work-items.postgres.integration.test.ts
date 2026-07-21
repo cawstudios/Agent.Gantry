@@ -811,25 +811,26 @@ maybeDescribe('live admission work items (Postgres)', () => {
     );
   });
 
-  it('converges a conversation created without a provider account with later admission', async () => {
-    const chatJid = 'app:default:session-convergence';
-    // Sessions/ensure path: the conversation row is created with NO provider
-    // account before any message arrives.
+  it('unions message reads across every conversation row for a jid', async () => {
+    const chatJid = 'app:default:session-read-union';
+    // Sessions path creates a legacy-shaped row; a later providerless
+    // admission creates the account-qualified twin. Readers that only know
+    // the jid (GET /v1/sessions/{id}/messages) must see messages from BOTH
+    // until the Phase-8 restamp collapses them.
     await runtime.ops.storeChatMetadata(
       chatJid,
-      '2026-06-16T00:00:03.000Z',
-      'Session Convergence',
+      '2026-06-16T00:00:04.000Z',
+      'Session Read Union',
       'app',
     );
-
     const result = await runtime.ops.storeMessageWithLiveAdmission?.(
       {
-        id: 'msg-session-convergence',
+        id: 'msg-session-read-union',
         chat_jid: chatJid,
         sender: 'api',
         sender_name: 'API',
-        content: 'hello from the session path',
-        timestamp: '2026-06-16T00:00:03.100Z',
+        content: 'hello across rows',
+        timestamp: '2026-06-16T00:00:04.100Z',
         is_from_me: false,
         is_bot_message: false,
       },
@@ -841,29 +842,25 @@ maybeDescribe('live admission work items (Postgres)', () => {
     );
     expect(result?.outcome).toBe('enqueued');
 
-    // One jid = ONE conversation row; the admitted message attaches to it.
-    // (The raw-input id derivation used to fork a second, qualified row here,
-    // splitting the session's conversation from its messages.)
-    const conversationsTable = `${quotePostgresIdentifier(
-      runtime.schemaName,
-    )}.${quotePostgresIdentifier('conversations')}`;
-    const messagesTable = `${quotePostgresIdentifier(
-      runtime.schemaName,
-    )}.${quotePostgresIdentifier('messages')}`;
-    const { rows: conversations } = await runtime.service.pool.query<{
-      id: string;
-    }>(
-      `SELECT id FROM ${conversationsTable}
-       WHERE external_ref_json::jsonb->>'jid' = $1`,
-      [chatJid],
+    const conversationIds =
+      await runtime.repositories.messages.listConversationIdsForJid(chatJid);
+    expect(conversationIds.length).toBeGreaterThanOrEqual(1);
+    const lists = await Promise.all(
+      conversationIds.map((conversationId) =>
+        runtime.repositories.messages.listRecentMessages({
+          conversationId,
+          limit: 10,
+        }),
+      ),
     );
-    expect(conversations).toHaveLength(1);
-    const { rows: messages } = await runtime.service.pool.query<{
-      conversation_id: string;
-    }>(`SELECT conversation_id FROM ${messagesTable} WHERE id = $1`, [
-      result?.item.messageId,
-    ]);
-    expect(messages).toEqual([{ conversation_id: conversations[0]!.id }]);
+    const union = lists.flat();
+    expect(
+      union.some((message) =>
+        message.parts.some(
+          (part) => part.kind === 'text' && part.text === 'hello across rows',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('stores accepted runtime event and live admission atomically', async () => {

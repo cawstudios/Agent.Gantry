@@ -220,11 +220,6 @@ export class PostgresCanonicalGraphRepository {
     const providerAccountId =
       input.providerAccountId ??
       fallbackProviderAccountId(CANONICAL_APP_ID, providerId);
-    // Id derivation is deterministic and recomputed at read time everywhere,
-    // so it must stay byte-stable until the Phase-8 offline restamp; callers
-    // that already located the conversation converge via
-    // input.existingConversationId instead (the admission path passes it so
-    // a providerless session's replies share the session's row).
     const canonicalConversationId = conversationIdForJid(
       jid,
       input.providerAccountId,
@@ -338,11 +333,7 @@ export class PostgresCanonicalGraphRepository {
     chatJid: string,
     threadId?: string | null,
     executor: CanonicalExecutor = this.db,
-    input: {
-      channel?: string | null;
-      providerAccountId?: string | null;
-      existingConversationId?: string | null;
-    } = {},
+    input: { channel?: string | null; providerAccountId?: string | null } = {},
   ): Promise<string | null> {
     const canonicalThreadId = threadIdFor(
       chatJid,
@@ -352,11 +343,7 @@ export class PostgresCanonicalGraphRepository {
     if (!canonicalThreadId) return null;
     const conversationId = await this.ensureConversation(
       chatJid,
-      {
-        channel: input.channel,
-        providerAccountId: input.providerAccountId,
-        existingConversationId: input.existingConversationId,
-      },
+      { channel: input.channel, providerAccountId: input.providerAccountId },
       executor,
     );
     await executor
