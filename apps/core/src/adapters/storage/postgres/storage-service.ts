@@ -319,6 +319,7 @@ export class PostgresStorageService implements StorageService {
       has_text_search: boolean;
       has_job_queue: boolean;
       has_runtime_events_table: boolean;
+      runtime_events_event_id_generates: boolean;
       has_event_bus_outbox_table: boolean;
       has_event_bus_outbox_runtime_event_unique: boolean;
       missing_runtime_event_indexes: string[] | null;
@@ -355,6 +356,17 @@ export class PostgresStorageService implements StorageService {
           EXISTS(SELECT 1 FROM pg_extension WHERE extname IN ('pg_trgm', 'pg_search')) AS has_text_search,
           (to_regclass('pgboss.version') IS NOT NULL) AS has_job_queue,
           ((SELECT runtime_events_oid FROM event_tables) IS NOT NULL) AS has_runtime_events_table,
+          EXISTS(
+            SELECT 1
+            FROM event_tables t
+            JOIN pg_attribute a ON a.attrelid = t.runtime_events_oid
+            LEFT JOIN pg_attrdef d
+              ON d.adrelid = a.attrelid
+             AND d.adnum = a.attnum
+            WHERE a.attname = 'event_id'
+              AND NOT a.attisdropped
+              AND (a.attidentity <> '' OR d.adbin IS NOT NULL)
+          ) AS runtime_events_event_id_generates,
           ((SELECT event_bus_outbox_oid FROM event_tables) IS NOT NULL) AS has_event_bus_outbox_table,
           EXISTS(
             SELECT 1
@@ -396,6 +408,9 @@ export class PostgresStorageService implements StorageService {
     const hasTextSearch = Boolean(row?.has_text_search);
     const hasJobQueue = Boolean(row?.has_job_queue);
     const hasRuntimeEventsTable = Boolean(row?.has_runtime_events_table);
+    const runtimeEventsEventIdGenerates = Boolean(
+      row?.runtime_events_event_id_generates,
+    );
     const hasEventBusOutboxTable = Boolean(row?.has_event_bus_outbox_table);
     const hasEventBusOutboxRuntimeEventUnique = Boolean(
       row?.has_event_bus_outbox_runtime_event_unique,
@@ -404,7 +419,9 @@ export class PostgresStorageService implements StorageService {
     const missingEventBusOutboxIndexes =
       row?.missing_event_bus_outbox_indexes ?? [];
     const hasRuntimeEvents =
-      hasRuntimeEventsTable && missingRuntimeEventIndexes.length === 0;
+      hasRuntimeEventsTable &&
+      runtimeEventsEventIdGenerates &&
+      missingRuntimeEventIndexes.length === 0;
     const hasEventBusOutbox =
       hasEventBusOutboxTable &&
       hasEventBusOutboxRuntimeEventUnique &&
@@ -430,6 +447,9 @@ export class PostgresStorageService implements StorageService {
             hasRuntimeEventsTable
               ? undefined
               : 'runtime_events table is missing',
+            hasRuntimeEventsTable && !runtimeEventsEventIdGenerates
+              ? 'runtime_events.event_id identity/default is missing'
+              : undefined,
             hasRuntimeEventsTable && missingRuntimeEventIndexes.length
               ? `runtime_events indexes are missing: ${missingRuntimeEventIndexes.join(', ')}`
               : undefined,
