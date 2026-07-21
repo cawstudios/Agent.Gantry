@@ -4,6 +4,8 @@ import { McpServerService } from '@core/application/mcp/mcp-server-service.js';
 import { McpToolProxy } from '@core/application/mcp/mcp-tool-proxy.js';
 import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 import type { McpServerDefinition } from '@core/domain/mcp/mcp-servers.js';
+import { ensureAgentToolCatalogItem } from '@core/domain/tools/agent-tool-catalog-references.js';
+import type { SemanticCapabilityDefinition } from '@core/shared/semantic-capabilities.js';
 
 import {
   startMcpTestServer,
@@ -22,12 +24,15 @@ const AGENT_ID = 'agent:main_agent';
 const SERVER_NAME = 'e2e-sum';
 const APPROVED_TOOL_RULE = `mcp__${SERVER_NAME}__get-sum`;
 
+const CAPABILITY_ID = 'e2e-sum.get-sum.read';
+
 // Matrix §5, non-model part: the fixture Streamable HTTP MCP server is
 // registered through the real management surface (McpServerService, the same
-// service mcp-server routes use) with ONLY `get-sum` approved, then invoked
-// through gantry's REAL client path (McpToolProxy — the exact class the
-// runtime constructs in ipc-admin-handlers.ts / control routes, including the
-// production `liveToolRules` approval input). Model involvement: none.
+// service mcp-server routes use) with ONLY `get-sum` in the source scope, a
+// reviewed `mcp_pattern` capability over `get-sum` is SELECTED for the agent
+// (the single action authority per the R5 model — live rules never mint MCP
+// authority), then invoked through gantry's REAL client path (McpToolProxy,
+// the exact class the runtime constructs). Model involvement: none.
 maybeDescribe('MCP client loop through the real proxy (Postgres)', () => {
   let runtime: PostgresIntegrationRuntime;
   let fixture: McpTestServer;
@@ -56,10 +61,64 @@ maybeDescribe('MCP client loop through the real proxy (Postgres)', () => {
       agentId: AGENT_ID as never,
       serverId: server.id,
     });
+
+    // R5 single authority: action comes ONLY from a SELECTED reviewed
+    // mcp_pattern capability, never from live rules. Persist the reviewed
+    // definition to the catalog and select it for the agent.
+    const now = new Date(0).toISOString();
+    const definition: SemanticCapabilityDefinition = {
+      capabilityId: CAPABILITY_ID,
+      displayName: 'E2E sum: get-sum (read)',
+      category: 'mcp',
+      risk: 'read',
+      can: 'Call the get-sum tool on the e2e-sum MCP server.',
+      cannot: 'Call any other tool or mutate state.',
+      credentialSource: 'none',
+      implementationBindings: [
+        {
+          kind: 'mcp_pattern',
+          mcpServer: SERVER_NAME,
+          mcpToolPatterns: ['get-sum'],
+        },
+      ],
+      preflight: { kind: 'none' },
+    };
+    const tool = await ensureAgentToolCatalogItem({
+      repository: runtime.repositories.tools,
+      appId: APP_ID as never,
+      reference: `capability:${CAPABILITY_ID}`,
+      now,
+      semanticCapabilityDefinitions: { [CAPABILITY_ID]: definition },
+    });
+    const mcpBindings = await runtime.repositories.mcpServers.listAgentBindings(
+      {
+        appId: APP_ID as never,
+        agentId: AGENT_ID as never,
+        limit: 100,
+      },
+    );
+    await runtime.repositories.agents.replaceAgentCapabilityBindings({
+      appId: APP_ID as never,
+      agentId: AGENT_ID as never,
+      toolBindings: [
+        {
+          id: `agent-tool-binding:${AGENT_ID}:${tool.id}` as never,
+          appId: APP_ID as never,
+          agentId: AGENT_ID as never,
+          toolId: tool.id,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      skillBindings: [],
+      mcpBindings,
+      updatedAt: now,
+    });
+
     proxy = new McpToolProxy(runtime.repositories.mcpServers, {
       tools: runtime.repositories.tools,
       skills: runtime.repositories.skills,
-      liveToolRules: [APPROVED_TOOL_RULE],
       publishRuntimeEvent: (event) =>
         runtime.storageRuntime.runtimeEvents.publish(event),
     });
