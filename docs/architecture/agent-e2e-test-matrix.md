@@ -165,6 +165,7 @@ Legend: ✅ covered (cite) · 🔨 to build · 🏷 label-gated (live lane) · �
 | Corrupt-state seed via direct test-DB rows (documented API exception)                                                                                                              | integration      | 🔨                                                                                                                     |
 | Providerless admission qualifies conversation/message/queue with ONE provider account (no silent turn drop, no parallel conversation)                                              | unit/integration | ✅ canonical-message-ops-service.test.ts, message-loop.test.ts, live-admission-work-items.postgres.integration.test.ts |
 | API-session (`app:` JID) admission stamps the internal channel account `control:<appId>` so channel ownership matches and the turn spawns (was: "No channel owns JID" silent skip) | unit             | ✅ canonical-message-ops-service.test.ts (app-session admission)                                                       |
+| App-session streamed replies project into durable message ROWS (today the event stream is the only delivery record; headless GET /messages sees inbound only)                      | integration      | 🔨 feature gap found by round-14                                                                                       |
 
 ## 12. Channel loop (Slack, dedicated test app)
 
