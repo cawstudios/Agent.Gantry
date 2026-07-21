@@ -653,6 +653,83 @@ export const openApiSchemas: Record<string, JsonSchema> = {
       chatJid: { type: 'string' },
     },
   },
+  SessionInteractionDecision: {
+    type: 'string',
+    enum: ['allow_once', 'allow_future', 'deny'],
+    description:
+      'Permission decision. Exactly three options exist; timed grants are not supported.',
+  },
+  SessionPendingInteraction: {
+    type: 'object',
+    required: [
+      'id',
+      'kind',
+      'createdAt',
+      'expiresAt',
+      'runId',
+      'toolName',
+      'summary',
+      'questions',
+      'options',
+    ],
+    properties: {
+      id: {
+        type: 'string',
+        description: 'Interaction id to use in the respond route.',
+      },
+      kind: { type: 'string', enum: ['permission', 'question'] },
+      createdAt: isoDateTime,
+      expiresAt: isoDateTime,
+      runId: { type: ['string', 'null'] },
+      toolName: { type: ['string', 'null'] },
+      summary: {
+        type: ['string', 'null'],
+        description: 'Redacted command preview when available.',
+      },
+      questions: {
+        type: ['array', 'null'],
+        items: { type: 'string' },
+        description: 'Question texts for question interactions.',
+      },
+      options: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/SessionInteractionDecision' },
+        description:
+          'Decisions available for this interaction. Empty for question interactions, which cannot be answered via this API.',
+      },
+    },
+  },
+  SessionInteractionListResponse: {
+    type: 'object',
+    required: ['interactions'],
+    properties: {
+      interactions: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/SessionPendingInteraction' },
+      },
+    },
+  },
+  SessionInteractionRespondRequest: {
+    type: 'object',
+    required: ['decision'],
+    properties: {
+      decision: { $ref: '#/components/schemas/SessionInteractionDecision' },
+    },
+  },
+  SessionInteractionRespondResponse: {
+    type: 'object',
+    required: ['status', 'interactionId', 'decision', 'decidedBy'],
+    properties: {
+      status: { type: 'string', enum: ['resolved'] },
+      interactionId: { type: 'string' },
+      decision: { $ref: '#/components/schemas/SessionInteractionDecision' },
+      decidedBy: {
+        type: 'string',
+        description:
+          'Approver identity recorded on the decision (api-key:<kid>).',
+      },
+    },
+  },
   SendSessionMessageRequest: {
     type: 'object',
     required: ['message'],

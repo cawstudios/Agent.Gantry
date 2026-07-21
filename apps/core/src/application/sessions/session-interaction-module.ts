@@ -458,7 +458,7 @@ export class SessionInteractionModule {
     return { emitted: true, eventId: event.eventId };
   }
 
-  private async requireSession(input: {
+  async requireSession(input: {
     appId: string;
     sessionId: string;
   }): Promise<SessionAppRecord> {

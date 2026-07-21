@@ -559,6 +559,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{sessionId}/interactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pending session interactions
+         * @description Lists pending permission and question interactions for the session conversation.
+         */
+        get: operations["listSessionInteractions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionId}/interactions/{interactionId}/respond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Respond to a pending permission interaction
+         * @description Decides a pending permission interaction (allow_once, allow_future, or deny) through the same durable resolution path channel approvers use. Question interactions are not supported.
+         */
+        post: operations["respondSessionInteraction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionId}/runs": {
         parameters: {
             query?: never;
@@ -2244,6 +2284,43 @@ export interface components {
             appId: string;
             conversationId: string;
             chatJid: string;
+        };
+        /**
+         * @description Permission decision. Exactly three options exist; timed grants are not supported.
+         * @enum {string}
+         */
+        SessionInteractionDecision: "allow_once" | "allow_future" | "deny";
+        SessionPendingInteraction: {
+            /** @description Interaction id to use in the respond route. */
+            id: string;
+            /** @enum {string} */
+            kind: "permission" | "question";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+            runId: string | null;
+            toolName: string | null;
+            /** @description Redacted command preview when available. */
+            summary: string | null;
+            /** @description Question texts for question interactions. */
+            questions: string[] | null;
+            /** @description Decisions available for this interaction. Empty for question interactions, which cannot be answered via this API. */
+            options: components["schemas"]["SessionInteractionDecision"][];
+        };
+        SessionInteractionListResponse: {
+            interactions: components["schemas"]["SessionPendingInteraction"][];
+        };
+        SessionInteractionRespondRequest: {
+            decision: components["schemas"]["SessionInteractionDecision"];
+        };
+        SessionInteractionRespondResponse: {
+            /** @enum {string} */
+            status: "resolved";
+            interactionId: string;
+            decision: components["schemas"]["SessionInteractionDecision"];
+            /** @description Approver identity recorded on the decision (api-key:<kid>). */
+            decidedBy: string;
         };
         SendSessionMessageRequest: {
             message: string;
@@ -4645,6 +4722,70 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listSessionInteractions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInteractionListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    respondSessionInteraction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id. */
+                sessionId: string;
+                /** @description Pending interaction id (the permission request id from the interactions list). */
+                interactionId: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON request payload. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInteractionRespondRequest"];
+            };
+        };
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInteractionRespondResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };

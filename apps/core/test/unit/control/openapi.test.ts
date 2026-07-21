@@ -121,6 +121,8 @@ const expectedControlRoutes = [
   'GET /v1/runs/{runId}/events',
   'GET /v1/sessions/{sessionId}',
   'GET /v1/sessions/{sessionId}/events',
+  'GET /v1/sessions/{sessionId}/interactions',
+  'POST /v1/sessions/{sessionId}/interactions/{interactionId}/respond',
   'GET /v1/sessions/{sessionId}/messages',
   'POST /v1/sessions/{sessionId}/messages',
   'GET /v1/sessions/{sessionId}/runs',

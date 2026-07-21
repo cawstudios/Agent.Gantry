@@ -24,6 +24,12 @@ export async function startTestControlServer(input: {
   token: string;
   appId: string;
   scopes: string[];
+  extraKeys?: Array<{
+    kid: string;
+    token: string;
+    scopes: string[];
+    appId: string;
+  }>;
   runtimeApp?: unknown;
   routeProfile?: 'full' | 'ops';
   processRole?: 'all' | 'control' | 'live-worker' | 'job-worker';
@@ -39,6 +45,7 @@ export async function startTestControlServer(input: {
       scopes: input.scopes,
       appId: input.appId,
     },
+    ...(input.extraKeys ?? []),
   ]);
   const handle = startControlServer({
     app:
