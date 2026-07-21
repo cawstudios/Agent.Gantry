@@ -36,6 +36,11 @@ const RUNTIME_POSTGRES_POOL_MAX = 20;
 // explicit migrator using PostgresStorageService.migrate().
 export const RUNTIME_MIGRATION_LOCK_NAMESPACE = 1_340_193_180;
 export const RUNTIME_MIGRATION_LOCK_KEY = 2;
+export const GENERATED_ALWAYS_IDENTITY_PRIMARY_KEYS = [
+  { tableName: 'runtime_events', columnName: 'event_id' },
+  { tableName: 'message_parts', columnName: 'id' },
+  { tableName: 'memory_recall_events', columnName: 'id' },
+] as const;
 
 interface LatestPostgresMigration {
   createdAt: number;
@@ -319,7 +324,7 @@ export class PostgresStorageService implements StorageService {
       has_text_search: boolean;
       has_job_queue: boolean;
       has_runtime_events_table: boolean;
-      runtime_events_event_id_generates: boolean;
+      missing_generated_identity_primary_keys: string[] | null;
       has_event_bus_outbox_table: boolean;
       has_event_bus_outbox_runtime_event_unique: boolean;
       missing_runtime_event_indexes: string[] | null;
@@ -346,6 +351,11 @@ export class PostgresStorageService implements StorageService {
         current_schema_name AS (
           SELECT $1::text AS schema_name
         ),
+        required_identity_primary_keys(table_name, column_name) AS (
+          SELECT identity_key."tableName", identity_key."columnName"
+          FROM jsonb_to_recordset($2::jsonb)
+            AS identity_key("tableName" text, "columnName" text)
+        ),
         event_tables AS (
           SELECT
             to_regclass(format('%I.%I', $1::text, 'runtime_events')) AS runtime_events_oid,
@@ -356,17 +366,27 @@ export class PostgresStorageService implements StorageService {
           EXISTS(SELECT 1 FROM pg_extension WHERE extname IN ('pg_trgm', 'pg_search')) AS has_text_search,
           (to_regclass('pgboss.version') IS NOT NULL) AS has_job_queue,
           ((SELECT runtime_events_oid FROM event_tables) IS NOT NULL) AS has_runtime_events_table,
-          EXISTS(
-            SELECT 1
-            FROM event_tables t
-            JOIN pg_attribute a ON a.attrelid = t.runtime_events_oid
+          ARRAY(
+            SELECT format('%s.%s', required.table_name, required.column_name)
+            FROM required_identity_primary_keys required
+            CROSS JOIN current_schema_name csn
+            LEFT JOIN pg_namespace n
+              ON n.nspname = csn.schema_name
+            LEFT JOIN pg_class c
+              ON c.relnamespace = n.oid
+             AND c.relname = required.table_name
+             AND c.relkind IN ('r', 'p')
+            LEFT JOIN pg_attribute a
+              ON a.attrelid = c.oid
+             AND a.attname = required.column_name
+             AND NOT a.attisdropped
             LEFT JOIN pg_attrdef d
               ON d.adrelid = a.attrelid
              AND d.adnum = a.attnum
-            WHERE a.attname = 'event_id'
-              AND NOT a.attisdropped
-              AND (a.attidentity <> '' OR d.adbin IS NOT NULL)
-          ) AS runtime_events_event_id_generates,
+            WHERE a.attnum IS NULL
+               OR (a.attidentity = '' AND d.adbin IS NULL)
+            ORDER BY required.table_name, required.column_name
+          ) AS missing_generated_identity_primary_keys,
           ((SELECT event_bus_outbox_oid FROM event_tables) IS NOT NULL) AS has_event_bus_outbox_table,
           EXISTS(
             SELECT 1
@@ -401,16 +421,22 @@ export class PostgresStorageService implements StorageService {
             )
             ORDER BY r.index_name
           ) AS missing_event_bus_outbox_indexes`,
-      [this.schemaName],
+      [this.schemaName, JSON.stringify(GENERATED_ALWAYS_IDENTITY_PRIMARY_KEYS)],
     );
     const row = caps.rows[0];
     const hasVector = Boolean(row?.has_vector);
     const hasTextSearch = Boolean(row?.has_text_search);
     const hasJobQueue = Boolean(row?.has_job_queue);
     const hasRuntimeEventsTable = Boolean(row?.has_runtime_events_table);
-    const runtimeEventsEventIdGenerates = Boolean(
-      row?.runtime_events_event_id_generates,
-    );
+    const missingGeneratedIdentityPrimaryKeys =
+      row?.missing_generated_identity_primary_keys ?? [];
+    const missingGeneratedIdentityDiagnostics =
+      missingGeneratedIdentityPrimaryKeys
+        .filter(
+          (identityKey) =>
+            hasRuntimeEventsTable || identityKey !== 'runtime_events.event_id',
+        )
+        .map((identityKey) => `${identityKey} identity/default is missing`);
     const hasEventBusOutboxTable = Boolean(row?.has_event_bus_outbox_table);
     const hasEventBusOutboxRuntimeEventUnique = Boolean(
       row?.has_event_bus_outbox_runtime_event_unique,
@@ -420,7 +446,7 @@ export class PostgresStorageService implements StorageService {
       row?.missing_event_bus_outbox_indexes ?? [];
     const hasRuntimeEvents =
       hasRuntimeEventsTable &&
-      runtimeEventsEventIdGenerates &&
+      missingGeneratedIdentityPrimaryKeys.length === 0 &&
       missingRuntimeEventIndexes.length === 0;
     const hasEventBusOutbox =
       hasEventBusOutboxTable &&
@@ -447,9 +473,7 @@ export class PostgresStorageService implements StorageService {
             hasRuntimeEventsTable
               ? undefined
               : 'runtime_events table is missing',
-            hasRuntimeEventsTable && !runtimeEventsEventIdGenerates
-              ? 'runtime_events.event_id identity/default is missing'
-              : undefined,
+            ...missingGeneratedIdentityDiagnostics,
             hasRuntimeEventsTable && missingRuntimeEventIndexes.length
               ? `runtime_events indexes are missing: ${missingRuntimeEventIndexes.join(', ')}`
               : undefined,

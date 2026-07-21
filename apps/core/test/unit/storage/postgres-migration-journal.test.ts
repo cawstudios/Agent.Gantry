@@ -23,7 +23,7 @@ describe('Postgres migration journal', () => {
     }
   });
 
-  it('registers the runtime events identity repair', () => {
+  it('registers the generated identity primary-key repair', () => {
     const migrationsDir = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations',
     );
@@ -41,9 +41,15 @@ describe('Postgres migration journal', () => {
       'utf8',
     );
     expect(migration).toContain(
-      'ALTER COLUMN event_id ADD GENERATED ALWAYS AS IDENTITY',
+      'AS identity_primary_keys(table_name, column_name)',
     );
-    expect(migration).toContain('COALESCE(MAX(event_id), 0) + 1');
+    expect(migration).toContain("('runtime_events', 'event_id')");
+    expect(migration).toContain("('message_parts', 'id')");
+    expect(migration).toContain("('memory_recall_events', 'id')");
+    expect(migration).toContain(
+      'ALTER TABLE %s ALTER COLUMN %I ADD GENERATED ALWAYS AS IDENTITY',
+    );
+    expect(migration).toContain('COALESCE(MAX(%I), 0) + 1');
   });
 
   it('registers the permission prompt relational cutover', () => {
