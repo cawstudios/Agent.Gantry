@@ -154,7 +154,11 @@ describe('skill permission review install sequence', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       'sl:C123',
       expect.stringContaining('demo-skill'),
-      { threadId: '171234.567', providerAccountId: 'slack_default' },
+      {
+        threadId: '171234.567',
+        providerAccountId: 'slack_default',
+        agentId: 'agent:test',
+      },
     );
     expect(reject).toHaveBeenCalledWith(
       expect.stringContaining('demo-skill'),

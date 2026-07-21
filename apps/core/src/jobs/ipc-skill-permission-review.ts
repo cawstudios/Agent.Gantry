@@ -214,6 +214,7 @@ function skillReviewMessageOptions(
         ...(input.providerAccountId
           ? { providerAccountId: input.providerAccountId }
           : {}),
+        agentId: input.agentId,
       }
     : undefined;
 }
