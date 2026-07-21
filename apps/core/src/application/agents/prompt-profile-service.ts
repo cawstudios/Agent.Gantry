@@ -12,7 +12,12 @@ import {
   type AgentRelationshipMode,
 } from '../../shared/agent-relationship-mode.js';
 import { PROACTIVE_RECOMMENDATION_GUIDANCE } from '../../shared/capability-guidance.js';
+import {
+  renderCapabilityGuidancePrompt,
+  type CapabilityCatalogRenderDiagnostics,
+} from './agent-prompt-capability-guidance.js';
 import { isValidPromptAgentFolder } from './prompt-profile-folder.js';
+import type { AgentPromptCapabilityCatalog } from './agent-prompt-capability-catalog.js';
 
 type PromptSectionName =
   | 'RUNTIME_RULES'
@@ -124,35 +129,18 @@ function personaPrompt(
   }
 }
 
-function capabilityGuidancePrompt(
-  persona: AgentPersona,
+export function capabilityGuidancePrompt(
+  catalog: AgentPromptCapabilityCatalog | undefined,
   accessPreset: PromptAccessPreset,
+  budget = DEFAULT_PROMPT_SECTION_BUDGETS.CAPABILITY_GUIDANCE,
+  mcpInventoryToolsMounted = true,
 ): string {
-  const baseline = [
-    '# Capability guidance',
-    accessPreset === 'locked'
-      ? '- Memory is baseline for every persona. Browser control is available only when Gantry-owned browser_* tools are present.'
-      : '- Memory is baseline for every persona. Browser control is available only when the canonical Browser capability is selected, through Gantry-owned browser_* tools.',
-    '- Memory tools store durable evidence only; temporary task state does not belong in memory.',
-    '- For non-trivial live work, first send one short natural acknowledgement with send_message before starting tools or investigation. Use todo_update for any multi-step task: publish a short plan and keep it current as items move pending -> inProgress -> completed. It renders as one live, in-place list per channel, so avoid repeated generic progress chatter unless there is a concrete blocker, decision, or result to share. It is display-only, non-authority state and does not grant tools or trigger work.',
-    '- Use render_status, render_facts, render_list, render_table, render_form, render_media, or render_progress when structured output should appear as native rich UI. Use send_message for plain narrative text.',
-    '- Use only the Gantry tools mounted in the current run; if a requested workflow cannot be done with them, say what is unavailable and continue with the best available path.',
-    '- Gantry delegation is unavailable until a delegated-task executor is mounted. Do not claim delegated work started unless a real Gantry delegation tool returns a handle.',
-    '- Lead with the outcome in plain prose. Give details only when useful or requested; do not append labeled receipts.',
-    '- Do not delegate risky execution, secret handling, config edits, permission changes, or work requiring tools the parent run cannot use.',
-  ];
-  if (persona === 'developer') {
-    baseline.push(
-      accessPreset === 'locked'
-        ? '- Developer capabilities may include workspace read/search.'
-        : '- Developer capabilities may include workspace read/search. Shell, file writes, Git, PR, deploy, and runtime-admin actions still require explicit capability or permission.',
-    );
-  } else {
-    baseline.push(
-      '- This persona should not introduce gstack, Git, PR, deploy, shell, repository, filesystem, or runtime-admin workflow language unless the user explicitly asks and host capabilities allow it.',
-    );
-  }
-  return baseline.join('\n');
+  return renderCapabilityGuidancePrompt({
+    catalog,
+    accessPreset,
+    budget,
+    mcpInventoryToolsMounted,
+  }).prompt;
 }
 const OPERATING_GUIDANCE_HEAD = [
   '# Operating guidance',
@@ -279,6 +267,8 @@ export interface CompilePromptProfileOptions {
   // Resolved agent access preset (config/profiles). Locked agents receive the
   // locked instruction projection; absent defaults to full (today's prompt).
   accessPreset?: PromptAccessPreset;
+  capabilityCatalog?: AgentPromptCapabilityCatalog;
+  mcpInventoryToolsMounted?: boolean;
   // Resolved model identity for this run; rendered as a plain "You are running
   // on ..." runtime rule. Changes only when model config changes (cache-safe).
   modelIdentity?: PromptModelIdentity;
@@ -296,6 +286,9 @@ export interface PromptProfileServiceOptions {
   appId?: string;
   sectionBudgets?: Partial<Record<PromptSectionName, number>>;
   totalBudget?: number;
+  onCapabilityCatalogRendered?: (
+    diagnostics: CapabilityCatalogRenderDiagnostics,
+  ) => void;
   // Optional one-way mirror writer. When provided, seeded default profile
   // files are also materialized as visible files in the agent workspace.
   mirrorProfileFile?: (input: ProfileMirrorInput) => void | Promise<void>;
@@ -414,6 +407,9 @@ export class PromptProfileService {
   private readonly appId: string;
   private readonly sectionBudgets: Readonly<Record<PromptSectionName, number>>;
   private readonly totalBudget: number;
+  private readonly onCapabilityCatalogRendered?: (
+    diagnostics: CapabilityCatalogRenderDiagnostics,
+  ) => void;
   private readonly mirrorProfileFile?: (
     input: ProfileMirrorInput,
   ) => void | Promise<void>;
@@ -430,6 +426,7 @@ export class PromptProfileService {
       ...(options.sectionBudgets || {}),
     };
     this.totalBudget = options.totalBudget || DEFAULT_PROMPT_TOTAL_BUDGET;
+    this.onCapabilityCatalogRendered = options.onCapabilityCatalogRendered;
     this.mirrorProfileFile = options.mirrorProfileFile;
     this.mirrorFileExists = options.mirrorFileExists;
   }
@@ -521,13 +518,17 @@ export class PromptProfileService {
 
     if (soul) sections.push(soul);
 
+    const renderedCapabilityGuidance = renderCapabilityGuidancePrompt({
+      catalog: options.capabilityCatalog,
+      accessPreset,
+      budget: this.sectionBudgets.CAPABILITY_GUIDANCE,
+      mcpInventoryToolsMounted: options.mcpInventoryToolsMounted !== false,
+    });
+    this.onCapabilityCatalogRendered?.(renderedCapabilityGuidance.diagnostics);
     const capabilityGuidance = makeSection(
       'CAPABILITY_GUIDANCE',
       CAPABILITY_GUIDANCE_SOURCE,
-      capabilityGuidancePrompt(
-        resolveAgentPersona(options.persona),
-        accessPreset,
-      ),
+      renderedCapabilityGuidance.prompt,
       this.sectionBudgets.CAPABILITY_GUIDANCE,
     );
     if (capabilityGuidance) sections.push(capabilityGuidance);

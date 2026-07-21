@@ -125,6 +125,29 @@ beforeEach(() => {
 });
 
 describe('Claude inline lane', () => {
+  it('consumes the compiled capability catalog in the static system prompt', async () => {
+    sdk.query.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield resultMessage('catalog-result', 'done');
+      },
+    }));
+    const base = laneInput();
+
+    await runClaudeInlineAgentLoopLane(
+      laneInput({
+        input: {
+          ...base.input,
+          compiledSystemPrompt:
+            '# Capability catalog\n- Incident triage — Diagnose incidents.',
+        },
+      }),
+    );
+
+    const systemPrompt = sdk.query.mock.calls[0]?.[0].options.systemPrompt;
+    expect(systemPrompt[0]).toContain('# Capability catalog');
+    expect(systemPrompt[0]).toContain('Incident triage');
+  });
+
   it('canonicalizes manifest-projected callable-agent activity to AgentDelegation', async () => {
     const emitOutput = vi.fn(async () => undefined);
     const toolActivity = createInlineToolActivity({

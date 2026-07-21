@@ -728,7 +728,7 @@ describe('skill registry integration flow', () => {
       expect(sendMessage).toHaveBeenCalledWith(
         'chat-origin',
         expect.stringContaining('Installed skill LinkedIn Posting'),
-        { threadId: 'thread-origin' },
+        expect.objectContaining({ threadId: 'thread-origin' }),
       );
     });
 
@@ -898,6 +898,12 @@ describe('skill registry integration flow', () => {
       deps as any,
     );
 
+    // The review runs detached; the install-time collision check adds async
+    // hops before the approval request, so wait for it instead of asserting
+    // on the microtask the handler happens to return on.
+    await vi.waitFor(() =>
+      expect(requestPermissionApproval).toHaveBeenCalledTimes(1),
+    );
     expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
     expect([...state.skills.values()]).toHaveLength(0);
     expect([...state.bindings.values()]).toEqual([]);
@@ -911,7 +917,7 @@ describe('skill registry integration flow', () => {
       expect(sendMessage).toHaveBeenCalledWith(
         'chat-origin',
         expect.stringContaining('Installed skill LinkedIn Posting'),
-        { threadId: 'thread-origin' },
+        expect.objectContaining({ threadId: 'thread-origin' }),
       );
     });
     expect([...state.bindings.values()]).toHaveLength(1);
@@ -1482,7 +1488,7 @@ describe('skill registry integration flow', () => {
       expect(sendMessage).toHaveBeenCalledWith(
         'chat-origin',
         expect.stringContaining('Installed skill Channel Posting'),
-        { threadId: 'thread-origin' },
+        expect.objectContaining({ threadId: 'thread-origin' }),
       );
     });
 
@@ -1719,7 +1725,7 @@ describe('skill registry integration flow', () => {
       expect(sendMessage).toHaveBeenCalledWith(
         'chat-origin',
         expect.stringContaining('Did not install skill Denied Capability'),
-        { threadId: 'thread-origin' },
+        expect.objectContaining({ threadId: 'thread-origin' }),
       );
     });
 

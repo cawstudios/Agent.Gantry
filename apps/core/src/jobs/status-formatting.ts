@@ -72,8 +72,12 @@ export function selectJobNotificationSummary(summary: string): string {
   const markers = [
     '## Final Job Report',
     '# Final Job Report',
+    '## Scoring Summary',
+    '# Scoring Summary',
     'Final Job Report',
     'Final Report',
+    'Scoring Summary',
+    'Score Summary',
   ];
   const lower = normalized.toLowerCase();
   let markerIndex = -1;

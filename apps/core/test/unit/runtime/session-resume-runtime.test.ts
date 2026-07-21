@@ -5,6 +5,7 @@ import type { SkillCatalogRepository } from '@core/domain/ports/repositories.js'
 import { createGroupAgentRunner } from '@core/runtime/group-agent-runner.js';
 import { currentLogContext } from '@core/infrastructure/logging/logger.js';
 import { buildProviderSessionAccessFingerprint } from '@core/runtime/provider-session-access-fingerprint.js';
+import { stableSha256Json } from '@core/shared/stable-hash.js';
 import {
   buildApprovedSkillContextBlock,
   createRuntimeResultSummaryAccumulator,
@@ -14,6 +15,16 @@ import {
   summarizeRuntimeResultForPersistence,
   truncateRuntimeResultSummary,
 } from '@core/runtime/session-resume-runtime.js';
+
+const EMPTY_ACCESS_FINGERPRINT = buildProviderSessionAccessFingerprint({
+  accessPreset: 'full',
+  capabilityCatalogDigest: stableSha256Json({
+    schemaVersion: 1,
+    readyActions: [],
+    installedSkills: [],
+    connectedMcpSources: [],
+  }),
+});
 
 describe('session-resume-runtime', () => {
   it('publishes one durable usage event per live-turn usage event id', async () => {
@@ -233,7 +244,7 @@ describe('session-resume-runtime', () => {
 
   it('injects compacted-session transcript delta before resumed turn', async () => {
     const markProviderSessionDeltaReplay = vi.fn();
-    const accessFingerprint = buildProviderSessionAccessFingerprint({});
+    const accessFingerprint = EMPTY_ACCESS_FINGERPRINT;
     const getAgentTurnContext = vi.fn(async (input) =>
       input.promoteReadyProviderSession
         ? {
@@ -364,7 +375,7 @@ describe('session-resume-runtime', () => {
 
   it('keeps compacted-session delta replay pending when the first resumed turn fails', async () => {
     const markProviderSessionDeltaReplay = vi.fn();
-    const accessFingerprint = buildProviderSessionAccessFingerprint({});
+    const accessFingerprint = EMPTY_ACCESS_FINGERPRINT;
     const getAgentTurnContext = vi.fn(async (input) =>
       input.promoteReadyProviderSession
         ? {

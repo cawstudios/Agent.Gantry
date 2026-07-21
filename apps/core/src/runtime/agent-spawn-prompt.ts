@@ -10,11 +10,19 @@ import { logger } from '../infrastructure/logging/logger.js';
 import { resolveWorkspaceFolderPath } from '../platform/workspace-folder.js';
 import type { AgentInput } from './agent-spawn-types.js';
 
+export function resolveSpawnPromptAccessPreset(
+  configured: PromptAccessPreset,
+  hideAuthorityTools: boolean,
+): PromptAccessPreset {
+  return configured === 'locked' || hideAuthorityTools ? 'locked' : 'full';
+}
+
 export async function compileSpawnSystemPrompt(input: {
   group: ConversationRoute;
   agentInput: AgentInput;
   appId: string;
   accessPreset: PromptAccessPreset;
+  mcpInventoryToolsMounted: boolean;
   modelIdentity?: PromptModelIdentity;
   fileArtifactStore: PromptProfileServiceOptions['fileArtifactStore'];
   measureAsync: <T>(
@@ -24,6 +32,16 @@ export async function compileSpawnSystemPrompt(input: {
 }): Promise<string> {
   const promptProfileService = new PromptProfileService({
     fileArtifactStore: input.fileArtifactStore,
+    onCapabilityCatalogRendered: ({ rendered, omitted }) => {
+      logger.info(
+        {
+          agentFolder: input.group.folder,
+          rendered,
+          omitted,
+        },
+        'Rendered agent prompt capability catalog',
+      );
+    },
   });
   let compiledSystemPrompt = '';
   try {
@@ -36,6 +54,8 @@ export async function compileSpawnSystemPrompt(input: {
           input.agentInput.agentId ??
           promptProfileAgentIdForFolder(input.group.folder),
         accessPreset: input.accessPreset,
+        capabilityCatalog: input.agentInput.capabilityCatalog,
+        mcpInventoryToolsMounted: input.mcpInventoryToolsMounted,
         ...(input.modelIdentity ? { modelIdentity: input.modelIdentity } : {}),
         runtimeContext: {
           chatJid: input.agentInput.chatJid,

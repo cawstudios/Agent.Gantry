@@ -224,6 +224,36 @@ beforeEach(() => {
 });
 
 describe('DeepAgents inline lane', () => {
+  it('consumes the compiled capability catalog in the system prompt', async () => {
+    deep.streamEvents.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield streamEvent('done');
+      },
+    }));
+    const base = laneInput();
+    const lane = createDeepAgentsInlineAgentLoopLane({
+      databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
+      schema: 'gantry_deepagents',
+    });
+
+    await lane(
+      laneInput({
+        input: {
+          ...base.input,
+          compiledSystemPrompt:
+            '# Capability catalog\n- Incident triage — Diagnose incidents.',
+        },
+      }),
+    );
+
+    expect(deep.createAgent.mock.calls[0]?.[0].systemPrompt).toContain(
+      '# Capability catalog',
+    );
+    expect(deep.createAgent.mock.calls[0]?.[0].systemPrompt).toContain(
+      'Incident triage',
+    );
+  });
+
   it.each([
     ['uses the default cap when unset', {}, 50],
     ['maps configured max_turns', { maxTurns: 6 }, 6],
@@ -273,7 +303,7 @@ describe('DeepAgents inline lane', () => {
     );
   });
 
-  it('uses a stable conversation/thread prompt cache key in automatic cache mode', async () => {
+  it('uses a stable conversation/thread/access prompt cache key in automatic cache mode', async () => {
     deep.streamEvents.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {
         yield streamEvent('done');
@@ -283,10 +313,17 @@ describe('DeepAgents inline lane', () => {
       databaseUrl: 'postgres://gantry:test@localhost:5432/gantry',
       schema: 'gantry_deepagents',
     });
-    const cachedInput = (threadId: string) => {
+    const cachedInput = (
+      threadId: string,
+      accessFingerprint = 'provider-session-access:v2:first',
+    ) => {
       const base = laneInput();
       return laneInput({
-        input: { ...base.input, threadId },
+        input: {
+          ...base.input,
+          threadId,
+          providerSessionAccessFingerprint: accessFingerprint,
+        },
         mcpServers: [],
         resolvedModel: {
           ok: true,
@@ -304,6 +341,7 @@ describe('DeepAgents inline lane', () => {
     await lane(cachedInput('thread:one'));
     await lane(cachedInput('thread:one'));
     await lane(cachedInput('thread:two'));
+    await lane(cachedInput('thread:one', 'provider-session-access:v2:changed'));
 
     const keys = model.build.mock.calls.map(
       ([input]) => input.promptCacheKey as string,
@@ -311,9 +349,10 @@ describe('DeepAgents inline lane', () => {
     expect(keys[0]).toMatch(/^[a-f0-9]{64}$/);
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[0]);
+    expect(keys[3]).not.toBe(keys[0]);
     expect(
       deep.streamEvents.mock.calls.map(([input]) => input.messages[0].content),
-    ).toEqual(['first prompt', 'first prompt', 'first prompt']);
+    ).toEqual(['first prompt', 'first prompt', 'first prompt', 'first prompt']);
   });
 
   it('emits and returns a named max_turns error on graph recursion', async () => {

@@ -59,6 +59,7 @@ export interface AdapterInlineAgentInput {
   memoryContextBlock?: string;
   attachedSkillSourceIds?: string[];
   toolPolicyRules?: string[];
+  providerSessionAccessFingerprint?: string;
   yoloMode?: YoloModeSettings;
   permissionMode: PermissionMode;
   isScheduledJob?: boolean;

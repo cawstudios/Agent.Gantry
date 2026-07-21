@@ -29,6 +29,13 @@ type EnrichedSlackMessage = {
 };
 type SlackRouteMatch = [string, ConversationRoute, string | undefined];
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function leadingBotMentionPattern(botUserId: string): RegExp {
+  return new RegExp(`^<@${escapeRegex(botUserId)}>[,:]?\\s*`);
+}
 function dedupeRouteAliases(matches: SlackRouteMatch[]): SlackRouteMatch[] {
   const byIdentity = new Map<
     string,
@@ -149,11 +156,11 @@ export async function ingestSlackMessage(input: {
   const content =
     input.botUserId && singleRoute
       ? rawContent.replace(
-          new RegExp(`^<@${input.botUserId}>\\s+`),
+          leadingBotMentionPattern(input.botUserId),
           `${triggerForRoute(singleRoute)} `,
         )
       : input.botUserId && routeMatches.length > 1
-        ? rawContent.replace(new RegExp(`^<@${input.botUserId}>\\s*`), '')
+        ? rawContent.replace(leadingBotMentionPattern(input.botUserId), '')
         : rawContent;
   if (!content) return;
   const triggeredRoutes =

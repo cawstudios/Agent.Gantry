@@ -12,11 +12,14 @@ import type {
   FileArtifactWriteInput,
 } from '@core/domain/ports/file-artifact-store.js';
 import {
+  capabilityGuidancePrompt,
   DEFAULT_PROMPT_SECTION_BUDGETS,
   LOCKED_OPERATING_GUIDANCE_BLOCK,
   OPERATING_GUIDANCE_BLOCK,
   PromptProfileService,
 } from '@core/application/agents/prompt-profile-service.js';
+import type { AgentPromptCapabilityCatalog } from '@core/application/agents/agent-prompt-capability-catalog.js';
+import { renderCapabilityGuidancePrompt } from '@core/application/agents/agent-prompt-capability-guidance.js';
 
 const loggerSpies = vi.hoisted(() => ({
   info: vi.fn(),
@@ -264,13 +267,10 @@ describe('PromptProfileService', () => {
     expect(prompt).toContain(
       'first send one short natural acknowledgement with send_message',
     );
-    expect(prompt).toContain('pending -> inProgress -> completed');
     expect(prompt).toContain('repeated generic progress chatter');
+    expect(prompt).toContain('# Capability catalog');
     expect(prompt).toContain(
-      'Gantry delegation is unavailable until a delegated-task executor is mounted. Do not claim delegated work started unless a real Gantry delegation tool returns a handle.',
-    );
-    expect(prompt).toContain(
-      'Lead with the outcome in plain prose. Give details only when useful or requested; do not append labeled receipts.',
+      'This is a read-only snapshot for this agent; execution policy still applies.',
     );
     expect(prompt).toContain('If it shapes the answer, briefly acknowledge it');
     for (const receiptHeading of [
@@ -302,6 +302,212 @@ describe('PromptProfileService', () => {
     expect(LOCKED_OPERATING_GUIDANCE_BLOCK.length).toBeLessThanOrEqual(
       DEFAULT_PROMPT_SECTION_BUDGETS.OPERATING_GUIDANCE,
     );
+  });
+
+  it('renders the same real catalog for full and locked profiles without locked acquisition guidance', async () => {
+    const catalog: AgentPromptCapabilityCatalog = {
+      schemaVersion: 1,
+      digest: 'catalog:test',
+      readyActions: [
+        {
+          kind: 'reviewed_capability',
+          stableRef: 'calendar.manage',
+          revision: '1',
+          displayName: 'Team calendar',
+          description: 'Find availability and create or update events.',
+          category: 'Calendar',
+        },
+      ],
+      installedSkills: [
+        {
+          kind: 'skill',
+          stableRef: 'skill:incident-triage',
+          revision: 'sha256:skill',
+          displayName: 'incident-triage',
+          description: 'Diagnose incidents from logs and recent changes.',
+          category: 'Skills',
+        },
+      ],
+      connectedMcpSources: [
+        {
+          kind: 'mcp_source',
+          stableRef: 'mcp:linear',
+          revision: '2026-07-20T00:00:00.000Z',
+          displayName: 'Linear',
+          description: 'Search issues, projects, and workflow metadata.',
+          category: 'MCP',
+        },
+      ],
+    };
+    const service = createService().service;
+    const full = await service.compileSystemPrompt({
+      agentFolder: 'team',
+      capabilityCatalog: catalog,
+    });
+    const locked = await service.compileSystemPrompt({
+      agentFolder: 'team',
+      accessPreset: 'locked',
+      capabilityCatalog: catalog,
+    });
+
+    for (const entry of ['Team calendar', 'incident-triage', 'Linear']) {
+      expect(full).toContain(entry);
+      expect(locked).toContain(entry);
+    }
+    expect(full).toContain(
+      'Acquire first -> request_access for the reviewed capability.',
+    );
+    expect(locked).not.toContain('Acquire first');
+    expect(locked).not.toContain('request_access');
+    expect(locked).toContain('If no provisioned action fits');
+  });
+
+  it('omits MCP discovery and acquisition guidance when inventory facades are not mounted', async () => {
+    const prompt = await createService().service.compileSystemPrompt({
+      agentFolder: 'team',
+      mcpInventoryToolsMounted: false,
+    });
+
+    expect(prompt).not.toContain('Discovery');
+    expect(prompt).not.toContain('mcp_search_tools');
+    expect(prompt).not.toContain('Acquire first');
+  });
+
+  it('includes MCP discovery and acquisition guidance when inventory facades are mounted', async () => {
+    const service = createService().service;
+    const full = await service.compileSystemPrompt({
+      agentFolder: 'team',
+      mcpInventoryToolsMounted: true,
+    });
+    const locked = await service.compileSystemPrompt({
+      agentFolder: 'team',
+      accessPreset: 'locked',
+      mcpInventoryToolsMounted: true,
+    });
+
+    expect(full).toContain('Discovery');
+    expect(full).toContain('mcp_search_tools');
+    expect(full).toContain('Acquire first');
+    expect(locked).toContain('mcp_search_tools');
+    expect(locked).not.toContain('Acquire first');
+    expect(locked).not.toContain('request_access');
+  });
+
+  it('truncates only whole trailing catalog entries within the section budget', () => {
+    const catalog: AgentPromptCapabilityCatalog = {
+      schemaVersion: 1,
+      digest: 'catalog:large',
+      readyActions: Array.from({ length: 8 }, (_, index) => ({
+        kind: 'reviewed_capability' as const,
+        stableRef: `ready:${index}`,
+        displayName: `Ready action ${index}`,
+        description: 'A deliberately long ready-action description. '.repeat(8),
+        category: 'Operations',
+      })),
+      installedSkills: Array.from({ length: 40 }, (_, index) => ({
+        kind: 'skill' as const,
+        stableRef: `skill:${index.toString().padStart(2, '0')}`,
+        displayName: `Skill ${index.toString().padStart(2, '0')}`,
+        description: `Description for skill ${index}.`,
+        category: 'Skills',
+      })),
+      connectedMcpSources: [],
+    };
+
+    const rendered = capabilityGuidancePrompt(catalog, 'full');
+
+    expect(rendered.length).toBeLessThanOrEqual(
+      DEFAULT_PROMPT_SECTION_BUDGETS.CAPABILITY_GUIDANCE,
+    );
+    for (let index = 0; index < 8; index += 1) {
+      expect(rendered).toContain(`Ready action ${index}`);
+    }
+    expect(rendered).toMatch(/\+\d+ more installed skills/);
+    for (const line of rendered
+      .split('\n')
+      .filter((candidate) => candidate.startsWith('- Skill '))) {
+      expect(line).toMatch(/ — Description for skill \d+\.$/);
+    }
+  });
+
+  it('reports rendered and omitted catalog counts after whole-entry truncation', async () => {
+    const onCapabilityCatalogRendered = vi.fn();
+    const service = new PromptProfileService({
+      onCapabilityCatalogRendered,
+      sectionBudgets: { CAPABILITY_GUIDANCE: 500 },
+    });
+    const catalog: AgentPromptCapabilityCatalog = {
+      schemaVersion: 1,
+      digest: 'catalog:diagnostics',
+      readyActions: [
+        {
+          kind: 'reviewed_capability',
+          stableRef: 'ready:calendar',
+          displayName: 'Team calendar',
+          description: 'Find availability and manage events.',
+          category: 'Calendar',
+        },
+      ],
+      installedSkills: Array.from({ length: 20 }, (_, index) => ({
+        kind: 'skill' as const,
+        stableRef: `skill:${index}`,
+        displayName: `Skill ${index}`,
+        description: `Use workflow ${index} safely and consistently.`,
+        category: 'Skills',
+      })),
+      connectedMcpSources: [],
+    };
+
+    await service.compileSystemPrompt({
+      agentFolder: 'team',
+      capabilityCatalog: catalog,
+    });
+
+    const diagnostics = onCapabilityCatalogRendered.mock.calls[0]?.[0];
+    expect(diagnostics.rendered.readyActions).toBe(1);
+    expect(diagnostics.omitted.readyActions).toBe(0);
+    expect(diagnostics.rendered.installedSkills).toBeLessThan(20);
+    expect(
+      diagnostics.rendered.installedSkills +
+        diagnostics.omitted.installedSkills,
+    ).toBe(20);
+  });
+
+  it('reserves a connected source and its exact omitted count after many skills', () => {
+    const catalog: AgentPromptCapabilityCatalog = {
+      schemaVersion: 1,
+      digest: 'catalog:balanced-truncation',
+      readyActions: [],
+      installedSkills: Array.from({ length: 40 }, (_, index) => ({
+        kind: 'skill' as const,
+        stableRef: `skill:${index.toString().padStart(2, '0')}`,
+        displayName: `Skill ${index.toString().padStart(2, '0')}`,
+        description: `Long skill description ${index} `.repeat(8),
+        category: 'Skills',
+      })),
+      connectedMcpSources: Array.from({ length: 20 }, (_, index) => ({
+        kind: 'mcp_source' as const,
+        stableRef: `mcp:source-${index.toString().padStart(2, '0')}`,
+        displayName: `Connected source ${index.toString().padStart(2, '0')}`,
+        description: `Long connected source description ${index} `.repeat(8),
+        category: 'MCP',
+      })),
+    };
+
+    const rendered = renderCapabilityGuidancePrompt({
+      catalog,
+      accessPreset: 'full',
+      mcpInventoryToolsMounted: true,
+      budget: DEFAULT_PROMPT_SECTION_BUDGETS.CAPABILITY_GUIDANCE,
+    });
+
+    expect(rendered.prompt.length).toBeLessThanOrEqual(
+      DEFAULT_PROMPT_SECTION_BUDGETS.CAPABILITY_GUIDANCE,
+    );
+    expect(rendered.prompt).toContain('Connected source 00');
+    expect(rendered.prompt).toContain('- +19 more connected sources');
+    expect(rendered.diagnostics.rendered.connectedMcpSources).toBe(1);
+    expect(rendered.diagnostics.omitted.connectedMcpSources).toBe(19);
   });
 
   it('compiles the Communication and Output Style guidance untruncated', async () => {

@@ -29,7 +29,7 @@ export function registerSlackUserQuestionHandlers(input: {
     answeredBy?: string,
   ) => Promise<void>;
 }): void {
-  input.app.action('gantry_userq_select', async (args: any) => {
+  input.app.action(/^gantry_userq_select_\d+$/, async (args: any) => {
     let acknowledged = false;
     const acknowledge = async (): Promise<void> => {
       if (acknowledged) return;

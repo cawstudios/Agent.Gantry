@@ -11,6 +11,7 @@ import { PartialMessageDeliveryError } from '@core/domain/messages/partial-deliv
 import { RUNTIME_EVENT_TYPES } from '@core/domain/events/runtime-event-types.js';
 import { buildProviderSessionAccessFingerprint } from '@core/runtime/provider-session-access-fingerprint.js';
 import { createAgentExecutionAdapterRegistry } from '@core/application/agent-execution/agent-execution-adapter-registry.js';
+import { stableSha256Json } from '@core/shared/stable-hash.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -130,7 +131,15 @@ const { createGroupProcessor } =
   await import('@core/runtime/group-processing.js');
 const { RUNTIME_RESULT_SUMMARY_MAX_CHARS } =
   await import('@core/runtime/session-resume-runtime.js');
-const EMPTY_ACCESS_FINGERPRINT = buildProviderSessionAccessFingerprint({});
+const EMPTY_ACCESS_FINGERPRINT = buildProviderSessionAccessFingerprint({
+  accessPreset: 'full',
+  capabilityCatalogDigest: stableSha256Json({
+    schemaVersion: 1,
+    readyActions: [],
+    installedSkills: [],
+    connectedMcpSources: [],
+  }),
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2160,7 +2169,52 @@ describe('createGroupProcessor', () => {
         expect.objectContaining({
           expectedAgentSessionId: 'agent-session:1',
           accessFingerprint: expect.stringMatching(
-            /^provider-session-access:v1:/,
+            /^provider-session-access:v2:/,
+          ),
+        }),
+      );
+      expect(mockSpawnAgent.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          providerSessionAccessFingerprint: expect.stringMatching(
+            /^provider-session-access:v2:/,
+          ),
+          capabilityCatalog: expect.objectContaining({
+            schemaVersion: 1,
+            digest: expect.any(String),
+          }),
+        }),
+      );
+    });
+
+    it('expires a full-preset provider session when the agent becomes locked', async () => {
+      const group = makeGroup({ requiresTrigger: false });
+      const { deps } = setupHappyPath({ group });
+      deps.getAgentLockStatus = vi.fn(() => 'locked');
+      (deps.opsRepository as any).getAgentTurnContext = vi
+        .fn()
+        .mockResolvedValue({
+          appId: 'app:test',
+          agentId: 'agent:test',
+          agentSessionId: 'agent-session:1',
+          providerSessionId: 'provider-session:full',
+          externalSessionId: 'claude-session-full',
+          providerSessionAccessFingerprint: EMPTY_ACCESS_FINGERPRINT,
+        });
+
+      const { processGroupMessages } = createGroupProcessor(deps);
+      await processGroupMessages('group1@g.us');
+
+      expect(deps.opsRepository.expireProviderSession).toHaveBeenCalledWith({
+        providerSessionId: 'provider-session:full',
+        agentSessionId: 'agent-session:1',
+        provider: 'anthropic:claude-agent-sdk',
+        externalSessionId: 'claude-session-full',
+      });
+      expect(mockSpawnAgent.mock.calls[0][1]).not.toHaveProperty('sessionId');
+      expect(mockSpawnAgent.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          providerSessionAccessFingerprint: expect.stringMatching(
+            /^provider-session-access:v2:/,
           ),
         }),
       );

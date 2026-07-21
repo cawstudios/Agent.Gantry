@@ -28,6 +28,7 @@ export function startSkillPermissionReview(input: {
   sourceAgentFolder: string;
   targetJid: string;
   threadId?: string;
+  providerAccountId?: string;
   skill: {
     id?: string;
     name: string;
@@ -80,6 +81,21 @@ export function startSkillPermissionReview(input: {
 async function completeSkillPermissionReview(
   input: Parameters<typeof startSkillPermissionReview>[0],
 ): Promise<void> {
+  // Install-time collision validation (trace defect 3): fail the install with
+  // an honest receipt now instead of blowing up the agent's next spawn.
+  const collision = await input.service.installMaterializationCollisionForAgent(
+    {
+      appId: input.appId,
+      agentId: input.agentId,
+      name: skillNameForReceipt(input.assets, input.skill.name),
+      ...(input.skill.id ? { skillId: input.skill.id as never } : {}),
+    },
+  );
+  if (collision) {
+    await notifyLifecycle(input.onBlocked);
+    input.responder.reject(collision, 'skill_materialization_collision');
+    return;
+  }
   await notifyLifecycle(input.onReviewStarted);
   const decision = await input.deps.requestPermissionApproval({
     requestId: `skill-${globalThis.crypto.randomUUID()}`,
@@ -88,6 +104,7 @@ async function completeSkillPermissionReview(
     sourceAgentFolder: input.sourceAgentFolder,
     targetJid: input.targetJid,
     threadId: input.threadId,
+    providerAccountId: input.providerAccountId,
     decisionPolicy: 'same_channel',
     decisionOptions: ['allow_once', 'cancel'],
     toolName: input.requestToolName,
@@ -143,6 +160,15 @@ async function completeSkillPermissionReview(
         skillNameForReceipt(input.assets, input.skill.name),
       ).toLowerCase(),
       async () => {
+        const collision =
+          await input.service.installMaterializationCollisionForAgent({
+            appId: input.appId,
+            agentId: input.agentId,
+            name: skillNameForReceipt(input.assets, input.skill.name),
+            ...(input.skill.id ? { skillId: input.skill.id as never } : {}),
+          });
+        if (collision)
+          throw new InstallMaterializationCollisionError(collision);
         let installedSkillId: string | undefined;
         try {
           const installed = await input.service.installSkill({
@@ -175,6 +201,10 @@ async function completeSkillPermissionReview(
     );
   } catch (err) {
     await notifyLifecycle(input.onBlocked);
+    if (err instanceof InstallMaterializationCollisionError) {
+      input.responder.reject(err.message, 'skill_materialization_collision');
+      return;
+    }
     throw err;
   }
   const sameSessionContext = buildInstalledSkillSameSessionContext(
@@ -190,7 +220,7 @@ async function completeSkillPermissionReview(
       installedSkill.name,
       installedSkill.requiredEnvVars,
     ),
-    input.threadId ? { threadId: input.threadId } : undefined,
+    skillReviewMessageOptions(input),
   );
   input.responder.acceptData(
     skillApprovalMessage(
@@ -201,6 +231,22 @@ async function completeSkillPermissionReview(
     sameSessionContext,
     'skill_installed',
   );
+}
+
+class InstallMaterializationCollisionError extends Error {}
+
+function skillReviewMessageOptions(
+  input: Parameters<typeof startSkillPermissionReview>[0],
+) {
+  return input.threadId || input.providerAccountId
+    ? {
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+        ...(input.providerAccountId
+          ? { providerAccountId: input.providerAccountId }
+          : {}),
+        agentId: input.agentId,
+      }
+    : undefined;
 }
 
 async function notifyLifecycle(
@@ -226,7 +272,7 @@ async function rejectSkillRequestFromPermission(
   await input.deps.sendMessage(
     input.targetJid,
     message,
-    input.threadId ? { threadId: input.threadId } : undefined,
+    skillReviewMessageOptions(input),
   );
   input.responder.reject(message, 'permission_denied');
 }
@@ -247,6 +293,7 @@ function skillReviewInteraction(
       sourceAgentFolder: input.sourceAgentFolder,
       targetJid: input.targetJid,
       threadId: input.threadId,
+      providerAccountId: input.providerAccountId,
       toolName: input.requestToolName,
       capabilityType: 'skill',
       capabilityId: input.skill.id,

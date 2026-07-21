@@ -38,6 +38,7 @@ import type {
   RunnerSandboxSpawnInput,
 } from '../shared/runner-sandbox-provider.js';
 import type { CallableAgentToolManifestEntry } from '../application/core-tools/callable-agent-tools.js';
+import type { AgentPromptCapabilityCatalog } from '../application/agents/agent-prompt-capability-catalog.js';
 
 export type AgentToolRule =
   | {
@@ -74,6 +75,8 @@ export interface AgentInput {
   selectedSkillDisplays?: string[];
   attachedMcpSourceIds?: string[];
   semanticCapabilities?: SemanticCapabilityDefinition[];
+  capabilityCatalog?: AgentPromptCapabilityCatalog;
+  providerSessionAccessFingerprint?: string;
   hideAuthorityTools?: boolean;
   isScheduledJob?: boolean;
   jobId?: string;

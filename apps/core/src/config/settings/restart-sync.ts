@@ -177,7 +177,12 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
   createdBy?: string;
 }): Promise<void> {
   for (let attempt = 0; attempt <= MAX_STALE_SETTINGS_RETRIES; attempt += 1) {
-    const previousSettings = loadRuntimeSettings(input.runtimeHome);
+    const base = await loadSyncedMutationBaseSettings({
+      runtimeHome: input.runtimeHome,
+      settingsRevisions: input.settingsRevisions,
+      appId: input.appId ?? ('default' as AppId),
+    });
+    const previousSettings = base.settings;
     const nextSettings = structuredClone(previousSettings);
     addAgentToolRulesToRuntimeSettings(
       nextSettings,
@@ -212,6 +217,7 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
               createdBy: input.createdBy ?? 'permission:persistent-tool-rule',
             },
             revisionMirrorRequired: true,
+            expectedRevision: base.expectedRevision,
           },
           nextSettings,
         );
@@ -244,7 +250,6 @@ export async function addAgentToolRulesToSyncedRuntimeSettings(input: {
     return;
   }
 }
-
 export async function addActiveMcpSourcesToRuntimeSettings(input: {
   settings: RuntimeSettings;
   agentFolder: string;
@@ -301,7 +306,12 @@ export async function removeAgentToolRulesFromSyncedRuntimeSettings(input: {
   pool?: SettingsRevisionMirror['pool'];
   createdBy?: string;
 }): Promise<void> {
-  const previousSettings = loadRuntimeSettings(input.runtimeHome);
+  const base = await loadSyncedMutationBaseSettings({
+    runtimeHome: input.runtimeHome,
+    settingsRevisions: input.settingsRevisions,
+    appId: input.appId ?? ('default' as AppId),
+  });
+  const previousSettings = base.settings;
   const nextSettings = structuredClone(previousSettings);
   removeAgentToolRulesFromRuntimeSettings(
     nextSettings,
@@ -326,6 +336,7 @@ export async function removeAgentToolRulesFromSyncedRuntimeSettings(input: {
           createdBy: input.createdBy ?? 'permission:persistent-tool-rule',
         },
         revisionMirrorRequired: true,
+        expectedRevision: base.expectedRevision,
       },
       nextSettings,
     );
@@ -345,4 +356,26 @@ export async function removeAgentToolRulesFromSyncedRuntimeSettings(input: {
     appId: input.appId,
     reloadRuntimeState: input.reloadRuntimeState,
   });
+}
+
+async function loadSyncedMutationBaseSettings(input: {
+  runtimeHome: string;
+  settingsRevisions?: SettingsRevisionRepository;
+  appId: AppId;
+}): Promise<{ settings: RuntimeSettings; expectedRevision?: number }> {
+  if (!input.settingsRevisions) {
+    return { settings: loadRuntimeSettings(input.runtimeHome) };
+  }
+  const latest = await input.settingsRevisions.getLatestSettingsRevision(
+    input.appId,
+  );
+  if (!latest) {
+    return { settings: loadRuntimeSettings(input.runtimeHome) };
+  }
+  const { settingsFromRevisionDocument } =
+    await import('./settings-import-service.js');
+  return {
+    settings: settingsFromRevisionDocument(latest.settingsDocument),
+    expectedRevision: latest.revision,
+  };
 }

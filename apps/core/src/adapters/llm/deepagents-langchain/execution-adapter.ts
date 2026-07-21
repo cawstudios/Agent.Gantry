@@ -137,6 +137,7 @@ export class DeepAgentsLangChainExecutionAdapter implements AgentExecutionAdapte
         modelEntry: input.effectiveModelEntry,
         conversationId: input.input.chatJid,
         threadId: input.input.threadId,
+        accessFingerprint: input.input.providerSessionAccessFingerprint,
       });
       env[GANTRY_DEEPAGENTS_CACHE_PROMPT_CONTROL_ENV] = promptCache.cacheMode;
       if (promptCache.promptCacheKey) {

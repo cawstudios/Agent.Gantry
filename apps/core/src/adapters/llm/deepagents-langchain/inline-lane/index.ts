@@ -101,12 +101,12 @@ export function createDeepAgentsInlineAgentLoopLane(input: {
     const hasProjectedSkills = Boolean(skillProjection);
     const backend = (config: { state: unknown; store?: BaseStore }) =>
       new StateBackend(config);
-
     const sessionId = laneInput.input.sessionId ?? randomUUID();
     const promptCache = resolveDeepAgentsPromptCache({
       modelEntry: laneInput.resolvedModel.value.modelEntry,
       conversationId: laneInput.input.chatJid,
       threadId: laneInput.input.threadId,
+      accessFingerprint: laneInput.input.providerSessionAccessFingerprint,
     });
     const stop = new AbortController();
     const pendingFollowups: string[] = [];

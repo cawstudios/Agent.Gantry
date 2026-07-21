@@ -49,7 +49,7 @@ vi.mock('@slack/bolt', () => ({
     eventHandlers = new Map<string, ((args: any) => Promise<void>)[]>();
     commandHandlers = new Map<string, (args: any) => Promise<void>>();
     shortcutHandlers = new Map<string, (args: any) => Promise<void>>();
-    actionHandlers = new Map<string, (args: any) => Promise<void>>();
+    actionHandlers = new Map<string | RegExp, (args: any) => Promise<void>>();
     viewHandlers = new Map<string, (args: any) => Promise<void>>();
     errorHandler: ((err: Error) => Promise<void>) | null = null;
 
@@ -127,7 +127,7 @@ vi.mock('@slack/bolt', () => ({
       this.shortcutHandlers.set(name, handler);
     }
 
-    action(name: string, handler: (args: any) => Promise<void>) {
+    action(name: string | RegExp, handler: (args: any) => Promise<void>) {
       this.actionHandlers.set(name, handler);
     }
 
@@ -645,7 +645,13 @@ function latestSlackUserQuestionActionValue(
   }>;
   const values = blocks
     ?.flatMap((block) => block.elements || [])
-    .filter((element) => element.action_id === actionId && element.value)
+    .filter(
+      (element) =>
+        element.value &&
+        (element.action_id === actionId ||
+          (optionIndex !== undefined &&
+            element.action_id === `${actionId}_${optionIndex}`)),
+    )
     .map((element) => JSON.parse(element.value!) as Record<string, unknown>);
   const value =
     optionIndex === undefined
@@ -653,6 +659,21 @@ function latestSlackUserQuestionActionValue(
       : values?.find((candidate) => candidate.optionIndex === optionIndex);
   if (!value) throw new Error(`Missing Slack user-question action ${actionId}`);
   return value;
+}
+
+function slackActionHandler(
+  actionId: string,
+): ((args: any) => Promise<void>) | undefined {
+  for (const [registeredActionId, handler] of appRef.current.actionHandlers) {
+    if (
+      registeredActionId === actionId ||
+      (registeredActionId instanceof RegExp &&
+        registeredActionId.test(actionId))
+    ) {
+      return handler;
+    }
+  }
+  return undefined;
 }
 
 describe('Slack channel', () => {
@@ -1637,6 +1658,52 @@ describe('Slack channel', () => {
       2,
       'sl:C123',
       expect.objectContaining({ content: '<@U_OTHER> !new' }),
+    );
+  });
+
+  it('strips only the leading Slack bot invocation and preserves the rest of the message', async () => {
+    const opts = createOpts();
+    opts.conversationRoutes.mockReturnValue({
+      [makeAgentThreadQueueKey('sl:C123', null, null, 'slack_default')]: {
+        folder: 'slack_ops',
+        name: 'Ops',
+        trigger: '@Gantry',
+      },
+    });
+    const channel = new SlackChannel('xoxb-token', 'xapp-token', opts as any);
+    await channel.connect();
+
+    const handlers = appRef.current.eventHandlers.get('app_mention') || [];
+    await handlers[0]({
+      event: {
+        channel: 'C123',
+        ts: '1710000000.000300',
+        thread_ts: '1710000000.000100',
+        user: 'U123',
+        text: 'yes <@U_BOT> you can request permission',
+      },
+    });
+    await handlers[0]({
+      event: {
+        channel: 'C123',
+        ts: '1710000000.000400',
+        user: 'U123',
+        text: '<@U_BOT>: deploy  now',
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenNthCalledWith(
+      1,
+      'sl:C123',
+      expect.objectContaining({
+        content: 'yes <@U_BOT> you can request permission',
+        thread_id: '1710000000.000100',
+      }),
+    );
+    expect(opts.onMessage).toHaveBeenNthCalledWith(
+      2,
+      'sl:C123',
+      expect.objectContaining({ content: '@Gantry deploy  now' }),
     );
   });
 
@@ -5081,6 +5148,32 @@ describe('Slack channel', () => {
     );
   });
 
+  it('posts a visible Slack notice when no approver can receive a permission prompt', async () => {
+    const channel = new SlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      createOptsWithApproverHook([]) as any,
+    );
+    await channel.connect();
+
+    const approvalPromise = requestSlackPermissionApproval(channel, 'sl:C123', {
+      requestId: 'perm-no-approver',
+      sourceAgentFolder: 'slack_main',
+      toolName: 'request_skill_install',
+      title: 'Install skill for this agent',
+    });
+    await flushSlackPromptRegistration();
+
+    await expect(approvalPromise).resolves.toMatchObject({ approved: false });
+    expect(appRef.current.client.chat.postEphemeral).not.toHaveBeenCalled();
+    expect(appRef.current.client.chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        text: expect.stringContaining('no configured approvers'),
+      }),
+    );
+  });
+
   it('fails closed when a Slack permission batch cannot be bound durably', async () => {
     vi.useFakeTimers();
     configurePendingInteractionDurability({
@@ -5672,10 +5765,20 @@ describe('Slack channel', () => {
     expect(postCall?.text).toContain('Preferred option?');
     expect(postCall?.text).not.toContain('Source: slack_main');
     expect(postCall?.text).not.toContain('Thread: 1711111111.000200');
-
-    const actionHandler = appRef.current.actionHandlers.get(
-      'gantry_userq_select',
+    const actionBlock = (postCall?.blocks as any[])?.find(
+      (block) => block.type === 'actions',
     );
+    const actionIds = actionBlock?.elements?.map(
+      (element: any) => element.action_id,
+    );
+    expect(new Set(actionIds).size).toBe(actionIds?.length);
+    expect(actionIds).toEqual([
+      'gantry_userq_select_0',
+      'gantry_userq_select_1',
+      'gantry_userq_other',
+    ]);
+
+    const actionHandler = slackActionHandler('gantry_userq_select_1');
     expect(actionHandler).toBeTypeOf('function');
     const ack = vi.fn().mockResolvedValue(undefined);
     await actionHandler?.({
@@ -5800,9 +5903,7 @@ describe('Slack channel', () => {
     });
     await flushSlackPromptRegistration();
 
-    const actionHandler = appRef.current.actionHandlers.get(
-      'gantry_userq_select',
-    );
+    const actionHandler = slackActionHandler('gantry_userq_select_1');
     expect(actionHandler).toBeTypeOf('function');
 
     await actionHandler?.({
@@ -5870,9 +5971,7 @@ describe('Slack channel', () => {
     });
     await flushSlackPromptRegistration();
 
-    const selectHandler = appRef.current.actionHandlers.get(
-      'gantry_userq_select',
-    );
+    const selectHandler = slackActionHandler('gantry_userq_select_0');
     const doneHandler = appRef.current.actionHandlers.get('gantry_userq_done');
     expect(selectHandler).toBeTypeOf('function');
     expect(doneHandler).toBeTypeOf('function');

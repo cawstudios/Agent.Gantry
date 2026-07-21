@@ -71,7 +71,6 @@ describe('buildGantryAgentSystemPrompt', () => {
     expect(prompt.prompt).toContain(
       'For multi-step work, then use todo_update',
     );
-    expect(prompt.prompt).toContain('Rich UI: render_status');
     expect(prompt.prompt).toContain('Use render_* rich UI tools');
     expect(prompt.prompt).toContain(
       'Use only the Gantry tools mounted in the current run',
@@ -88,6 +87,8 @@ describe('buildGantryAgentSystemPrompt', () => {
     expect(prompt.prompt).toContain('RunCommand(<scope>)');
     expect(prompt.prompt).not.toContain('WebFetch');
     expect(prompt.prompt).not.toContain('DeepAgents');
+    expect(prompt.prompt).not.toContain('Public Gantry catalog:');
+    expect(prompt.prompt).not.toContain('Scheduler: scheduler_*');
   });
 
   it('does not re-inject request_access taxonomy (owned by the profile, stripped for locked)', () => {
@@ -162,6 +163,50 @@ describe('buildGantryAgentSystemPrompt', () => {
     }
   });
 
+  it('keeps the same capability catalog in both prompt modes and runtime families', () => {
+    const compiledSystemPrompt = [
+      '[[CAPABILITY_GUIDANCE]]',
+      '# Capability catalog',
+      '- Calendar · Team calendar — Find availability and manage events.',
+      '- Linear — Search connected issue inventory.',
+      '[[/CAPABILITY_GUIDANCE]]',
+    ].join('\n');
+
+    for (const promptMode of ['full', 'minimal'] as const) {
+      const shared = buildGantryAgentSystemPrompt({
+        runtimeProjection: 'wrapped-tool-projection',
+        promptMode,
+        compiledSystemPrompt,
+        currentDateTimeIso: '2026-07-20T00:00:00.000Z',
+      });
+      expect(shared.staticPrompt, promptMode).toContain(
+        'Calendar · Team calendar',
+      );
+      expect(shared.staticPrompt, promptMode).toContain('Linear');
+    }
+
+    const anthropic = buildRunnerSystemPrompt(
+      {
+        prompt: 'schedule a meeting',
+        workspaceFolder: 'main_agent',
+        chatJid: 'tg:team',
+        compiledSystemPrompt,
+      },
+      '',
+    );
+    const deepAgents = composeDeepAgentSystemPrompt({
+      prompt: 'schedule a meeting',
+      workspaceFolder: 'main_agent',
+      chatJid: 'tg:team',
+      compiledSystemPrompt,
+    });
+
+    expect(anthropic).toHaveLength(3);
+    expect(anthropic[0]).toContain('Calendar · Team calendar');
+    expect(anthropic[2]).not.toContain('# Capability catalog');
+    expect(deepAgents).toContain('Calendar · Team calendar');
+  });
+
   it('drops the receipts phrasing from Execution Bias', () => {
     const prompt = buildGantryAgentSystemPrompt({
       runtimeProjection: 'wrapped-tool-projection',
@@ -183,7 +228,8 @@ describe('buildGantryAgentSystemPrompt', () => {
       persona: 'generalist',
       assistantName: 'Asha',
       promptMode: 'full',
-      compiledSystemPrompt: 'custom profile prompt',
+      compiledSystemPrompt:
+        '# Capability catalog\n- Calendar · Team calendar — Manage events.',
       allowedTools: ['Read'],
     } satisfies AgentRunnerInput;
 
@@ -192,6 +238,10 @@ describe('buildGantryAgentSystemPrompt', () => {
     const first = buildRunnerSystemPrompt(input, 'memory context');
     vi.setSystemTime(new Date('2026-06-18T12:34:56.000Z'));
     const second = buildRunnerSystemPrompt(input, 'memory context');
+    const changedMessage = buildRunnerSystemPrompt(
+      { ...input, prompt: 'a different user message' },
+      'memory context',
+    );
 
     expect(first).toHaveLength(3);
     expect(second).toHaveLength(3);
@@ -199,9 +249,13 @@ describe('buildGantryAgentSystemPrompt', () => {
     // with the clock or the prompt cache is broken.
     expect(second[0]).toBe(first[0]);
     expect(second[1]).toBe(first[1]);
+    expect(changedMessage[0]).toBe(first[0]);
+    expect(changedMessage[1]).toBe(first[1]);
     expect(second[2]).not.toBe(first[2]);
     expect(first[2]).toContain('2026-06-17T00:00:00.000Z');
     expect(second[2]).toContain('2026-06-18T12:34:56.000Z');
+    expect(first[0]).toContain('# Capability catalog');
+    expect(first[2]).not.toContain('# Capability catalog');
   });
 
   it('renders none mode as base identity only', () => {

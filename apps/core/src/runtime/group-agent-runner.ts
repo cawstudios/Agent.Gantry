@@ -9,13 +9,7 @@ import type {
   GroupProcessingDeps,
   GroupProcessingRepository,
 } from './group-processing-types.js';
-import {
-  memoryScopeForConversationKind,
-  resolveTurnToolPolicy,
-  resolveTurnSemanticCapabilities,
-  resolveTurnSelectedMcpServerIds,
-  resolveTurnSelectedSkillContext,
-} from './group-run-context.js';
+import { memoryScopeForConversationKind } from './group-run-context.js';
 import {
   resolveSingleNonSelfSenderId,
   buildApprovedSkillContextBlock,
@@ -27,10 +21,7 @@ import {
 } from './session-resume-runtime.js';
 import { createRuntimeModelStatusAccess as createModelStatus } from './model-status-store.js';
 import { recordRuntimeModelUsage } from './model-status-output.js';
-import {
-  buildProviderSessionAccessFingerprint,
-  providerSessionAccessFingerprintMatches,
-} from './provider-session-access-fingerprint.js';
+import { providerSessionAccessFingerprintMatches } from './provider-session-access-fingerprint.js';
 import { buildBoundedMemoryRecallQuery } from '../memory/app-memory-recall-query.js';
 import { appIdFromConversationJid } from '../shared/app-conversation-jid.js';
 import {
@@ -63,6 +54,7 @@ import { maintenanceCompactionPromptForExecutionProvider } from './group-agent-r
 import { hasAsyncTaskRepository } from './group-agent-runner-async-task-repository.js';
 import { resolveInitialGroupExecutionProviderId } from './group-initial-execution-provider.js';
 import { RUNTIME_EVENT_TYPES } from '../domain/events/runtime-event-types.js';
+import { resolveGroupAgentAccessContext } from './group-agent-access-context.js';
 const DEFAULT_ASSISTANT_NAME = 'Gantry';
 const WORKSPACE_FOLDER_INPUT_KEY = `workspace${'Folder'}`;
 export type GroupAgentRunResult = 'success' | 'error' | 'stopped';
@@ -367,23 +359,22 @@ export function createGroupAgentRunner(input: {
       skillArtifactStore: deps.getSkillArtifactStore?.(),
       turnContext,
     });
-    const [configuredToolPolicy, selectedSkillContext, semanticCapabilities] =
-      await Promise.all([
-        resolveTurnToolPolicy(deps, turnContext),
-        resolveTurnSelectedSkillContext(deps, turnContext),
-        resolveTurnSemanticCapabilities(deps, turnContext),
-      ]);
-    const attachedMcpSourceIds = await resolveTurnSelectedMcpServerIds(
+    const {
+      configuredToolPolicy,
+      selectedSkillContext,
+      semanticCapabilities,
+      attachedMcpSourceIds,
+      capabilityCatalog,
+      currentAccessFingerprint,
+    } = await resolveGroupAgentAccessContext({
       deps,
       turnContext,
-      configuredToolPolicy.toolPolicyRules,
-    );
-    const currentAccessFingerprint = buildProviderSessionAccessFingerprint({
-      toolPolicyRules: configuredToolPolicy.toolPolicyRules,
-      runtimeAccess: configuredToolPolicy.runtimeAccess,
-      attachedSkillSourceIds: selectedSkillContext.ids,
-      attachedMcpSourceIds,
-      semanticCapabilities,
+      catalogScope: {
+        appId: turnContext?.appId ?? runtimeAppId,
+        agentId:
+          turnContext?.agentId ?? memoryAgentIdForWorkspaceFolder(group.folder),
+      },
+      agentFolder: group.folder,
     });
     if (
       turnContext?.providerSessionId &&
@@ -552,6 +543,8 @@ export function createGroupAgentRunner(input: {
             selectedSkillDisplays: selectedSkillContext.displays,
             attachedMcpSourceIds,
             semanticCapabilities,
+            capabilityCatalog,
+            providerSessionAccessFingerprint: currentAccessFingerprint,
             assistantName: group.trigger || DEFAULT_ASSISTANT_NAME,
             thinking: group.agentConfig?.thinking,
             memoryContextBlock: agentInput.memoryContextBlock,

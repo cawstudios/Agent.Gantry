@@ -8,6 +8,7 @@ export function resolveDeepAgentsPromptCache(input: {
   modelEntry: ModelCatalogEntry;
   conversationId: string;
   threadId?: string;
+  accessFingerprint?: string;
 }): {
   cacheMode: CachePromptControlMode;
   promptCacheKey?: string;
@@ -23,6 +24,8 @@ export function resolveDeepAgentsPromptCache(input: {
             .update(input.conversationId)
             .update('\0')
             .update(input.threadId ?? '')
+            .update('\0')
+            .update(input.accessFingerprint ?? '')
             .digest('hex'),
         }
       : {}),

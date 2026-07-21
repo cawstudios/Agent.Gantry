@@ -91,6 +91,18 @@ export const CORE_TOOL_NAMES = [
 ] as const;
 export type CoreToolName = (typeof CORE_TOOL_NAMES)[number];
 
+const MCP_INVENTORY_TOOL_NAMES = [
+  'mcp_list_tools',
+  'mcp_search_tools',
+  'mcp_describe_tool',
+  'mcp_call_tool',
+] as const;
+
+export function inlineCoreToolsMountMcpInventory(): boolean {
+  const mounted = new Set<string>(CORE_TOOL_NAMES);
+  return MCP_INVENTORY_TOOL_NAMES.every((name) => mounted.has(name));
+}
+
 const LOCKED_ACCESS_PRESET_DENY_REASON =
   'capability not provisioned: this agent runs with a locked access preset and cannot request new tools, skills, MCP servers, or permissions. Provision the capability before the run.';
 

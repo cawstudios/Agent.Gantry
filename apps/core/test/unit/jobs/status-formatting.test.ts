@@ -177,4 +177,26 @@ describe('job status formatting', () => {
     );
     expect(message).not.toContain('request_access');
   });
+
+  it('selects the scoring summary as the reported completed summary', () => {
+    const message = formatRunStatusMessage({
+      job: job(),
+      runId: 'cb7f3c0a-c8f8-40eb-82f0-3b21d2cfc342',
+      runShortId: 3,
+      runStatus: 'completed',
+      summary: [
+        'Intermediate progress notes that should not be reported.',
+        '',
+        '## Scoring Summary',
+        'Scored 5 candidates: 2 shortlist, 1 hold, 2 reject.',
+      ].join('\n'),
+      nextRun: null,
+      retryCount: 0,
+    });
+
+    expect(message).toContain(
+      'Scoring Summary Scored 5 candidates: 2 shortlist, 1 hold, 2 reject.',
+    );
+    expect(message).not.toContain('Intermediate progress notes');
+  });
 });

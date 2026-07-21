@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   CORE_TOOL_NAMES,
   createCoreToolRegistry,
+  inlineCoreToolsMountMcpInventory,
   type CoreTaskLifecycleBackend,
   type CoreToolRegistryDeps,
 } from '@core/runtime/core-tools/registry.js';
@@ -63,6 +64,7 @@ describe('core tool registry', () => {
 
     expect(registry.tools.map((tool) => tool.name)).toEqual(CORE_TOOL_NAMES);
     expect(Object.keys(registry.byName)).toEqual(CORE_TOOL_NAMES);
+    expect(inlineCoreToolsMountMcpInventory()).toBe(false);
   });
 
   it('enforces declarative rules and records only successful prior tools', async () => {

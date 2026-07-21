@@ -160,6 +160,7 @@ function richInteractionContext(): Record<string, unknown> {
   return {
     ...(appId ? { appId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
     ...(chatJid ? { chatJid } : {}),
     ...(threadId ? { threadId } : {}),
     ...(jobId ? { jobId } : {}),

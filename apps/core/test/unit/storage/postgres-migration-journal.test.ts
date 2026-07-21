@@ -23,6 +23,35 @@ describe('Postgres migration journal', () => {
     }
   });
 
+  it('registers the generated identity primary-key repair', () => {
+    const migrationsDir = path.resolve(
+      'apps/core/src/adapters/storage/postgres/schema/migrations',
+    );
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'),
+    ) as { entries: Array<{ idx: number; tag: string }> };
+    expect(
+      journal.entries.find(
+        (entry) => entry.tag === '0104_runtime_events_identity_repair',
+      ),
+    ).toMatchObject({ idx: 104 });
+
+    const migration = fs.readFileSync(
+      path.join(migrationsDir, '0104_runtime_events_identity_repair.sql'),
+      'utf8',
+    );
+    expect(migration).toContain(
+      'AS identity_primary_keys(table_name, column_name)',
+    );
+    expect(migration).toContain("('runtime_events', 'event_id')");
+    expect(migration).toContain("('message_parts', 'id')");
+    expect(migration).toContain("('memory_recall_events', 'id')");
+    expect(migration).toContain(
+      'ALTER TABLE %s ALTER COLUMN %I ADD GENERATED ALWAYS AS IDENTITY',
+    );
+    expect(migration).toContain('COALESCE(MAX(%I), 0) + 1');
+  });
+
   it('registers the permission prompt relational cutover', () => {
     const migrationsDir = path.resolve(
       'apps/core/src/adapters/storage/postgres/schema/migrations',

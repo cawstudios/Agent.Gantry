@@ -631,7 +631,13 @@ function cawAtsMcpCapability(mcpTool: string): Record<string, unknown> {
     can: 'Call approved tools on the caw-ats MCP server.',
     cannot: 'Call unapproved MCP tools or receive raw credentials.',
     credentialSource: 'none',
-    implementationBindings: [{ kind: 'mcp_tool', mcpTool }],
+    implementationBindings: [
+      {
+        kind: 'mcp_pattern',
+        mcpServer: 'caw-ats',
+        mcpToolPatterns: [allowedToolPattern],
+      },
+    ],
     source: {
       source: 'mcp',
       serverName: 'caw-ats',
@@ -1133,7 +1139,10 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
         ],
         reason: 'Reuse a posting workflow.',
       },
-      { GANTRY_MEMORY_USER_ID: 'tg:user-1' },
+      {
+        GANTRY_MEMORY_USER_ID: 'tg:user-1',
+        GANTRY_PROVIDER_ACCOUNT_ID: 'provider-account:telegram:main',
+      },
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -1149,6 +1158,7 @@ describe('agent-runner MCP stdio tools', { timeout: 70_000 }, () => {
       type: 'request_skill_proposal',
       targetJid: 'tg:team',
       chatJid: 'tg:team',
+      providerAccountId: 'provider-account:telegram:main',
       memoryUserId: 'tg:user-1',
       payload: {
         reason: 'Reuse a posting workflow.',

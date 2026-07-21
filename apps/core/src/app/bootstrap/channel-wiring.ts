@@ -344,9 +344,13 @@ export function createChannelWiring(
       persistence: 'message_row_projection' | 'none';
     },
   ): Promise<MessageDeliveryResult | undefined> {
-    const channel = findBoundChannel(
+    const channel = findBoundChannelForRequest(
       jid,
       options.messageOptions?.providerAccountId,
+      {
+        threadId: options.messageOptions?.threadId,
+        agentId: options.messageOptions?.agentId,
+      },
     );
     if (!channel) {
       if (options.throwOnMissing) {

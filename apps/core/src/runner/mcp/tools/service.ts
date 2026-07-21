@@ -10,6 +10,7 @@ import {
   isAdminMcpToolEnabled,
   memoryUserId,
   memoryDefaultScope,
+  providerAccountId,
   TASKS_DIR,
   threadId,
 } from '../context.js';
@@ -57,6 +58,7 @@ export function registerServiceTools(server: McpServer): void {
         chatJid,
         memoryUserId,
         authThreadId: threadId,
+        providerAccountId,
         payload: {
           patternCandidateId: args.patternCandidateId,
           choice: args.choice,
@@ -252,7 +254,9 @@ export function registerServiceTools(server: McpServer): void {
           ) &&
           capability.implementationBindings.some(
             (binding) =>
-              binding.kind === 'mcp_tool' || Boolean(binding.mcpTool),
+              binding.kind === 'mcp_tool' ||
+              binding.kind === 'mcp_pattern' ||
+              Boolean(binding.mcpTool),
           ),
       );
       const selectedMcpCapabilityIds = selectedMcpCapabilities
@@ -558,6 +562,10 @@ function mcpCapabilityNames(
   const sourceServerName = mcpSourceServerName(capability.source);
   if (sourceServerName) names.push(sourceServerName);
   for (const binding of capability.implementationBindings) {
+    if (binding.kind === 'mcp_pattern') {
+      if (binding.mcpServer) names.push(binding.mcpServer);
+      continue;
+    }
     if (binding.kind !== 'mcp_tool' && !binding.mcpTool) continue;
     const match = /^mcp__(.+?)__/.exec(binding.mcpTool ?? '');
     if (match?.[1]) names.push(match[1]);
@@ -631,6 +639,9 @@ function selectedMcpCapabilitiesForSource(serverName: string): string[] {
         return true;
       }
       return capability.implementationBindings.some((binding) => {
+        if (binding.kind === 'mcp_pattern') {
+          return normalizeMcpServerName(binding.mcpServer) === requestedName;
+        }
         if (binding.kind !== 'mcp_tool' && !binding.mcpTool) return false;
         const match = /^mcp__(.+?)__/.exec(binding.mcpTool ?? '');
         return normalizeMcpServerName(match?.[1]) === requestedName;
@@ -680,6 +691,7 @@ async function submitCapabilityReviewTask(
     targetJid: chatJid,
     chatJid,
     authThreadId: threadId,
+    providerAccountId,
     payload,
     timestamp: nowIso(),
   });
@@ -707,8 +719,7 @@ async function submitCapabilityReviewTask(
           toolName === 'request_skill_install'
             ? formatSkillProposalResponse(
                 response.data,
-                response.message ||
-                  `${requestLabel} approved. It is available now.`,
+                response.message || `${requestLabel} approved.`,
                 { deploymentMode },
               )
             : response.message ||
@@ -758,6 +769,7 @@ function registerSkillProposalTool(
         chatJid,
         memoryUserId,
         authThreadId: threadId,
+        providerAccountId,
         payload: {
           files: args.files,
           reason: args.reason,
@@ -790,8 +802,7 @@ function registerSkillProposalTool(
             type: 'text' as const,
             text: formatSkillProposalResponse(
               response.data,
-              response.message ||
-                `${requestLabel} installed. It is available now.`,
+              response.message || `${requestLabel} installed.`,
               { deploymentMode },
             ),
           },
