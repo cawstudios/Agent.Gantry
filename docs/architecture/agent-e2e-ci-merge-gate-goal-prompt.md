@@ -321,7 +321,7 @@ tool CALL + its structured effect, not the phrasing):
 |---|---|
 | Onboarding+model API | Agent + binding created via Control API/SDK; model selected via model-management API; assert API contract (status/shape) + persisted revision + post-restart survival + the turn routes to the selected `haiku` alias. |
 | Runtime/model | Image starts, migrations current, turn completes; evidence identifies alias/route/provider/family/harness. |
-| Skill lifecycle | `internal-comms` (vendored subtree + license + provenance + content hash, pinned commit) installs via `/v1/skills/install` zip, binds, survives restart, materializes assets incl. `examples/3p-updates.md`; assert the skill was SELECTED + its files materialized + (behaviorally) the model produced the Progress/Plans/Problems STRUCTURE — assert the structural sections exist, not exact wording. `gantry-admin` is NOT installed (reserved name — `/v1/skills/install` rejects it); instead assert its already-bundled read-only tool `admin_permission_list` is callable and returns the expected shape. |
+| Skill lifecycle | `internal-comms` (vendored subtree + license + provenance + content hash, pinned commit) installs via `/v1/skills/install` zip, binds, survives restart, materializes the planned 3P updates example asset; assert the skill was SELECTED + its files materialized + (behaviorally) the model produced the Progress/Plans/Problems STRUCTURE — assert the structural sections exist, not exact wording. `gantry-admin` is NOT installed (reserved name — `/v1/skills/install` rejects it); instead assert its already-bundled read-only tool `admin_permission_list` is callable and returns the expected shape. |
 | MCP lifecycle | In-process Streamable HTTP test server (extend the existing `inline-agent-runtime.integration.test.ts:328-357` pattern) exposing `echo` + `get-sum` — do NOT depend on `@modelcontextprotocol/server-everything@2.0.0` (does not exist; E404). Only echo+get-sum approved; discovery, schema, denied-tool invisibility, MCP audit; assert the model CALLED `get-sum(20,22)` and the tool returned `42` (assert the tool result + audit, not that `42` appears in the reply text). |
 | Permission real-turn | A directive prompt makes the model issue a RunCommand; assert it's permission-decided on the current auto/human path + audit recorded. |
 | Capability real-turn | `admin_permission_list` succeeds; a local_cli capability preflight passes / fails-closed in the real image. |
@@ -352,7 +352,7 @@ dedicated low-spend protected-environment secrets (user-provided), never
 production.
 
 ## Merge policy — trust boundary sealed (validation §7)
-`.github/workflows/agent-e2e.yml`, triggers: PR open/synchronize/reopen/label/unlabel.
+Add the planned agent E2E workflow, triggered on PR open/synchronize/reopen/label/unlabel.
 - The required gate (real `haiku` agent turn + all-tools exercise, API-driven) +
   (extended) test:integration:postgres run for every non-docs PR. It needs the
   protected-environment model credential (so it runs on same-repo PRs; fork PRs

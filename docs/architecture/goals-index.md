@@ -39,7 +39,7 @@ reality; (5) type-system lies.
 | Permission engine redesign | design ✅ · plan ⏳ · build ⏳ | writing plan | fold in floor+promotion + simplification |
 | Observer program | 1/6 shipped · 2/6 staged · 3/6 pending | land S2 + S3a | my verify → autoreview → merge |
 | Agent E2E merge gate | foundation + core rows shipped | many rows pending; matrix tracker itself behind | per-row, in progress |
-| Capability authoring | uncommitted lane, not merged | commit / reconcile it | at-risk; edits mcp-tool-proxy → blocks MCP hybrid |
+| Capability authoring | committed on `feature/capability-authoring` (13ae2e698), not merged | verify → review → merge | edits mcp-tool-proxy → blocks MCP hybrid |
 | MCP hybrid search | design ✅ · build ⏳ | — | capability-authoring must land first |
 | Ponytail audit | phased re-derive in progress (wt-ponytail) | reconcile phase live | final cutover GATED — your go, any red = STOP |
 
@@ -54,8 +54,8 @@ redesign; Fail-loud audit writes is unscoped — Parked, not queued.)_
 
 ### Permission engine redesign  ·  PENDING (design locked, unbuilt)
 Live git/sandbox pain root-caused to AUTHORIZATION (not sandbox). Design LOCKED:
-deterministic risk analyzer + decision memory + ask-once-genuine-risk. RCA +
-design in the session scratchpad (`permission-engine-redesign.md`).
+deterministic risk analyzer + decision memory + ask-once-genuine-risk. Design of
+record committed: `permission-engine-redesign-goal-prompt.md` + `git-permission-rca.md`.
 - [x] Root-cause RCA (git prompts = authorization; direct mode not the lever)
 - [x] Design locked (risk analyzer · decision memory · classifier shrinks · ask-once)
 - [ ] Network/FS investigation — Codex ran, **output unrecovered** (grill from code instead)
@@ -71,18 +71,18 @@ Curious Observer: harvest firehose → nightly dream → deterministic value flo
 batch LLM judge → private ≤1/day digest. Behind `observer.enabled` (default off).
 Design of record: session `proactive-observer-plan.md`. API+SDK+E2E every stage.
 - [x] S1 foundations — MERGED **#264** (proactive_insights, deliveries, cursors, read-only API/SDK/E2E)
-- [~] S2 emission — staged `wt-observer-s2` (floor conf≥0.6 · evidence≥1 · dedup cosine≥0.86)
-- [~] S3a batch-core + fix — staged `wt-observer-s3` (gateway batch endpoints, prefer-orphan state machine; 7 autoreview fixes applied)
+- [~] S2 emission — was an UNCOMMITTED diff in `wt-observer-s2`; rescued as WIP
+      `e055dc14a` on `feature/observer-s2-emission` 2026-07-22 (floor conf≥0.6 · evidence≥1 · dedup cosine≥0.86)
+- [~] S3a batch-core + fix — was an UNCOMMITTED diff in `wt-observer-s3`; rescued as WIP
+      `a51a4909d` on `feature/observer-s3-batch` 2026-07-22 (gateway batch endpoints, prefer-orphan state machine; 7 autoreview fixes applied)
 - [ ] S3b — xAI Grok + Kimi transports (same declared-capability slot)
 - [ ] S4 — digest delivery (staging · settlement · freshness revalidation · evidence permalinks · feedback capture · artifact)
 - [ ] S5 — setup wizard + preview + status + cold-start backfill
 - **Next action:** verify → autoreview → PR → merge S2 and S3a. Exclude the
   plan/GOAL scratch docs from the autoreview *diff* only — do NOT delete the
   design record.
-- **Contract gap:** Observer has NO committed `*-goal-prompt.md`; its design of
-  record (`proactive-observer-plan.md`) lives in the scratchpad (ephemeral).
-  Promote it to a committed goal-prompt to satisfy the pipeline contract before
-  later stages.
+- **Contract gap CLOSED 2026-07-22:** the design of record is committed as
+  `proactive-observer-goal-prompt.md` (promoted verbatim from the scratchpad).
 
 ### Agent E2E CI merge gate  ·  IN PROGRESS (many rows pending)
 Packaged real-image runtime + real agent turn + evidence; the merge bar. Goal
@@ -97,14 +97,17 @@ reconcile the matrix separately before trusting any "% done".
 - [>] Many matrix rows still pending: packaged boot/restart, haiku model gate, all-tools coverage, security/recovery
 - [ ] Flip `agent-e2e-gate` to a **required check** (LAST — only when the matrix is green)
 - **Next action:** reconcile the matrix tracker, then work the pending batches. NOT near closeout.
+- _Reconciled 2026-07-22: `feature/agent-e2e-haiku-turn` carries 15 commits with a
+  real +382/−11 diff vs main beyond merged #246 (streamed-reply proof
+  strengthening) — salvage-or-discard during the matrix reconciliation._
 
-### Capability authoring  ·  ACTIVE LANE (uncommitted, at risk)
-The lane that lets agents author capabilities; edits `mcp-tool-proxy.ts`. Built as
-uncommitted work in `wt-pr237` (no committed goal-prompt yet). Blocks MCP hybrid
-search — both edit mcp-tool-proxy, so no concurrent edits.
-- [>] Built in `wt-pr237`, **uncommitted** — the diff there is the source of record
-- [ ] Commit / reconcile the lane → then it (and MCP hybrid) can proceed
-- **Source of record:** the `wt-pr237` worktree diff, until a goal-prompt is committed.
+### Capability authoring  ·  ACTIVE LANE (committed, unmerged)
+The lane that lets agents author capabilities; edits `mcp-tool-proxy.ts`. Blocks
+MCP hybrid search — both edit mcp-tool-proxy, so no concurrent edits.
+- [~] Rescued 2026-07-22: the wt-pr237 diff is committed verbatim as
+  `feature/capability-authoring` @ 13ae2e698 (WIP snapshot — not reviewed, not verified)
+- [ ] Verify + review the lane → then it (and MCP hybrid) can proceed
+- **Source of record:** branch `feature/capability-authoring` (no goal-prompt yet).
 
 ### MCP hybrid search  ·  BLOCKED (design locked, dep unmet)
 Extends `mcp_search_tools`: FTS ranking + light stemming + opt-in semantic layer
@@ -119,12 +122,14 @@ Extends `mcp_search_tools`: FTS ranking + light stemming + opt-in semantic layer
   (#255, merged) is a different thing from capability *authoring* (the wt-pr237 lane).
 
 ### Ponytail audit (separate track, gated)  ·  IN PROGRESS (unmerged lane)
-Main-sync re-derive + phased cutover, all in `wt-ponytail` (`feature/ponytail-audit`,
-unmerged). **The live worktree runs AHEAD of this board — re-derive the exact
-phase from its git log, don't trust a phase number written here.**
-- [~] Re-derive + baseline phases committed in the lane (through the DB-baseline phase)
-- [ ] Final offline cutover / live restamp — **GATED**: explicit user cutover go +
-      fresh-green + required e2e rows green; **any red = STOP**. Nothing merged to main.
+Main-sync re-derive + phased cutover on `feature/ponytail-audit` (unmerged).
+Reconciled vs the lane git log 2026-07-22:
+- [~] Phases 1–7 committed in-lane through `9ffa146c2` (Phase 7 = 102 migrations
+      replaced by one 93-table baseline + Phase-8 offline restamp/reset/rollback runbook)
+- [~] Post-Phase-7 in-flight diff (169M+22?? — capability guards, tool-permission-gate,
+      query-loop re-derive) rescued as WIP `e4104edc8` 2026-07-22
+- [ ] Phase 8: final offline cutover / live restamp — **GATED**: explicit user cutover
+      go + fresh-green + required e2e rows green; **any red = STOP**. Nothing merged to main.
 
 ---
 
@@ -132,22 +137,32 @@ phase from its git log, don't trust a phase number written here.**
 
 1. **Durable-work primitive** — **FIRST post-Ponytail-cutover lane** (recorded
    user directive 2026-07-20); plan-validation complete. Refactors jobs/
-   interactions state that Ponytail Phases 5–6 move. NB: its goal-prompt
-   (`durable-work-primitive-goal-prompt.md`) lives on the
-   `feature/durable-work-primitive` branch, NOT this tree — land it here before
-   the pipeline runs.
+   interactions state that Ponytail Phases 5–6 move. Its goal-prompt
+   (`durable-work-primitive-goal-prompt.md`) landed on this tree 2026-07-22.
 2. **Model management: unify then UX** — FINALIZED 2026-07-19; starts when the
    ponytail lane closes (shares the settings parser/renderer surface). Folds in
-   `status-cost-cache-visibility-goal-prompt.md`. `model-management-goal-prompt.md`
+   `status-cost-cache-visibility-goal-prompt.md`. _Salvage candidate:
+   `codex/model-management-agent-tool` (6 commits, unmerged)._
+   `model-management-goal-prompt.md`
 3. **Media render capability + env-facts** — **NOT runnable — gated on
    validation, do NOT auto-run.** Round-3 plan-validation
    (`media-render-plan-validation-round3.md`) = NOT APPROVED FOR IMPLEMENTATION
    (unresolved sandbox + capability-routing). The v4 FACADE-PREFLIGHT delta needs
    a fresh validation pass + a committed v4 goal-prompt before the pipeline.
-   Queues after the E2E gate. `wt-media` (unmerged). `media-render-goal-prompt.md`
+   Queues after the E2E gate. _Reconciled 2026-07-22: NO lane work exists —
+   `feature/media-render-capability` has zero unique commits (the old "wt-media
+   (unmerged)" note was wrong)._ `media-render-goal-prompt.md`
 4. **S3/MinIO file-artifact bytes** — protocol decided (pending-row + upload +
-   verified commit + TTL janitor); LOW PRIORITY (live uses local). `wt-attach`
-   (unmerged). `artifact-store-s3-goal-prompt.md`
+   verified commit + TTL janitor); LOW PRIORITY (live uses local). _Reconciled
+   2026-07-22: `feature/s3-file-artifacts` holds ONE stage-1 commit marked
+   `[HOLD] ... commit-first ... NOT for merge` — it predates the decided
+   pending-row protocol and needs rework to it, not a straight merge._
+   `artifact-store-s3-goal-prompt.md`
+5. **OTel permission/decision spans** — goal-prompt committed
+   (`otel-permission-spans-goal-prompt.md`); reconciled 2026-07-22: NOT
+   started (the `feature/otel-permission-spans` branch has no unique work;
+   its tmp worktree was wiped — nothing lost). OTel shipped so far: base
+   #220 · dev-observability #209 · tool-execution spans #262.
 
 ## Then — medium, scoped
 
@@ -156,17 +171,13 @@ phase from its git log, don't trust a phase number written here.**
 7. **`desired-state-current-export` rewrite** — schema-driven merge, fail-loud. (Group C)
 8. **Remaining Fable arch cycles** (#2–#8). `fable-architecture-review-2026-07-16.md`
 
-## Parked — goal-prompt on disk, unscoped (verify before scheduling)
+## Parked — goal-prompt on disk, unscoped (verified 2026-07-22)
 
-Goals with a doc in this folder but no merged PR and no active lane. Status to
-confirm before promoting into the board:
-`cross-provider-conversation-context-goal-prompt.md` ·
-`generative-ui-goal-prompt.md` ·
-`durable-async-tool-burst-queue-goal-prompt.md` ·
-`event-driven-waits-agent-subagent-goal-prompt.md` ·
-`non-blocking-session-compaction-goal-prompt.md` ·
-`multi-agent-provider-onboarding-goal-prompt.md` ·
-`deepagents-cache-savings-goal-prompt.md`.
+Verified against merged PRs 2026-07-22 — five of the seven former entries had
+in fact SHIPPED (#185/#186/#192/#193; moved to Shipped below). Still parked:
+- `multi-agent-provider-onboarding-goal-prompt.md` — no merged PR; salvage
+  candidate lane `codex/multi-agent-provider-onboarding` (6 commits, unmerged).
+- `deepagents-cache-savings-goal-prompt.md` — no merged PR, no lane.
 
 Unscoped fixes with NO goal doc yet (symptom + proposed counter only — need a
 goal-prompt + plan-validation before scheduling):
@@ -177,7 +188,8 @@ throws WARN-swallowed; add a failure counter so silent audit loss can't hide.
 
 - **KB / document ingestion per workspace.** `platform-roadmap-2026-07.md` (#1)
 - **Tenant isolation hardening** — hostile-tenant review; verified via E2E matrix. (#3)
-- **E2E persona/topology harness** — goal-prompt drafted in scratchpad.
+- **E2E persona/topology harness** — the scratchpad draft was lost; re-draft
+  deferred as D-0002 (trigger: E2E matrix reconciliation).
 - **Connector strategy execution** — direct OAuth, `providers.yaml`, org-owned
   GitHub+Google v1 _(design doc in `~/.gstack` projects dir)_.
 
@@ -202,6 +214,10 @@ capability-authoring lane). Do not maintain a worktree list here.
 ## Shipped (reference only — do not re-execute)
 
 - Observer S1 foundations — #264.
+- Cross-provider conversation context — **#185**. `cross-provider-conversation-context-goal-prompt.md` _(was mislabeled Parked until the 2026-07-22 reconciliation)_
+- Generative UI / rich interaction rendering — **#186**. `generative-ui-goal-prompt.md` _(v1; was mislabeled Parked)_
+- Event-driven waits + durable async burst queue — **#192** (one PR, two goal docs). `event-driven-waits-agent-subagent-goal-prompt.md`, `durable-async-tool-burst-queue-goal-prompt.md` _(were mislabeled Parked)_
+- Non-blocking session compaction — **#193**. `non-blocking-session-compaction-goal-prompt.md` _(was mislabeled Parked)_
 - OTel trace enrichment (span taxonomy beyond base) — **#262** _(verify full
   agent/LLM/tool/MCP taxonomy scope before reopening)_. `otel-llm-observability-goal-prompt.md`
 - Agent output style — **#243**. `agent-output-style-goal-prompt.md`

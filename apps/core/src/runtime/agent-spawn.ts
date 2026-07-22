@@ -40,14 +40,12 @@ import { executeRunnerProcess } from './agent-spawn-process.js';
 import { applyAgentEgressNoProxyEnv } from '../shared/no-proxy.js';
 import { buildToolNetworkEnv } from '../shared/tool-network-env.js';
 import { closeEgressGateway, ensureEgressGateway } from './egress-gateway.js';
-import { resolveConversationBrowserProfile } from '../shared/browser-profile-scope.js';
 import {
   AgentInput,
   AgentOutput,
   RunAgentOptions,
 } from './agent-spawn-types.js';
 import { selectedMemoryIpcActionsFromToolRules } from '../shared/memory-ipc-actions.js';
-import { isCanonicalBrowserCapabilityRule } from '../shared/agent-tool-references.js';
 import { agentIdForFolder } from '../domain/agent/agent-folder-id.js';
 import { conversationBoundAgentIdsForRoute } from '../application/core-tools/callable-agent-tools.js';
 import { resolveMcpCredentialEnvForAgent } from '../application/capability-secrets/mcp-secret-projection.js';
@@ -65,15 +63,10 @@ import {
   writeProtectedFilesystemEnv,
 } from './agent-spawn-runtime-policy.js';
 import {
-  resolveAgentSpawnLogContext,
-  stripIncompleteRunLeaseIdentity,
-} from './agent-spawn-identity.js';
-import {
   getConfiguredModelProvidersForApp,
   getRuntimeFileArtifactStore,
   getRuntimeStorage,
 } from '../adapters/storage/postgres/runtime-store.js';
-import { effectiveYoloModeSettings } from '../shared/yolo-mode-policy.js';
 import { formatGeneratedRuntimePathPermissionError } from './generated-runtime-path-error.js';
 import { writeRunnerMcpConfigFile } from './agent-spawn-mcp-config.js';
 import { withStdioMcpEgressEnv } from './agent-spawn-mcp-egress-env.js';
@@ -104,27 +97,25 @@ import {
   prepareWorkerAuthorityProjection,
 } from './agent-spawn-preparation.js';
 import { resolveSpawnExecutionAdapter } from './agent-spawn-execution-adapter.js';
+import {
+  resolveAgentSpawnLogContext,
+  stripIncompleteRunLeaseIdentity,
+} from './agent-spawn-identity.js';
 import { createRunnerTempDirectories } from './agent-spawn-temp-directories.js';
+import {
+  agentPersonasById,
+  projectSpawnRunnerInput,
+} from './agent-spawn-input-projection.js';
+import { createSpawnAgent } from './agent-spawn-entry.js';
 export { writeGroupsSnapshot } from './agent-spawn-snapshots.js';
 export type { AvailableGroup } from './agent-spawn-types.js';
 export type { AgentInput, AgentOutput } from './agent-spawn-types.js';
-export async function spawnAgent(
-  group: ConversationRoute,
-  input: AgentInput,
-  onProcess: (proc: ChildProcess, runHandle: string) => void,
-  onOutput: ((output: AgentOutput) => Promise<void>) | undefined,
-  options: RunAgentOptions,
-): Promise<AgentOutput> {
-  const spawnInput = stripIncompleteRunLeaseIdentity(input);
-  return runSpawnWithLogContext(
-    {
-      ...resolveAgentSpawnLogContext(group, input, options?.correlationRunId),
-      onOutput,
-    },
-    (turnTracker) =>
-      spawnAgentWithContext(group, spawnInput, onProcess, options, turnTracker),
-  );
-}
+export const spawnAgent = createSpawnAgent({
+  runWithLogContext: runSpawnWithLogContext,
+  resolveLogContext: resolveAgentSpawnLogContext,
+  stripIncompleteRunLeaseIdentity,
+  spawnWithContext: spawnAgentWithContext,
+});
 async function spawnAgentWithContext(
   group: ConversationRoute,
   input: AgentInput,
@@ -195,12 +186,7 @@ async function spawnAgentWithContext(
   }
   const agentIdentifier = group.folder.toLowerCase().replace(/_/g, '-');
   const credentials = host.getHostRuntimeCredentialEnv;
-  const personasByAgentId = Object.fromEntries(
-    Object.entries(runtimeSettings.agents ?? {}).map(([folder, agent]) => [
-      String(agentIdForFolder(folder)),
-      agent.persona,
-    ]),
-  );
+  const personasByAgentId = agentPersonasById(runtimeSettings.agents);
   const { accessPreset, hideAuthorityTools, callableAgentManifest } =
     await prepareWorkerAuthorityProjection({
       agentInput: input,
@@ -235,28 +221,16 @@ async function spawnAgentWithContext(
     fileArtifactStore: () => getRuntimeFileArtifactStore(),
     measureAsync: (name, fn) => hostStartup.measureAsync(name, fn),
   });
-  const browserProfileName = resolveConversationBrowserProfile({
-    agentId: group.folder,
-    workspaceKey: group.folder,
-    conversationId: input.chatJid,
-  });
-  const trustedToolPolicyRules = input.toolPolicyRules;
-  const browserIpcEnabled = (trustedToolPolicyRules ?? []).some(
-    isCanonicalBrowserCapabilityRule,
-  );
-  // hideAuthorityTools comes from prepareWorkerAuthorityProjection above
-  // (same three conditions).
+  const { runnerInput, browserIpcEnabled, trustedToolPolicyRules } =
+    projectSpawnRunnerInput({
+      agentInput: input,
+      workspaceFolder: group.folder,
+      callableAgentManifest,
+      hideAuthorityTools,
+      compiledSystemPrompt,
+      permissions: runtimeSettings.permissions,
+    });
   const egressSettings = runtimeSettings.permissions.egress;
-  const runnerInput: RunnerAgentInput = {
-    ...input,
-    allowedTools: trustedToolPolicyRules,
-    callableAgentManifest,
-    browserProfileName,
-    hideAuthorityTools,
-    compiledSystemPrompt,
-    yoloMode: effectiveYoloModeSettings(runtimeSettings.permissions.yoloMode),
-    egressDenylist: egressSettings.denylist,
-  };
   const hostRuntime = host.prepareHostRuntimeContext(group);
   const adapterResolution = resolveSpawnExecutionAdapter(
     resolvedModel.value.executionProviderId,
@@ -618,7 +592,7 @@ async function spawnAgentWithContext(
       brokerProfile: projectedCredentials.brokerProfile,
       brokerApplied: projectedCredentials.brokerApplied,
       mcpServerNames: allMcpCapabilities.map((capability) => capability.name),
-      browserProfileName,
+      browserProfileName: runnerInput.browserProfileName!,
       preparedRuntimeDetails: preparedExecution.runtimeDetails,
       effectiveModel,
       effectiveModelSource,

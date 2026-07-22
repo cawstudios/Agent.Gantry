@@ -52,6 +52,7 @@ import {
   renderObservabilitySettingsYaml,
 } from './runtime-settings-optional-blocks-renderer.js';
 import { resolveConfiguredAgentRuntime } from './runtime-settings-agent-runtime.js';
+import { renderProvidersYaml } from './runtime-settings-provider-renderer.js';
 const SYSTEM_DEFAULT_MODEL_ALIAS = 'opus';
 
 function renderDefaultsYaml(
@@ -672,19 +673,6 @@ function renderRuntimeProcessYaml(
     lines.push(`  deployment_mode: ${quoteYamlString(runtime.deploymentMode)}`);
   }
   lines.push(...renderArtifactStoreYamlLines(runtime.artifactStore), '');
-}
-
-function renderProvidersYaml(lines: string[], settings: RuntimeSettings): void {
-  const enabledProviders = Object.entries(settings.providers)
-    .filter(([, provider]) => provider.enabled)
-    .sort(([a], [b]) => a.localeCompare(b));
-  if (enabledProviders.length === 0) return;
-
-  lines.push('providers:');
-  for (const [providerId] of enabledProviders) {
-    lines.push(`  ${quoteYamlKey(providerId)}:`, '    enabled: true');
-  }
-  lines.push('');
 }
 
 export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {

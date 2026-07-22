@@ -36,6 +36,7 @@ import { IpcWakeupScopeTracker } from './ipc-wakeup-scope.js';
 import { processRichInteractionRequestDirectory } from './ipc-rich-interaction-directory.js';
 import { resolveRunnerIpcRoute } from './ipc-route-authorization.js';
 import { incrementOperationalError } from '../shared/operational-error-counters.js';
+import { releaseIpcRootLock } from './ipc-root-lock-release.js';
 export type { IpcDeps } from './ipc-domain-types.js';
 export { processTaskIpc } from '../jobs/ipc-handler.js';
 export { validateIpcAuthRequest } from './ipc-auth-validation.js';
@@ -51,19 +52,6 @@ let activeRunnerControlPort: FilesystemRunnerControlPort | undefined;
 let activeRequestWakeups: IpcRequestWakeupRegistry | undefined;
 const MAX_IN_FLIGHT_INTERACTION_IPC = 100;
 const inFlightInteractionIpc = new Set<string>();
-
-function releaseIpcRootLock(): void {
-  if (!ipcRootLockPath) return;
-  try {
-    activeRunnerControlPort?.releaseRootLock(ipcRootLockPath);
-  } catch (err) {
-    // prettier-ignore
-    logger.warn({ err, lockPath: ipcRootLockPath }, 'Failed to release IPC lock');
-  } finally {
-    ipcRootLockPath = undefined;
-    activeRunnerControlPort = undefined;
-  }
-}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -829,6 +817,14 @@ export function stopIpcWatcher(): void {
   clearConsumedIpcRequestIds({ durable: false });
   activeRequestWakeups?.stop();
   activeRequestWakeups = undefined;
-  releaseIpcRootLock();
+  const releasedRootLock = releaseIpcRootLock({
+    lockPath: ipcRootLockPath,
+    runnerControlPort: activeRunnerControlPort,
+    warn: logger.warn.bind(logger),
+  });
+  if (releasedRootLock) {
+    ipcRootLockPath = undefined;
+    activeRunnerControlPort = undefined;
+  }
   logger.info('IPC watcher stopped');
 }

@@ -16,7 +16,7 @@
 // (routes/models.ts; preflight requires the seeded credential), confirmed via
 // GET /v1/models/defaults (chat.effectiveAlias + provider.id).
 //
-// Gating: requires E2E_ANTHROPIC_API_KEY (protected CI secret — absent on fork
+// Gating: requires E2E_MODEL_API_KEY (protected CI secret — absent on fork
 // PRs, so the suite self-skips) AND GANTRY_TEST_DATABASE_URL (throwaway admin
 // Postgres, same as the hermetic lane).
 
@@ -27,6 +27,7 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { requireRealModelCredential } from '../fixtures/model-credential-fixture.js';
 import { AgentE2EApiClient, type SessionEvent } from '../harness/api-client.js';
 import {
   redactText,
@@ -38,11 +39,13 @@ import {
   type RuntimeHarness,
 } from '../harness/runtime-harness.js';
 
-const apiKey = process.env.E2E_ANTHROPIC_API_KEY?.trim();
+const modelCredential = requireRealModelCredential();
+const apiKey =
+  'credential' in modelCredential ? modelCredential.credential : undefined;
 const hasDb = Boolean(process.env.GANTRY_TEST_DATABASE_URL?.trim());
-if (!apiKey) {
+if ('skipReason' in modelCredential) {
   // stderr directly: vitest swallows module-level console output.
-  process.stderr.write('haiku-turn skipped: E2E_ANTHROPIC_API_KEY not set\n');
+  process.stderr.write(`haiku-turn skipped: ${modelCredential.skipReason}\n`);
 }
 const maybeDescribe = apiKey && hasDb ? describe : describe.skip;
 

@@ -1,4 +1,5 @@
 # Permission floor + command-class promotion — goal prompt
+<!-- doc-references: frozen 2026-07-22 (decision 0036) -->
 
 Status: SCOPED via grill (2026-07-20). Next lane after the incident closeout.
 Stay-direct posture confirmed; this lane makes the live default safer AND kills

@@ -67,8 +67,8 @@ async function recallCount(
   return rows.length;
 }
 
-// Matrix §8 deterministic seam fallback. E2E_ANTHROPIC_API_KEY is not
-// available in this environment, so a reliable real-model gate cannot run.
+// Matrix §8 deterministic seam fallback: the real-model credential is unavailable,
+// so a reliable real-model gate cannot run.
 // Instead, a real persisted session transcript enters the production boundary
 // collector through a scripted MemoryLlmClient, structured evidence is promoted
 // by the real dreaming service, and later scripted turns use the production

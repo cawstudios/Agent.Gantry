@@ -7,8 +7,16 @@ routes to it.
 output.** A dev should never need to type a `python3 .agents/scripts/...`
 command themselves. Prompts are the interface, recorder commands are the
 contract — every artifact you record must match its `.agents/schemas/` file,
-including `generated_by`. The one exception is human-only actions
-(`decision accept`): relay the command, never run it.
+including `generated_by`. Human-only actions (`decision accept`) need an
+explicit human statement — but the human need not type the command: a clear
+in-chat confirmation authorizes running it with `--by "<their name>"`.
+
+**Between gates the loop is autonomous (conduct §7).** A clean local review
+or a passing gate IS the permission to continue — never stop to ask
+"proceed?" after a review, between stages, or across phase transitions.
+Report progress and keep driving; stop only for an open signal, a gate
+refusal you cannot resolve within the approved plan, a human-only act, or
+scope the plan does not cover.
 
 `./forge <cmd>` (from repo root) is shorthand for
 `python3 .agents/scripts/forge.py <cmd>` — either form works everywhere below.
@@ -64,7 +72,7 @@ or route:
 | what decisions are in force | `./forge decision list --active` — the live corpus (superseded records are history) |
 | compact the assumptions ledger | `./forge assumptions archive` — resolved rows from finished tasks move to the archive |
 | is the repo getting heavy | `python3 .agents/scripts/check_repo_budget.py` (CI runs it too) |
-| human confirms a decision | THE HUMAN runs `./forge decision accept <slug> --by "Name"` — never you; relay the command and wait |
+| human confirms a decision | acceptance is the HUMAN's call, not their keystroke: on an explicit in-chat confirmation ("accept <slug>", "approved"), run `./forge decision accept <slug> --by "<their name>"` for them; without that statement, relay and wait |
 | made an assumption while implementing | `python3 .agents/scripts/forge.py plan assume "<one sentence>"` — lands on the active plan AND as an open row in plans/assumptions.md |
 | worker hit a contradiction / is confused / blocked / scope shifted | `./forge signal raise --kind <k> --by <agent> -m "..."` then PAUSE — the orchestrator monitors `.factory/signals.jsonl`, resolves, resumes |
 | a worker signal is open (orchestrator) | `./forge signal list --open` → `./forge signal resolve <id> --notes "<answer>"` → resume the rescue. Open signals block pr_ready |
@@ -94,5 +102,7 @@ or route:
   recorders refuse artifacts from unpinned generators.
 - Review is ONE autoreview run — never inline, never nested reviewers.
 - Never set a decision to `accepted`, never flip `client_signoff`, never
-  activate a proposed skill — humans do those.
+  activate a proposed skill without an explicit human confirmation — the
+  human decides; a clear in-chat statement lets you run the recording
+  command with their name.
 - If `check_dual_runtime.py` fails, fix the violation it names before anything else.

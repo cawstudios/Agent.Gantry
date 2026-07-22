@@ -16,6 +16,10 @@ import type {
 } from '../../../domain/models/credentials.js';
 import type { ModelCredentialProvider } from '../../../domain/model-credentials/model-credentials.js';
 import {
+  projectGatewayTokenEnv,
+  projectedModelCredentialEnvKeys,
+} from './gantry-model-gateway-sdk-projection.js';
+import {
   applyRateCap,
   GatewayRateLimiter,
   type GatewayProviderRateLimits,
@@ -24,7 +28,6 @@ import {
   getModelProviderByGatewayPath,
   getModelProviderDefinition,
   getDefaultModelRouteProvider,
-  listExecutableModelProviders,
   normalizeModelProviderId,
   resolveModelCredentialMode,
   type ModelProviderDefinition,
@@ -699,32 +702,4 @@ function requireBindingAppId(input: AgentCredentialBrokerInput): AppId {
     throw new Error('Gantry Model Gateway credential binding requires appId.');
   }
   return input.binding.appId;
-}
-function projectGatewayTokenEnv(input: {
-  provider: ModelProviderDefinition;
-  baseUrl: string;
-  token: string;
-}): Record<string, string> {
-  const projection = input.provider.gateway.sdkProjection;
-  return {
-    [projection.baseUrlEnv]: input.baseUrl,
-    [projection.tokenEnv]: input.token,
-    ...(projection.additionalTokenEnv
-      ? { [projection.additionalTokenEnv]: input.token }
-      : {}),
-  };
-}
-function projectedModelCredentialEnvKeys(): string[] {
-  return [
-    ...new Set([
-      ...listExecutableModelProviders().flatMap((provider) => {
-        const projection = provider.gateway.sdkProjection;
-        return [
-          projection.baseUrlEnv,
-          projection.tokenEnv,
-          projection.additionalTokenEnv,
-        ].filter((key): key is string => Boolean(key));
-      }),
-    ]),
-  ].sort();
 }

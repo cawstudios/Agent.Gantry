@@ -190,7 +190,8 @@ def cmd_import(args: argparse.Namespace) -> None:
         fail(
             "the roadmap import is the PM->EM handoff and requires PM approval of "
             "the epics first: `./forge decision new epics-approved` (list the epics "
-            "in the record), then A HUMAN runs "
+            "in the record), then on the PM's explicit confirmation (in chat or "
+            "typed themselves) run "
             '`./forge decision accept epics-approved --by "<PM name>"`.'
         )
     try:

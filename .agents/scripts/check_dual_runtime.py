@@ -211,7 +211,8 @@ def check_decision_records(root: Path) -> None:
             if not fields.get("confirmed_by"):
                 violation(
                     f"{record.relative_to(root)} is accepted but confirmed_by is empty. "
-                    "A human must be named; agents must not self-confirm decisions."
+                    "A human must be named; agents must not self-confirm decisions "
+                    "(an explicit human confirmation in chat authorizes recording)."
                 )
             else:
                 try:

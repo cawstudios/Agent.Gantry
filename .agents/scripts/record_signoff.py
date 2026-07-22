@@ -56,7 +56,8 @@ def main() -> int:
     if not fields.get("confirmed_by"):
         print(
             f"VIOLATION: {record.relative_to(root)} has empty confirmed_by.\n"
-            "  Record WHO confirmed (a human name); agents must not self-confirm."
+            "  Record WHO confirmed (a human name); agents must not self-confirm —"
+            "  an explicit human confirmation in chat authorizes recording it."
         )
         return 1
     state = load_json(run_state_path(root), default={})

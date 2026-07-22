@@ -35,6 +35,10 @@ import {
 } from './skill-install-assets.js';
 import { parseSkillPackageAssets } from './skill-package-ipc.js';
 import { claimPatternCandidateForSkillProposal } from './pattern-candidate-skill-proposal.js';
+import {
+  redactCommandOutput,
+  sanitizedStringList,
+} from './skill-install-command-sanitization.js';
 const pendingSkillInstallCommandReviews = new Set<string>();
 const pendingSkillPackageReviews = new Set<string>();
 
@@ -748,22 +752,4 @@ async function installSkillFromApprovedCommand(input: {
   } finally {
     fs.rmSync(stagingDir, { recursive: true, force: true });
   }
-}
-
-function redactCommandOutput(value: string): string {
-  return value.replace(
-    /[A-Za-z0-9_=-]*(TOKEN|SECRET|PASSWORD|API_KEY)[A-Za-z0-9_=-]*/gi,
-    '<redacted>',
-  );
-}
-
-function sanitizedStringList(values: unknown[]): string[] {
-  return [
-    ...new Set(
-      values
-        .slice(0, 50)
-        .map((item) => toTrimmedString(item, { maxLen: 512 }))
-        .filter((item): item is string => Boolean(item)),
-    ),
-  ];
 }

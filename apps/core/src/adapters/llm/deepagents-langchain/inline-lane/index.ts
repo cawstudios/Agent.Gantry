@@ -55,6 +55,7 @@ import {
 } from '../runner/stream-normalizer.js';
 import * as memory from './gantry-memory-middleware.js';
 import { createInlineSkillsMiddleware } from './skills.js';
+import { abortedOutput, structuredOutputError } from './inline-lane-output.js';
 
 const CHECKPOINT_POOL_MAX_CONNECTIONS = 1;
 const DENY_ALL_FILESYSTEM: FilesystemPermission[] = [
@@ -699,26 +700,4 @@ function responseFormatForSchema(
   const normalized = { ...schema, name, title: name };
   if (structuredOutput === true) return ProviderStrategy.fromSchema(normalized);
   return ToolStrategy.fromSchema(normalized);
-}
-function structuredOutputError(
-  error: unknown,
-  newSessionId: string,
-): RunnerOutputFrame & { structuredOutputValidationFailure: true } {
-  const detail = error instanceof Error ? ` ${error.message}` : '';
-  return {
-    status: 'error',
-    result: null,
-    error: `Inline structured output failed schema validation.${detail}`,
-    structuredOutputValidationFailure: true,
-    newSessionId,
-  };
-}
-
-function abortedOutput(newSessionId?: string): RunnerOutputFrame {
-  return {
-    status: 'error',
-    result: null,
-    error: 'Inline DeepAgents lane aborted.',
-    ...(newSessionId ? { newSessionId } : {}),
-  };
 }
