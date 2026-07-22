@@ -186,7 +186,7 @@ describe('control route port composition', () => {
       appId: 'default',
       providerId: 'chat_provider',
       providerAccountId: 'account_1',
-      externalConversationId: 'room-1',
+      externalConversationId: 'cp:room-1',
     });
   });
 });
