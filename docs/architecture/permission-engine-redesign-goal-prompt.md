@@ -1,178 +1,188 @@
 # Permission engine redesign — empowered classifier + safety rails — goal prompt
 
-Status: GRILL + DOUBLE-CRITIQUE HARDENED 2026-07-22 (Fable + Codex, both agree).
-Supersedes `permission-floor-and-promotion-goal-prompt.md`, folds
-`permission-simplification-goal-prompt.md`. RCA: `git-permission-rca.md`.
+Status: GRILL + DOUBLE-CRITIQUE + PLAN-VALIDATION HARDENED 2026-07-22 (Fable + Codex
+critiques, then a Codex plan-validation whose 6 gaps are folded below). Supersedes
+`permission-floor-and-promotion-goal-prompt.md`, folds `permission-simplification-goal-prompt.md`.
+RCA: session scratchpad `git-permission-rca.md` (NOT in-tree — its incident claims
+below are ASSUMPTIONS pending runtime re-verification, not repo-provable).
 Decision-ENGINE redesign, NOT a sandbox change.
 
-## Problem (confirmed by both critiques)
-User clones/git-ops/edits and is prompted constantly. AUTHORIZATION, not sandbox:
-the `auto` classifier is UNRELIABLE — uncached (re-judges every call,
-`permission-classifier.ts:191`), nondeterministic, and correctly fails to `ask`.
-Telemetry is blind for `RunCommand` (`ipc-permission-telemetry.ts:59`) so the
-incident was unanswerable. Codex confirms: **the only proven bug is repeated
-authorization prompting — NOT a sandbox denial** (all 5 incident calls resumed;
-no denial event). Direct mode already on; the SDK sandbox stays fail-closed and
-independent (`filesystem-sandbox.ts:68`) — we do NOT touch it.
+## Problem
+The `auto` classifier is UNRELIABLE — uncached (re-judges every call,
+`permission-classifier.ts:191`), nondeterministic, correctly fails to `ask`. Rules
+need exact `RunCommand(...)` match; git is excluded from the read-only allowlist.
+Telemetry is blind for `RunCommand` (`ipc-permission-telemetry.ts:59`). **Assumption
+(RCA, re-verify at runtime):** the incident was authorization-prompting, not a
+sandbox denial (all 5 calls resumed; no denial event; direct mode on). The SDK
+sandbox stays fail-closed + independent (`filesystem-sandbox.ts:68`) — untouched.
 
-## Core decision (user): EMPOWER the classifier; rules are ask-floors. But the
-architecture must be a proper host-side coordinator, not a seam insertion.
+## Core: EMPOWER the classifier (reliable, cached, guarded); rails are ask-floors.
 
-## Architecture (both critiques — this is the load-bearing change)
-1. **Deterministic rails stay SYNC + pure.** `ToolExecutionPolicyService.evaluate`
-   is a synchronous, dependency-free pre-filter that runs in the runner subprocess
-   and is called 2–3× non-terminally (`tool-execution-policy-service.ts:177`). It
-   is NOT the decision seam. Keep it pure rule/precheck. The destructive catalog +
-   egress rail + guards live alongside it as sync ask-floors.
-2. **NEW async host-side DECISION COORDINATOR** = the single authority for
-   cache → classifier → human, reached by every lane via authenticated IPC (this
-   is where `permission-classifier.ts` already lives, host-side, with LLM/DB/
-   telemetry). The analyzer is NOT embedded in `evaluate`.
-3. **HARD ORDERING — locked/fixed-image restrictions + hard-denies PRECEDE any
-   cache/classifier allow.** Today `tool-permission-gate.ts:520/526` returns an
-   `allow` BEFORE the locked-preset check — safe only because `allow` means a
-   narrow reviewed rule. A broad classifier-allow there would outrank locked mode.
-   The coordinator must resolve hard-deny/locked FIRST, then cache, then classifier.
+## Architecture
+1. **ONE host-side `coordinatePermissionDecision(input)`** — the single authority for
+   rails → cache → classifier → human. NOT embedded in `evaluate`.
+   - **Worker lanes** (SDK, DeepAgents shell/MCP/facade) reach it via existing
+     authenticated IPC: `resolvePermissionIpcDecision` (`ipc-permission-classifier-decision.ts`)
+     becomes the worker IPC ADAPTER that calls the coordinator.
+   - **Inline lanes** (`gateCoreTool` `registry.ts:451/490`; `authorizeThirdPartyMcpTool`
+     `inline-agent-loop-tools.ts:328/392` — shared by DeepAgents inline AND Anthropic
+     SDK inline `inline-lane/index.ts:190`) call the coordinator DIRECTLY (in-host,
+     no filesystem IPC — IPC would add no auth value).
+2. **Deterministic rails stay SYNC + pure** (`ToolExecutionPolicyService.evaluate` +
+   catalog + egress + guards). They run first, both as pre-filters and re-run inside
+   the coordinator on every cache hit.
+3. **Authority precedence (HARD): hard-deny → locked-preset → fixed-image restriction
+   → reviewed selected-rule allow → coordinator (cache → classifier → human).** Today
+   an `allow` returns BEFORE the locked check in every gate
+   (`tool-permission-gate.ts:509/520/526`, DeepAgents `gantry-shell-tool.ts:191`,
+   `third-party-mcp-gate.ts:87`, `gantry-facade-tools.ts:121`, inline `registry.ts:490`,
+   `inline-agent-loop-tools.ts:354`). Reorder so NO coordinator allow can outrank a
+   lock. **Fixed-image authority** (`hideAuthorityTools` = configured lock + per-run
+   flag + `GANTRY_NO_PERMISSION_TOOLS`, `agent-spawn-preparation.ts:82`) is NOT in
+   `resolveAgentLockStatus` (reads only `accessPreset`, `profiles.ts:79`) — add an
+   authoritative per-run restriction to the coordinator input, validated host-side.
+   **SDK `allowedTools`** is projected straight to the provider (`query-loop.ts:389`)
+   — v1 REMOVES that silent auto-approval so every tool crosses the coordinator (or
+   prove equivalent hard rails run first; "handle later" is insufficient).
+   **Reviewed selected-rule allows** remain usable (incl. under locked mode per
+   existing semantics): a rule hit is a deterministic standing authority the
+   coordinator honors — it is NOT a classifier-cache entry (see memory kinds).
 
-## Decision flow (at the coordinator, all lanes route here on rule-miss)
+## Decision flow (inside coordinatePermissionDecision)
 ```
-op → parse (bash-command-parser). PARSE-FAIL / unsupported (env-assign, meta-exec,
-      shell-expansion, >4096 chars) / interpreter-with-string leaf
-      (bash -c, sh -c, -e, node -e, python -c, xargs, find -exec/-delete) → ASK. Never cache, never classifier.
-    → hard-deny / locked / fixed-image restriction? → DENY (precedes everything)
-    → DETERMINISTIC RAILS (ask-floors, re-run on EVERY cache hit):
-        destructive catalog · EGRESS rail · secrets/protected · out-of-trusted-root · privilege → ASK/DENY
-    → read-only fast-path (existing proven gate, unchanged) → ALLOW
-    → EXACT effect-cache hit? → reuse verdict (rails already re-ran above)
-    → EMPOWERED CLASSIFIER (host, cache-miss only) → safe: ALLOW · risk: ASK
-        classifier error/timeout → FAIL-CLOSED to ASK (one bounded retry). NEVER allow-on-error.
-    → cache the verdict by versioned effect key. every ASK → remembered (scoped, below).
+→ EXACT decision input (see effect key) — if input was sanitized/truncated/unavailable → ASK
+→ parse (bash-command-parser). PARSE-FAIL / unsupported (env-assign, meta-exec, shell-
+   expansion, >4096) / interpreter-with-string leaf (bash -c, sh -c, -e, node -e,
+   python -c, xargs, find -exec/-delete) → ASK. Never cache, never classifier.
+→ hard-deny / locked / fixed-image → DENY   (precede everything)
+→ reviewed selected-rule allow → ALLOW       (standing rule authority)
+→ DETERMINISTIC RAILS (ask-floors, re-run every hit): destructive catalog · EGRESS
+   rail · secrets/protected · out-of-trusted-root · privilege → ASK/DENY
+→ read-only fast-path (existing gate unchanged) → ALLOW
+→ EXACT effect-cache hit (classifier-verdict kind only) → reuse
+→ EMPOWERED CLASSIFIER (cache-miss) → safe: ALLOW · risk: ASK. Error/timeout →
+   FAIL-CLOSED to ASK (one bounded retry). NEVER allow-on-error.
+→ cache CLASSIFIER verdicts only, by versioned effect key. every ASK → remembered per its kind.
 ```
 
-## The hardening LOCKS (both critiques — non-negotiable)
-1. **Fail-closed to ASK on any classifier failure** (unconfigured/timeout/abort/
-   parse/validation). Current code already does this (`permission-classifier.ts:167/215/597`);
-   preserve it. Auto-allow-on-error = availability→authorization bypass. Allow
-   WITHOUT the LLM only on a POSITIVE deterministic proof (read-only fast path).
-2. **Versioned, collision-resistant EFFECT key — not raw argv, not generalized
-   op-shape.** `bash-command-parser.ts` alone is insufficient (strips quote context
-   — `chmod 0644 '*.pem'` == `*.pem`; flattens `&&`/`||`/pipes/subshells; only
-   generalizes URLs/hex-refs). Define a VERSIONED canonical effect schema
-   preserving: control flow/grouping, quoting/glob semantics, cwd/repository
-   identity, resolved targets (against real parents; symlink-aware), network host,
-   executable identity, risk-relevant flags. Unsupported parse → ASK. Rails re-run
-   before every hit. Do NOT abstract mutation/destructive targets to gain hits.
-3. **EGRESS rail** (new sync guard). Destruction/secret/scope/privilege miss quiet
-   exfiltration: `curl -d/-T/-F @file host`, `wget --post-file`, `scp`/`rsync` to
-   remote, `git push` to non-remembered remote → ASK once, keyed on destination
-   host. Silent-allow scoped to read-only OR write-in-trusted-root-no-egress.
-4. **Coordinator, not `evaluate`; hard-deny/locked precede allow** (Architecture #2/#3).
-5. **Jobs inherit the agent's STANDING permission set (one allow list per agent).**
-   A job runs AS its agent; no separate mode-scoping. The once-vs-future choice IS
-   the job-inheritance control: **"Allow for future" = standing** (owner-authored,
-   inherited by the agent's jobs — trusted roots + safe verdicts are all standing,
-   so jobs just work); **"Allow once" = per-interaction** (a job that hits it
-   PAUSES — it cannot inherit a one-time grant). Standing grants require **owner
-   authority** — a non-owner (group member / prompt-injected message) cannot mint a
-   standing grant that jobs then inherit (cross-conversation propagation guard,
-   `channel-prompts.ts:396`). Key memory by app + stable agent ID + decision kind +
-   **approving principal** + analyzer/catalog **version** + effect hash. Trusted
-   roots stored SEPARATELY from classifier verdicts; destructive/privileged
-   approvals never become a generic classifier-cache allow.
+## Effect key (versioned, collision-resistant) — the hard input problem
+- **Host discards the exact input before the decision**: `raw.toolInput` is
+  redacted/truncated (500-char cap) at `ipc-parsing.ts:403` /
+  `ipc-tool-input-sanitization.ts`. Distinct effects collapse before hashing.
+  → the coordinator MUST receive an EXACT, non-persisted decision-input (or a
+  host-built canonical effect) generated BEFORE telemetry/prompt sanitization; any
+  sanitized/altered/missing input → ASK.
+- **Canonical effect schema (versioned)** preserving: control-flow/grouping,
+  quoting/glob semantics, authoritative effective cwd + repo/worktree identity,
+  executable identity under the runner's real PATH, resolved symlink-aware existing
+  & prospective targets, destination host for implicit ops (`git push origin`),
+  normalized risk flags. `PermissionApprovalRequest` (`domain/types.ts:124`) carries
+  none of these — new fields to plumb. Document the cwd invariant: SDK cwd = fixed
+  workspace group dir (`query-loop.ts:368`); DeepAgents shell has separate
+  `config.cwd` (`gantry-shell-tool.ts:255`).
+- `bash-command-parser.ts` alone is insufficient (strips quotes `:289`, flattens
+  `&&`/pipes `:348`, `argv.join(' ')` `:477`). Do NOT abstract targets to gain hits.
 
-   **Job permission-ask routing.** A job that reaches ASK (a non-standing op) does
-   NOT stall and does NOT silently run — it PAUSES and surfaces the pending action
-   BOTH (a) durably in the job's status/metadata (job list: "paused — needs
-   approval: X"; never lost) AND (b) to the OWNER via the owner's conversation with
-   the agent. The approver is the OWNER (the only one who can mint a standing grant)
-   — this channel is DISTINCT from the job's delivery route (which may be a group
-   channel — wrong approver, and would leak the pending action). A job with no
-   delivery route still asks the owner. On owner approval → standing (or
-   once-for-this-run) → the job resumes.
-
-## Deterministic rails (detail)
-- **Destructive catalog** = a false-allow REDUCER for known scary shapes, NOT the
-  guarantee (guarantee = parse-fail/interpreter→ASK + scope/egress-bounded silent-
-  allow). Does not exist yet (the YOLO denylist is small/optional — not this).
-  Shapes: `rm -r/-f`, destructive `--force`/`-f`, `git reset --hard`/`push --force`/
-  `clean -fdx`/`checkout -- .`/`branch -D`/`stash clear`, `drop`, `truncate`, `dd`,
-  `mkfs`, overwrite `>` of existing, `sed -i`, `chmod/chown -R`, `rsync --delete`,
-  `find -delete`, `tee` over existing. Match → ASK once (re-evaluated every time).
-- **Read-only fast-path** = absorb the EXISTING gate UNCHANGED (exact executable,
-  single leaf, no expansion). Do NOT add git reads — config-injected pagers
-  (`git -c core.pager=`, `GIT_PAGER`) execute code; the existing test deliberately
-  excludes `git status/log/diff/show` (`auto-permission-read-only-gate.test.ts:102`).
-- **Effect model gap**: today git clone/pull/commit classify as bare `execute` with
-  NO target (`tool-execution-policy-service.ts:502/521`), and the request lacks
-  cwd/repo identity (the builder doesn't even set the available `agentId`,
-  `:72/:157`). Deriving cwd-aware git effects (implicit writes/network/hooks) is
-  net-new work in this redesign.
+## Decision memory — FOUR distinct kinds, never conflated
+1. **Classifier-verdict cache** — the ONLY thing keyed by effect hash + reused.
+2. **Remembered denies** — surfaced with an ambient undo; list/revoke before ship.
+3. **Trusted roots** — separate structure (owner-authored, canonical root, principal, revocation).
+4. **Standing human grants ("Allow for future")** — separate; owner-authored.
+**"Allow once" is per-interaction and is NEVER written to any reusable store.**
+Dedicated versioned table (beside `permission_promotion_counters`; `permission_decisions`
+is ID-keyed only, `permissions.ts:42`) with: stable row id, verdict/effect, decision
+kind, effect-schema version, rail/catalog version, provenance (approving principal),
+created/expiry, `revoked_at`, unique lookup identity, list/revoke repo methods.
 
 ## Trusted scope + approval UX
-- **Learned roots only** — nothing trusted by default; first op in a new root →
-  ASK once → remembered (fixes repos in `~/Workdir` being outside the agent workspace).
-- **Prompt options v1 = `[this folder] [once] [deny]`** (DROP "whole area" — over-grants).
-- Remembered **denies** surface an ambient notice + undo; decision memory needs a
-  list/revoke surface BEFORE ship (no silent permanent self-DoS).
+- **Learned roots only**; first op in a new root → ASK once → remembered (fixes
+  `~/Workdir` being outside the agent workspace). Prompt options v1 =
+  `[this folder] [once] [deny]` (DROP "whole area").
+- Remembered denies surface undo; memory needs list/revoke before ship.
 
-## Runtime-neutral coverage (Codex #4 — there is NO single boundary today; prove the matrix)
-Route every permission-bearing wrapper to the coordinator exactly once, no bypass:
-SDK worker `createCanUseToolCallback`→`resolvePermissionIpcDecision`; DeepAgents
-worker shell `createGantryShellTool`; DeepAgents worker MCP/facade wrappers
-(`third-party-mcp-gate.ts`, `gantry-facade-tools.ts`); inline `gateCoreTool`
-(`registry.ts:451/490` — it currently OMITS the classifier); DeepAgents inline MCP
-`authorizeThirdPartyMcpTool`. Handle bypasses: SDK `alwaysAllowedTools`
-(`tool-permission-gate.ts:509`) + `allowedTools` silent fast-path (`query-loop.ts:388`).
-**PRESERVE** the intentional absence of a DeepAgents direct/inline RunCommand lane
-(shell not projected unless a rule exists + `sandbox_runtime`) — do NOT add one;
-that's a separate sandbox-authority decision.
+## Jobs (LOCKED with user) — same engine, standing grants inherited, pause-and-resume
+- A job runs AS its agent through the SAME coordinator and **inherits the agent's
+  standing set** ("Allow for future" + trusted roots + safe cached verdicts).
+  "Allow once" is per-interaction → **never** arms a job. (This IS the mode rule —
+  there is NO separate interactive/autonomous scoping; the once-vs-future choice is it.)
+- **NEW: a `paused` JobRunStatus** (`job-types.ts:156` has none today; unattended ASK
+  currently returns denial `permission-ipc-client.ts:183` / cancels
+  `ipc-permission-classifier-decision.ts:152` and the run goes `failed`
+  `execution-finalization.ts:152`). On a non-standing ASK the fenced run PAUSES;
+  **owner approval RESUMES the SAME fenced run** (not a new run). Dedicated stage.
+- **Job permission-ask routing**: surfaces BOTH durably in job status/metadata
+  ("paused — needs approval: X") AND to the **owner-equivalent authority = the
+  granting context's `controlApprovers`** (v1; a dedicated agent-owner is deferred).
+  This channel is DISTINCT from the job's delivery route (which may be a group —
+  wrong approver, would leak the action). A job with no delivery route still asks.
+- **Owner authority v1 = `controlApprovers`** (`runtime-settings-types.ts:39`) — only
+  they can author a standing grant. Known v1 limitation (accepted): a standing grant
+  is agent-wide though authored by one context's approvers; a dedicated agent-owner +
+  cross-context tightening is v2.
 
-## Decision-memory store (Codex #7 — net-new; existing tables not reusable)
-Dedicated, versioned table beside `permission_promotion_counters` (the nearest
-seam: app+agent-folder+key, but stores counts not verdicts). Keyed by app + stable
-agent ID + decision kind + exec mode + approving principal + analyzer/catalog
-version + effect hash. Trusted roots in a separate structure.
+## Runtime-neutral coverage (prove the matrix, no bypass)
+Route every wrapper to the coordinator exactly once: SDK worker
+`createCanUseToolCallback`; DeepAgents worker shell/MCP/facade; inline `gateCoreTool`;
+`authorizeThirdPartyMcpTool` (BOTH DeepAgents-inline AND Anthropic-SDK-inline — both
+need tests). Remove SDK `alwaysAllowedTools`/`allowedTools` silent bypasses.
+**PRESERVE** the intentional DeepAgents-shell absence (projected only under a
+RunCommand rule + `sandbox_runtime`, `deepagents-shell-filesystem-guard.ts:125`) — call
+the coordinator only after projection; do NOT add a shell lane.
 
-## Consolidation + honest scope corrections
-- Demote the flaky classifier → cached (effect key) + guarded + fail-closed, at the coordinator.
-- Absorb the read-only allowlist unchanged. Fix telemetry (RunCommand text + ask reasons).
-- **DROP the `select:`/`tool-search-decision.ts` fix** — Codex proved it does NOT
-  reinterpret `select:`; it only picks tool-search mode. Move that to observability;
-  reproduce the upstream misclassification before touching it.
-- **Sandbox stays independent.** ALLOW ≠ sandbox bypass. The incident is
-  authorization-prompting only. Add an execution test (public remote + non-protected
-  dest works) AND separately assert precise sandbox denials — do not conflate.
+## Consolidation + honest corrections
+Demote the flaky classifier → cached+guarded+fail-closed at the coordinator. Absorb the
+read-only allowlist unchanged (keep git reads OUT — pager-injection). Fix telemetry
+(RunCommand text + ask reasons). **DROP the `select:`/`tool-search-decision.ts` fix**
+(Codex: it does not reinterpret `select:`; move to observability, reproduce first).
+Sandbox stays independent; ALLOW ≠ bypass — add an execution test (public remote +
+non-protected dest) AND assert sandbox denials separately.
 
-## Staging (telemetry FIRST; each leaves tree green; autoreview per commit)
-0. **Telemetry fix** — redacted RunCommand command text + ask reasons. Makes flood-
-   reduction + cache-hit-rate measurable before any behavior change.
-1. **Async decision coordinator skeleton** (host) + route ONE lane (SDK worker) to
-   it; hard-deny/locked precede allow; classifier moved behind it, fail-closed.
-2. **Deterministic rails** — destructive catalog + egress rail + guards + read-only
-   fast-path (absorbed) + parse-fail/interpreter→ASK, sync, re-run on every hit.
-3. **Versioned effect key + exact effect-cache** (decision memory table) + rails-recheck.
-4. **Learned-root ask-once** (`[this folder][once][deny]`) + memory keyed by kind/
-   mode/principal/version + revoke surface. Trusted roots separate from verdicts.
-5. **Route remaining lanes** (DeepAgents worker shell/MCP/facade, inline gateCoreTool,
-   inline MCP) to the coordinator; prove the matrix; handle alwaysAllowed/allowedTools.
-6. Runtime smoke: clone/git/FS scenario end-to-end + execution verify (public remote).
+## Surface Impact Matrix (AGENTS.md:203 — required)
+| Surface | Change |
+|---|---|
+| Runtime | new `coordinatePermissionDecision`; reorder authority precedence in all gates; remove SDK allowed/alwaysAllowed bypass |
+| Rails | destructive catalog + egress rail + guards (new); read-only fast-path absorbed |
+| Postgres projection | new decision-memory table + trusted-root store (+ revoke) |
+| Jobs | new `paused` JobRunStatus + resume-same-run + pause-ask routing |
+| Settings | standing-grant authority via existing `controlApprovers` (no new owner key v1) |
+| IPC / runner | exact pre-sanitization decision-input path; effect fields plumbed |
+| API / CLI / MCP | list/revoke decision-memory surface |
+| Telemetry / audit | RunCommand command text + ask reasons |
+| Sandbox / adapters | UNCHANGED (execution test only) |
+| Docs | this doc + assumptions ledger |
 
-## Verify (real)
-tsc clean · parse-fail/interpreter→ASK · exact effect-cache hit (2nd identical
-effect = no LLM) with rails re-run · egress rail asks on `curl -d @f host` ·
-classifier error→ASK · hard-deny/locked precede any allow · learned-root ask-once ·
-interactive grant does NOT arm autonomous · non-owner group op asks · remembered-deny
-undo · per-lane coordinator-reached-once matrix (SDK+DeepAgents+inline) · ALLOW→runs
-(public remote, non-protected dest) with sandbox denials asserted separately ·
-existing permission suites green · autoreview clean before each commit.
+## Staging (telemetry FIRST; each green; autoreview per commit)
+0. Telemetry fix (RunCommand text + ask reasons) — makes flood/cache-hit measurable.
+1. Coordinator skeleton + authority-precedence reorder (hard-deny/locked/fixed-image
+   before any allow) + remove SDK bypasses + route ONE lane (SDK worker).
+2. Deterministic rails (catalog + egress + guards + read-only fast-path + parse-fail/
+   interpreter→ASK) sync, re-run every hit.
+3. Exact pre-sanitization decision-input + versioned effect key + classifier-verdict cache.
+4. Empowered classifier behind the coordinator, fail-closed, cache-miss only.
+5. Decision-memory table (4 kinds, allow_once never cached) + trusted roots + list/revoke.
+6. Learned-root ask-once + `[this folder][once][deny]`.
+7. **Jobs: `paused` status + resume-same-run + pause-ask routing to `controlApprovers` + durable job status.**
+8. Route remaining lanes (DeepAgents worker shell/MCP/facade, inline gateCoreTool,
+   shared inline MCP) + prove the matrix.
+9. Runtime smoke: clone/git/FS scenario + execution verify (public remote) + a job-pause/resume.
 
-## Non-goals
-Sandbox provider change · adding a DeepAgents RunCommand lane · per-command user
-allowlist · ask-once-on-every-unknown default · generalized op-shape cache ·
-"whole area" breadth (v1) · `select:` behavior change · multi-tenant requester-
-scoping beyond principal/owner-initiation (v1).
+## Verify
+tsc clean · sanitized/truncated input→ASK · parse-fail/interpreter→ASK · hard-deny/
+locked/fixed-image precede any allow · SDK allowedTools no longer silently approves ·
+exact effect-cache hit (2nd identical effect = no LLM) with rails re-run · egress rail
+asks `curl -d @f host` · classifier error→ASK · allow_once never cached · learned-root
+ask-once · per-lane coordinator-once matrix (SDK+DeepAgents worker+inline, shared inline
+MCP) · job non-standing ASK → paused (not failed) → owner approval resumes SAME run,
+routed to controlApprovers not delivery · ALLOW→runs (public remote) with sandbox
+denials asserted separately · existing permission suites green · autoreview clean per commit.
+
+## Non-goals (v1)
+Sandbox provider change · DeepAgents shell lane · per-command user allowlist · ask-once-
+on-every-unknown default · generalized op-shape cache · "whole area" breadth · `select:`
+change · dedicated agent-owner / cross-context approver tightening (v2).
 
 ## Plan-validation gate (Codex twin, before build)
-Confirm the coordinator IPC contract per lane + the exact effect-schema fields +
-the memory table shape + that hard-deny/locked precede allow in every gate + the
-execution-gap resolution. Both critiques already ran; this is the pipeline's formal pass.
+Re-confirm: coordinator entry + per-lane adapters; authority precedence enforced in
+every gate; the exact pre-sanitization decision-input path; the effect-schema fields
+& availability; the memory table + 4 kinds; the `paused`/resume state machine; the
+matrix. (This doc already folded one full plan-validation.)
