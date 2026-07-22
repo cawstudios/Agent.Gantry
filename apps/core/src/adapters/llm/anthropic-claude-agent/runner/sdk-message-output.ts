@@ -103,9 +103,19 @@ export function sdkStructuredOutputText(message: unknown): string | null {
 export function sdkResultText(
   message: unknown,
   responseSchema?: Record<string, unknown>,
+  options?: { allowErrorResultText?: boolean },
 ): string | null {
   const failure = sdkResultFailureMessage(message);
-  if (failure) throw new Error(failure);
+  if (failure) {
+    if (!options?.allowErrorResultText) throw new Error(failure);
+    const result =
+      message && typeof message === 'object'
+        ? (message as { result?: unknown }).result
+        : undefined;
+    if (typeof result !== 'string' || result.trim().length === 0) {
+      throw new Error(failure);
+    }
+  }
   if (responseSchema) {
     const structured = sdkStructuredOutputText(message);
     if (structured === null) {

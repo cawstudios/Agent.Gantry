@@ -60,6 +60,7 @@ import { logUsage } from './usage-logging.js';
 import { readContextUsage } from './context-usage.js';
 import {
   hasTopLevelAssistantContent,
+  sdkResultFailureMessage,
   sdkResultText,
   sdkStructuredOutputOptions,
   shouldPrefixVisibleBoundary,
@@ -612,7 +613,17 @@ export async function runQuery(
           firstResultMs = elapsedMs();
           log(`First SDK result after ${firstResultMs}ms`);
         }
-        const textResult = sdkResultText(message, agentInput.responseSchema);
+        const sdkFrameFailure = !agentInput.responseSchema
+          ? sdkResultFailureMessage(message)
+          : null;
+        const textResult = sdkResultText(message, agentInput.responseSchema, {
+          allowErrorResultText: !agentInput.responseSchema,
+        });
+        if (sdkFrameFailure && textResult?.trim()) {
+          log(
+            `Claude SDK result carried error flag but non-empty plain-text output was preserved: ${sdkFrameFailure}`,
+          );
+        }
         const emittedVisibleText =
           sawPartialTextSinceLastResult || sawStructuredTextSinceLastResult;
         const canUseResultFallback =
