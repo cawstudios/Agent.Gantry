@@ -252,11 +252,31 @@ export interface PromptModelIdentity {
 // NOT vary turn-to-turn within one session; per-turn facts (time, speaker)
 // belong to the dynamic tail or the message payload instead.
 export interface PromptRuntimeContext {
-  chatJid?: string;
-  conversationKind?: 'dm' | 'channel';
+  channelContextLine?: string;
   workspacePath?: string;
   // Present only for scheduled job runs.
   job?: { id?: string; name?: string };
+}
+
+type ChannelPromptPresentationRenderer = (
+  chatJid: string | undefined,
+  conversationKind: 'dm' | 'channel' | undefined,
+) => string | undefined;
+
+let channelPromptPresentationRenderer: ChannelPromptPresentationRenderer = () =>
+  undefined;
+
+export function registerChannelPromptPresentationRenderer(
+  renderer: ChannelPromptPresentationRenderer,
+): void {
+  channelPromptPresentationRenderer = renderer;
+}
+
+export function renderChannelPromptPresentationLine(
+  chatJid: string | undefined,
+  conversationKind: 'dm' | 'channel' | undefined,
+): string | undefined {
+  return channelPromptPresentationRenderer(chatJid, conversationKind);
 }
 
 export interface CompilePromptProfileOptions {
@@ -328,36 +348,6 @@ function truncateDeterministically(content: string, budget: number): string {
   return content.slice(0, budget).trimEnd();
 }
 
-// ponytail: jid prefixes and per-channel caps mirror the channel adapters
-// (tg: TELEGRAM_MESSAGE_MAX_LENGTH 4096, sl: SLACK_FALLBACK_CHUNK_MAX_LENGTH
-// 4000, dc: DISCORD_MESSAGE_MAX_LENGTH 2000, 25MB =
-// MAX_MESSAGE_FILE_ATTACHMENT_BYTES); not imported so the prompt compiler
-// stays free of channel-adapter dependencies.
-function channelContextLine(
-  chatJid: string | undefined,
-  conversationKind: 'dm' | 'channel' | undefined,
-): string | undefined {
-  if (!chatJid) return undefined;
-  const kind =
-    conversationKind === 'dm'
-      ? 'direct message'
-      : conversationKind === 'channel'
-        ? 'group conversation'
-        : 'conversation';
-  const attachments = 'outbound workspace file attachments are capped at 25MB';
-  if (chatJid.startsWith('tg:'))
-    return `- Channel: Telegram ${kind}. Telegram renders a limited HTML subset; hard message length cap 4096 characters; ${attachments}.`;
-  if (chatJid.startsWith('sl:'))
-    return `- Channel: Slack ${kind}. Slack renders mrkdwn; keep single messages under 4000 characters; ${attachments}.`;
-  if (chatJid.startsWith('dc:'))
-    return `- Channel: Discord ${kind}. Discord renders markdown; hard message length cap 2000 characters; ${attachments}.`;
-  if (chatJid.startsWith('teams:'))
-    return `- Channel: Microsoft Teams ${kind}. Teams renders basic HTML; ${attachments}.`;
-  if (chatJid.startsWith('app:'))
-    return `- Channel: embedded app ${kind}. Markdown renders natively; no hard message length cap; ${attachments}.`;
-  return `- Channel: ${kind}; ${attachments}.`;
-}
-
 function runtimeContextLines(options: CompilePromptProfileOptions): string[] {
   const lines: string[] = [];
   if (options.modelIdentity) {
@@ -368,8 +358,7 @@ function runtimeContextLines(options: CompilePromptProfileOptions): string[] {
   }
   const context = options.runtimeContext;
   if (!context) return lines;
-  const channel = channelContextLine(context.chatJid, context.conversationKind);
-  if (channel) lines.push(channel);
+  if (context.channelContextLine) lines.push(context.channelContextLine);
   if (context.workspacePath) {
     lines.push(
       `- Workspace root: ${context.workspacePath}. Durable outputs belong under media/ inside the workspace; tmp paths are ephemeral and may not survive between runs.`,
