@@ -27,7 +27,7 @@ until this lands. Line-budget violations are never waived
    relax the rule globally.
 3. **Layer Import Rules** — runtime/adapters importing config files beyond
    exception `maxViolations` caps (fleet-boot, control/server routes incl.
-   `routes/observer.ts` with NO exception). Fix the imports (narrow ports /
+   `apps/core/src/control/server/routes/observer.ts` with NO exception). Fix the imports (narrow ports /
    move types) rather than raising caps; a raised cap needs a ratchet
    deadline.
 4. **Provider Boundary** — `ANTHROPIC_` tokens in `haiku-turn.agent-e2e` and
@@ -35,7 +35,7 @@ until this lands. Line-budget violations are never waived
    boundary; move behind the boundary or record exact debt in cleanup plan
    `myclaw-architecture-gates-20260517-provider-boundary-sentinels`.
 5. **Provider-Specific Paths** — `slack`/`telegram` literals in
-   `application/agents/prompt-profile-service.ts:332-351`; route through the
+   `apps/core/src/application/agents/prompt-profile-service.ts:332-351`; route through the
    channel-neutral seam or an approved adapter path.
 
 ## Constraints

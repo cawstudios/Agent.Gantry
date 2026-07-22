@@ -10,14 +10,14 @@ date: 2026-07-22
 
 The real-model E2E scenario gates on `E2E_ANTHROPIC_API_KEY`, tripping the
 provider-boundary sentinel in test code (3 tokens in
-haiku-turn.agent-e2e.test.ts). The debt mechanism ratchets exact counts and
+`apps/core/test/agent-e2e/scenarios/haiku-turn.agent-e2e.test.ts`). The debt mechanism ratchets exact counts and
 would preserve provider-token leakage rather than fix it. GitHub workflow
 files are outside the sentinel's scan scope.
 
 ## Decision
 
 Tests read a neutral `E2E_MODEL_API_KEY` via a fixture helper
-(`requireRealModelCredential()`); ci.yml maps the existing GitHub secret to
+(`requireRealModelCredential()`); `.github/workflows/ci.yml` maps the existing GitHub secret to
 that neutral name (`E2E_MODEL_API_KEY: ${{ secrets.E2E_ANTHROPIC_API_KEY }}`).
 The GitHub secret itself is not renamed.
 

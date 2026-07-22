@@ -11,7 +11,7 @@ date: 2026-07-22
 `prompt-profile-service.ts:332-357` hard-codes `telegram`/`slack` labels,
 formatting guidance, and message caps in the application layer — flagged by
 the Provider-Specific Paths gate. The channel provider registry
-(`channels/provider-registry.ts`) already owns `label`, `jidPrefix`, and
+(`apps/core/src/channels/provider-registry.ts`) already owns `label`, `jidPrefix`, and
 `formatting`, but not prompt wording; the architecture map forbids the
 application layer importing the registry.
 

@@ -655,6 +655,49 @@ class CheckArchitectureTests(unittest.TestCase):
             self.assertIn("[Active Doc References]", result.stdout)
             self.assertIn("README.md -> docs/not-real.md", result.stdout)
 
+    def test_frozen_doc_reference_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "README.md",
+                "<!-- doc-references: frozen 2026-07-22 (decision 0036) -->\n"
+                "[Missing](docs/not-real.md)\n",
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_unfrozen_or_malformed_marker_doc_reference_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            for marker in (
+                "",
+                "<!-- doc-references: frozen 2026-7-22 (decision 0036) -->\n",
+                "<!-- doc-references: frozen 2026-02-30 (decision 0036) -->\n",
+            ):
+                with self.subTest(marker=marker):
+                    write_text(root / "README.md", marker + "[Missing](docs/not-real.md)\n")
+                    result = run_architecture_check(root)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("README.md -> docs/not-real.md", result.stdout)
+
+    def test_placeholder_doc_reference_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(root / "README.md", "`plans/active/<issue>-<slug>.md`\n")
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_missing_runtime_ledger_references_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "README.md",
+                "[Team ledger](plans/team.json)\n"
+                "`plans/assumptions-archive.md`\n",
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
     def test_direct_risky_execution_outside_sandbox_adapter_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))

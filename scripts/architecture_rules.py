@@ -218,6 +218,10 @@ RECOVERY_ONLY_CHANNEL_WIRING_CALL_PATTERNS = (
 
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+DOC_REFERENCE_FREEZE_RE = re.compile(
+    r"<!-- doc-references: frozen (\d{4}-\d{2}-\d{2}) \(decision 0036\) -->"
+)
+DOC_REFERENCE_PLACEHOLDER_RE = re.compile(r"<[^<>\n]+>")
 IMPORT_FROM_RE = re.compile(r"(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s*['\"]([^'\"]+)['\"]", re.MULTILINE)
 SIDE_EFFECT_IMPORT_RE = re.compile(r"(?:^|\n)\s*import\s*['\"]([^'\"]+)['\"]", re.MULTILINE)
 DYNAMIC_IMPORT_RE = re.compile(r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]\s*\)")
@@ -1539,17 +1543,33 @@ def check_doc_references(root: Path) -> list[str]:
     for doc in active_docs(root):
         rel_doc = doc.relative_to(root).as_posix()
         text = doc.read_text()
+        freeze_marker = DOC_REFERENCE_FREEZE_RE.search(text)
+        if freeze_marker:
+            try:
+                date.fromisoformat(freeze_marker.group(1))
+            except ValueError:
+                pass
+            else:
+                continue
         for raw_target in MARKDOWN_LINK_RE.findall(text):
+            if DOC_REFERENCE_PLACEHOLDER_RE.search(raw_target):
+                continue
             target = raw_target.strip().split()[0].strip("<>").split("#", 1)[0]
             if should_ignore_markdown_target(target):
                 continue
             resolved = resolve_doc_target(root, doc, target)
-            if resolved is None or not resolved.exists():
+            if (resolved is None or not resolved.exists()) and not target.startswith(
+                "plans/"
+            ):
                 missing.add(f"{rel_doc} -> {target}")
         for token in INLINE_CODE_RE.findall(text):
+            if DOC_REFERENCE_PLACEHOLDER_RE.search(token):
+                continue
             if not looks_like_local_file_reference(token):
                 continue
             resolved = resolve_doc_target(root, doc, token)
-            if resolved is None or not resolved.exists():
+            if (resolved is None or not resolved.exists()) and not token.startswith(
+                "plans/"
+            ):
                 missing.add(f"{rel_doc} -> {token}")
     return sorted(missing)

@@ -35,3 +35,7 @@ historical records; the checker also skips `<placeholder>` template tokens.
 - Stamping any NEW doc requires updating this record in the same change;
   live docs stay fully checked; all other gates still apply to frozen docs.
 - Checker changes land with tests in scripts/tests/test_check_architecture.py.
+- Amendment (signal S-0001-5b3c, 2026-07-22): missing references whose path
+  starts with `plans/` are skipped — that namespace is runtime ledgers that
+  materialize on first forge use (assumptions.md, team.json, …); requiring
+  their pre-existence would force creating empty ledgers by hand.

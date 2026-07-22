@@ -1,4 +1,5 @@
 # Agent E2E CI Merge Gate — Plan Validation Round 2
+<!-- doc-references: frozen 2026-07-22 (decision 0036) -->
 
 Status: **NOT APPROVED FOR IMPLEMENTATION**
 

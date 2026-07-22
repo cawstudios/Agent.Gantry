@@ -230,7 +230,7 @@ contract exists.
 
 ### Stage 4 — provider-neutral selected skill (durable desired-state write)
 
-- Install `media-render/SKILL.md` via `SkillService.installSkill`
+- Install the planned media-render skill manifest via `SkillService.installSkill`
   (`skill-service.ts:37-104`) — idempotent by materialization identity, writes
   the artifact, returns the AUTHORITATIVE generated `skill:<uuid>`. Both
   provider projections require selected durable ids
