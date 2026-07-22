@@ -173,7 +173,8 @@ throws WARN-swallowed; add a failure counter so silent audit loss can't hide.
 
 - **KB / document ingestion per workspace.** `platform-roadmap-2026-07.md` (#1)
 - **Tenant isolation hardening** — hostile-tenant review; verified via E2E matrix. (#3)
-- **E2E persona/topology harness** — goal-prompt drafted in scratchpad.
+- **E2E persona/topology harness** — the scratchpad draft was lost; re-draft
+  deferred as D-0002 (trigger: E2E matrix reconciliation).
 - **Connector strategy execution** — direct OAuth, `providers.yaml`, org-owned
   GitHub+Google v1 _(design doc in `~/.gstack` projects dir)_.
 

@@ -18,6 +18,12 @@ Prefer deleting legacy code over compatibility shims. Do not add migration
 compatibility commands, auto-migration flows, cleanup shims, or runtime
 branches that exist only to support old local state.
 
+"No users are live" means no EXTERNAL users. The owner's live deployment
+(launchd `com.gantry`) is real and its durable state — Postgres data,
+settings, credentials, memory — is preserved by migrating it MANUALLY to the
+new state when a breaking change lands; a breaking PR names the manual
+migration step it requires. (Clarified at sign-off grill, 2026-07-22.)
+
 ## Consequences
 
 - Breaking replacements remove the obsolete code paths, schemas, tests, docs,

@@ -27,6 +27,13 @@ one deterministic, evidence-recorded pipeline. Product intent lives in
 - [x] 28 pre-harness decision records migrated to numbered, frontmattered form
   (0000–0001, 0005–0033) with historical acceptance transcribed
 
+## Roadmap source (sign-off grill, 2026-07-22)
+
+The forge roadmap is seeded from `docs/architecture/goals-index.md` ordering
+(Active → Queued → Then → verified Parked); per-story `acceptance_criteria`
+come from each goal's `*-goal-prompt.md` Acceptance Criteria section. Goals
+without a committed goal-prompt are not importable until one exists.
+
 ## Prototype notes (phase 0b)
 
 Not applicable — the product is long past prototype; live runtime ships from
