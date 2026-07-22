@@ -1,7 +1,7 @@
 {
   "items": [
     {
-      "status": "pending",
+      "status": "active",
       "key": "PAY-1",
       "title": "Architecture gate paydown \u2014 check:architecture exit 0",
       "epic": "harness-hygiene",
@@ -417,5 +417,5 @@
     }
   ],
   "generated_by": "human",
-  "updated_at": "2026-07-22T12:34:54+00:00"
+  "updated_at": "2026-07-22T12:36:40+00:00"
 }
