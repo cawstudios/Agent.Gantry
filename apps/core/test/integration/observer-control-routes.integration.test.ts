@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createResolveObserverStatus } from '@core/application/control-plane/control-plane-storage-model.js';
 import { createDefaultRuntimeSettings } from '@core/config/settings/runtime-settings.js';
 import type { ControlRouteContext } from '@core/control/server/handler-context.js';
 import { handleObserverRoutes } from '@core/control/server/routes/observer.js';
@@ -75,6 +76,12 @@ function context(
     getInternalRuntimeSettings: () => settings,
     getEffectiveRuntimeSettings: () => effectiveSettings,
     getEffectiveMemoryState: () => effectiveMemoryState,
+    resolveObserverStatus: createResolveObserverStatus({
+      getInternalRuntimeSettings: () => settings,
+      getEffectiveRuntimeSettings: () => effectiveSettings,
+      getEffectiveMemoryState: () => effectiveMemoryState,
+      conversations: conversationRepository,
+    }),
   } as ControlRouteContext;
 }
 
