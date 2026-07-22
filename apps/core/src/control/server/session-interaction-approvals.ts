@@ -161,7 +161,7 @@ export type SessionInteractionRespondOutcome =
  * Decide a pending permission interaction through the SAME durable
  * claim → grant application → resolution chain the channel permission
  * callbacks use (pending-interaction-permission-callback.ts, the functions
- * behind Slack/Telegram buttons and recoverDurablePermissionDecision). The
+ * behind provider-rendered actions and recoverDurablePermissionDecision). The
  * API introduces no new authority semantics: the callback claim CAS is the
  * single-decider gate, and grants/settings mirrors/receipts flow through
  * applyPendingInteractionGrantDecision exactly as for channel approvers.
@@ -208,7 +208,7 @@ export async function respondToSessionPermissionInteraction(input: {
   if (!group) {
     // Headless prompts never rendered on a channel have no durable prompt
     // binding yet. Bind one exactly as channel deliveries do before their
-    // callbacks become answerable (slack/permission-approval-delivery.ts).
+    // callbacks become answerable through the durable interaction seam.
     const request = permissionRequestFromPayload(row.payload);
     if (!request) return { status: 'malformed' };
     await bindPendingPermissionInteractionMessage({
