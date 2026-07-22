@@ -10,6 +10,11 @@ import {
 } from './brain-page-ingest.js';
 import type { BrainRepository } from './brain-repository.js';
 import type { BrainService } from './brain-service.js';
+import type { ObserverInsightEmissionRuntime } from './observer-insight-emission.js';
+import {
+  emitObserverInsights,
+  normalizeSurfaceableInsightDraft,
+} from './observer-insight-emission.js';
 import {
   BRAIN_EDGE_TYPES,
   BRAIN_ENTITY_KINDS,
@@ -24,9 +29,15 @@ export interface BrainDreamProposalPort {
   propose(input: {
     appId: string;
     pages: BrainPage[];
+    observerEnabled?: boolean;
     signal?: AbortSignal;
     timeoutMs?: number;
-  }): Promise<unknown[]>;
+  }): Promise<unknown[] | BrainDreamProposal>;
+}
+
+export interface BrainDreamProposal {
+  operations: unknown[];
+  surfaceableInsights: unknown[];
 }
 
 export interface BrainDreamBatchResult {
@@ -36,17 +47,39 @@ export interface BrainDreamBatchResult {
   noop: number;
   rejected: number;
   proposed: number;
+  observer?: {
+    persisted: number;
+    deduplicated: number;
+    filtered: number;
+    message: string;
+  };
 }
 
-const BRAIN_DREAM_PROMPT = [
-  'You consolidate Gantry company brain pages into grounded knowledge.',
-  'Return strict JSON array operations only.',
+const BRAIN_OPERATION_PROMPT_LINES = [
   'Allowed additive operations:',
   '{"action":"upsert_entity","kind":"person|company|project|topic","name":"name"}',
   '{"action":"upsert_edge","type":"works_at|member_of|mentions|authored|assigned_to|relates_to","from":{"kind":"person|company|project|topic","name":"name"},"to":{"kind":"person|company|project|topic","name":"name"},"evidencePageId":"page id"}',
   '{"action":"write_fact_page","topic":"stable topic","title":"title","markdown":"short durable fact page","evidencePageIds":["page id"]}',
   '{"action":"enrich_entity_page","kind":"person|company|project|topic","name":"name","markdown":"short entity summary","evidencePageIds":["page id"]}',
   'Destructive operations may be proposed, but the host journals them without applying.',
+] as const;
+
+const BRAIN_DREAM_PROMPT = [
+  'You consolidate Gantry company brain pages into grounded knowledge.',
+  'Return strict JSON array operations only.',
+  ...BRAIN_OPERATION_PROMPT_LINES,
+  'Use only supplied page ids as evidence.',
+].join('\n');
+
+const OBSERVER_BRAIN_DREAM_PROMPT = [
+  'You consolidate Gantry company brain pages into grounded knowledge and identify surfaceable insights.',
+  'Return one strict JSON object with arrays named operations and surfaceableInsights.',
+  'operations accepts the same additive or destructive operation shapes below:',
+  ...BRAIN_OPERATION_PROMPT_LINES,
+  'Each surfaceable insight must have insightType, title, summary, canonicalSignature, confidence, and evidencePageIds.',
+  'Allowed insightType values: commitment, contradiction, open_question, stale_fact, decision_without_owner, duplicated_work.',
+  'canonicalSignature is the concise canonical content phrase, not a hash.',
+  'confidence is a number from 0 through 1.',
   'Use only supplied page ids as evidence.',
 ].join('\n');
 
@@ -63,9 +96,10 @@ export class MemoryLlmBrainDreamProposer implements BrainDreamProposalPort {
   async propose(input: {
     appId: string;
     pages: BrainPage[];
+    observerEnabled?: boolean;
     signal?: AbortSignal;
     timeoutMs?: number;
-  }): Promise<unknown[]> {
+  }): Promise<unknown[] | BrainDreamProposal> {
     const llm = getMemoryLlmClient();
     if (!llm.isConfigured()) {
       throw new Error('Brain dreaming LLM client is not configured');
@@ -81,17 +115,22 @@ export class MemoryLlmBrainDreamProposer implements BrainDreamProposalPort {
         metadata: page.metadata,
       })),
     };
+    const prompt = input.observerEnabled
+      ? OBSERVER_BRAIN_DREAM_PROMPT
+      : BRAIN_DREAM_PROMPT;
     const text = await llm.query({
       appId: input.appId as AppId,
       model,
       modelProfile: modelProfiles?.dreaming,
-      systemPrompt: BRAIN_DREAM_PROMPT,
-      prompt: `${BRAIN_DREAM_PROMPT}\n\n${JSON.stringify(payload, null, 2)}`,
+      systemPrompt: prompt,
+      prompt: `${prompt}\n\n${JSON.stringify(payload, null, 2)}`,
       signal: input.signal,
       timeoutMs: input.timeoutMs,
     });
     input.signal?.throwIfAborted();
-    return parseJsonArray(text);
+    return input.observerEnabled
+      ? parseJsonProposal(text)
+      : parseJsonArray(text);
   }
 }
 
@@ -103,7 +142,11 @@ export async function runBrainDreamBatch(input: {
   limit?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
+  observer?: ObserverInsightEmissionRuntime;
 }): Promise<BrainDreamBatchResult> {
+  if (input.observer?.enabled) {
+    return runObserverBrainDreamBatch({ ...input, observer: input.observer });
+  }
   const runId = `bdr_${randomUUID().replace(/-/g, '')}`;
   const proposer = input.proposer ?? new MemoryLlmBrainDreamProposer();
   const cursor = await input.repository.getDreamCursor(input.appId);
@@ -122,12 +165,12 @@ export async function runBrainDreamBatch(input: {
   };
   for (const page of pages) {
     input.signal?.throwIfAborted();
-    const ops = await proposer.propose({
+    const ops = (await proposer.propose({
       appId: input.appId,
       pages: [page],
       signal: input.signal,
       timeoutMs: input.timeoutMs,
-    });
+    })) as unknown[];
     input.signal?.throwIfAborted();
     const summary = await applyBrainDreamOperations({
       brain: input.brain,
@@ -151,6 +194,132 @@ export async function runBrainDreamBatch(input: {
     });
   }
   return result;
+}
+
+async function runObserverBrainDreamBatch(input: {
+  brain: BrainService;
+  repository: BrainRepository;
+  appId: string;
+  proposer?: BrainDreamProposalPort;
+  limit?: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  observer: ObserverInsightEmissionRuntime & { enabled: true };
+}): Promise<BrainDreamBatchResult> {
+  const runId = `bdr_${randomUUID().replace(/-/g, '')}`;
+  const proposer = input.proposer ?? new MemoryLlmBrainDreamProposer();
+  const [brainCursor, observerCursor] = await Promise.all([
+    input.repository.getDreamCursor(input.appId),
+    input.observer.repository.getInsightCursor(
+      input.appId,
+      input.observer.cursorSubject,
+    ),
+  ]);
+  const [brainPages, observerPages] = await Promise.all([
+    input.repository.listPagesForDream({
+      appId: input.appId,
+      cursor: brainCursor,
+      limit: input.limit ?? 25,
+    }),
+    input.repository.listPagesForDream({
+      appId: input.appId,
+      cursor: observerCursor,
+      limit: input.limit ?? 25,
+    }),
+  ]);
+  const brainPageIds = new Set(brainPages.map((page) => page.id));
+  const observerPageIds = new Set(observerPages.map((page) => page.id));
+  const pages = [
+    ...new Map(
+      [...brainPages, ...observerPages].map((page) => [page.id, page]),
+    ).values(),
+  ].sort(compareBrainPages);
+  const result: BrainDreamBatchResult = {
+    runId,
+    pages: 0,
+    applied: 0,
+    noop: 0,
+    rejected: 0,
+    proposed: 0,
+  };
+  const drafts: Array<{
+    draft: NonNullable<ReturnType<typeof normalizeSurfaceableInsightDraft>>;
+    page: BrainPage;
+  }> = [];
+
+  for (const page of pages) {
+    input.signal?.throwIfAborted();
+    const rawProposal = await proposer.propose({
+      appId: input.appId,
+      pages: [page],
+      observerEnabled: true,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    });
+    input.signal?.throwIfAborted();
+    const proposal = normalizeBrainDreamProposal(rawProposal);
+    result.pages += 1;
+    if (brainPageIds.has(page.id)) {
+      const summary = await applyBrainDreamOperations({
+        brain: input.brain,
+        repository: input.repository,
+        appId: input.appId,
+        runId,
+        page,
+        evidencePages: [page],
+        ops: proposal.operations,
+        signal: input.signal,
+      });
+      result.applied += summary.applied;
+      result.noop += summary.noop;
+      result.rejected += summary.rejected;
+      result.proposed += summary.proposed;
+      input.signal?.throwIfAborted();
+      await input.repository.saveDreamCursor(input.appId, {
+        updatedAt: page.updatedAt,
+        pageId: page.id,
+      });
+    }
+    if (observerPageIds.has(page.id)) {
+      for (const rawDraft of proposal.surfaceableInsights) {
+        const draft = normalizeSurfaceableInsightDraft(rawDraft, page.id);
+        if (draft) drafts.push({ draft, page });
+      }
+    }
+  }
+
+  result.observer = await emitObserverInsights({
+    ...input.observer,
+    appId: input.appId,
+    drafts,
+    cursor: observerCursor,
+    cursorTarget: [...observerPages].sort(compareBrainPages).at(-1),
+    signal: input.signal,
+  });
+  return result;
+}
+
+function normalizeBrainDreamProposal(
+  proposal: unknown[] | BrainDreamProposal,
+): BrainDreamProposal {
+  if (
+    Array.isArray(proposal) ||
+    !Array.isArray(proposal.operations) ||
+    !Array.isArray(proposal.surfaceableInsights)
+  ) {
+    throw new Error(
+      'Brain dreaming observer proposal requires operations and surfaceableInsights arrays',
+    );
+  }
+  return {
+    operations: proposal.operations,
+    surfaceableInsights: proposal.surfaceableInsights,
+  };
+}
+
+function compareBrainPages(left: BrainPage, right: BrainPage): number {
+  const time = left.updatedAt.localeCompare(right.updatedAt);
+  return time || left.id.localeCompare(right.id);
 }
 
 // ponytail: bounded recency window — new harvest lines append at the tail,
@@ -484,6 +653,31 @@ function normalizeOperation(raw: unknown): NormalizedOperation {
         };
   }
   return { valid: false, reason: `unsupported operation action: ${action}` };
+}
+
+function parseJsonProposal(text: string): BrainDreamProposal {
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first < 0 || last < first) {
+    throw new Error('brain dream proposer returned no JSON object');
+  }
+  const value = JSON.parse(text.slice(first, last + 1)) as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('brain dream proposer returned non-object JSON');
+  }
+  const proposal = value as Record<string, unknown>;
+  if (
+    !Array.isArray(proposal.operations) ||
+    !Array.isArray(proposal.surfaceableInsights)
+  ) {
+    throw new Error(
+      'Brain dreaming observer proposal requires operations and surfaceableInsights arrays',
+    );
+  }
+  return {
+    operations: proposal.operations,
+    surfaceableInsights: proposal.surfaceableInsights,
+  };
 }
 
 function parseJsonArray(text: string): unknown[] {
