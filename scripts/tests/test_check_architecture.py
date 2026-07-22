@@ -58,6 +58,7 @@ def make_base_fixture(root: Path) -> Path:
         root / "scripts/architecture-map.json",
         {
             "version": 1,
+            "frozenDocs": [],
             "layers": {
                 "domain": {
                     "paths": ["apps/core/src/domain"],
@@ -658,6 +659,11 @@ class CheckArchitectureTests(unittest.TestCase):
     def test_frozen_doc_reference_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = make_base_fixture(Path(tmp))
+            architecture_map = json.loads(
+                (root / "scripts/architecture-map.json").read_text()
+            )
+            architecture_map["frozenDocs"] = ["README.md"]
+            write_json(root / "scripts/architecture-map.json", architecture_map)
             write_text(
                 root / "README.md",
                 "<!-- doc-references: frozen 2026-07-22 (decision 0036) -->\n"
@@ -665,6 +671,34 @@ class CheckArchitectureTests(unittest.TestCase):
             )
             result = run_architecture_check(root)
             self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_frozen_marker_on_unlisted_doc_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            write_text(
+                root / "README.md",
+                "<!-- doc-references: frozen 2026-07-22 (decision 0036) -->\n"
+                "[Missing](docs/not-real.md)\n",
+            )
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(
+                "README.md: frozen marker on unlisted doc — update decision 0036 + frozenDocs together",
+                result.stdout,
+            )
+
+    def test_unstamped_allowlisted_doc_reference_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_base_fixture(Path(tmp))
+            architecture_map = json.loads(
+                (root / "scripts/architecture-map.json").read_text()
+            )
+            architecture_map["frozenDocs"] = ["README.md"]
+            write_json(root / "scripts/architecture-map.json", architecture_map)
+            write_text(root / "README.md", "[Missing](docs/not-real.md)\n")
+            result = run_architecture_check(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("README.md -> docs/not-real.md", result.stdout)
 
     def test_unfrozen_or_malformed_marker_doc_reference_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

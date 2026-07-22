@@ -1,5 +1,19 @@
 {
   "version": 1,
+  "frozenDocs": [
+    "docs/decisions/0036-doc-reference-historical-records.md",
+    "docs/architecture/codex-self-improvement.md",
+    "docs/architecture/outbound-attachments-audit-2026-07-19.md",
+    "docs/architecture/ponytail-audit-2026-07-16.md",
+    "docs/architecture/agent-e2e-plan-validation-round2.md",
+    "docs/architecture/permission-floor-and-promotion-goal-prompt.md",
+    "docs/architecture/codex-harness.md",
+    "docs/architecture/media-render-plan-validation.md",
+    "docs/architecture/ponytail-audit-2026-07-14.md",
+    "docs/architecture/pr237-final-review.md",
+    "docs/architecture/pr237-validation.md",
+    "docs/architecture/permission-durable-storage-plan-validation.md"
+  ],
   "defaultLineBudget": 700,
   "lineBudgets": {
     "apps/core/src/adapters/storage/postgres/repositories/domain-repositories.postgres.ts": 2100,

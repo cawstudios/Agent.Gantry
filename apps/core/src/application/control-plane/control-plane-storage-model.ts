@@ -200,14 +200,11 @@ export async function resolveControlObserverStatus(input: {
       memoryState,
     );
   }
-  const externalConversationId = conversation.externalId.includes(':')
-    ? conversation.externalId.slice(conversation.externalId.indexOf(':') + 1)
-    : conversation.externalId;
   const stored = await input.conversations.getConversationByExternalRef({
     appId: input.appId,
     providerId: providerAccount.provider as ProviderId,
     providerAccountId: providerAccountId as ProviderAccountId,
-    externalConversationId,
+    externalConversationId: conversation.externalId,
   });
   if (!stored || stored.kind !== 'direct') {
     return unverifiedObserverOwner(memoryState);

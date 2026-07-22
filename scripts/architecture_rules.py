@@ -1540,11 +1540,17 @@ def looks_like_local_file_reference(token: str) -> bool:
 
 def check_doc_references(root: Path) -> list[str]:
     missing: set[str] = set()
+    architecture_map, _ = load_architecture_map(root / "scripts/architecture-map.json")
+    frozen_docs = set(map_list(architecture_map or {}, "frozenDocs"))
     for doc in active_docs(root):
         rel_doc = doc.relative_to(root).as_posix()
         text = doc.read_text()
         freeze_marker = DOC_REFERENCE_FREEZE_RE.search(text)
-        if freeze_marker:
+        if freeze_marker and rel_doc not in frozen_docs:
+            missing.add(
+                f"{rel_doc}: frozen marker on unlisted doc — update decision 0036 + frozenDocs together"
+            )
+        if freeze_marker and rel_doc in frozen_docs:
             try:
                 date.fromisoformat(freeze_marker.group(1))
             except ValueError:

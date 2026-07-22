@@ -186,6 +186,58 @@ describe('observer control routes', () => {
     });
   });
 
+  it('resolves a Teams owner with a colon-bearing external conversation ID', async () => {
+    const settings = configuredSettings();
+    settings.providers.teams = { enabled: true };
+    settings.providerAccounts.teams_default = {
+      agentId: 'main_agent',
+      provider: 'teams',
+      label: 'Teams',
+      runtimeSecretRefs: { client_id: 'TEAMS_CLIENT_ID' },
+    };
+    settings.conversations.owner_dm = {
+      providerAccount: 'teams_default',
+      externalId: 'teams:19:owner-thread@thread.v2',
+      kind: 'dm',
+      displayName: 'Owner DM',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['owner-1'],
+    };
+    settings.memory.dreaming.enabled = true;
+    brainStatus.mockResolvedValue({ channelPages: 7 });
+    observerRepository.count.mockResolvedValue(0);
+    conversationRepository.getConversationByExternalRef.mockResolvedValue({
+      id: 'conversation:teams_default:teams:19:owner-thread@thread.v2',
+      kind: 'direct',
+    });
+    const res = responseRecorder();
+
+    await handleObserverRoutes(
+      request(),
+      res,
+      context(settings),
+      new URL('http://localhost/v1/observer/status'),
+      '/v1/observer/status',
+    );
+
+    expect(
+      conversationRepository.getConversationByExternalRef,
+    ).toHaveBeenCalledWith({
+      appId: 'default',
+      providerId: 'teams',
+      providerAccountId: 'teams_default',
+      externalConversationId: 'teams:19:owner-thread@thread.v2',
+    });
+    expect(JSON.parse(res.body)).toMatchObject({
+      enabled: true,
+      activation: 'active',
+      owner: {
+        conversationJid: 'teams:19:owner-thread@thread.v2',
+        providerAccountId: 'teams_default',
+      },
+    });
+  });
+
   it('reports the scheduler-owned dreaming gate instead of desired settings', async () => {
     const settings = configuredSettings();
     settings.memory.enabled = true;

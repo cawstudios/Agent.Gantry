@@ -34,6 +34,7 @@ historical records; the checker also skips `<placeholder>` template tokens.
   banner'd codex-harness and codex-self-improvement histories if needed.
 - Stamping any NEW doc requires updating this record in the same change;
   live docs stay fully checked; all other gates still apply to frozen docs.
+- The `frozenDocs` allowlist in `scripts/architecture-map.json` is the machine enforcement point for this rule.
 - Checker changes land with tests in scripts/tests/test_check_architecture.py.
 - Amendment (signal S-0001-5b3c, 2026-07-22): missing references whose path
   starts with `plans/` are skipped — that namespace is runtime ledgers that
