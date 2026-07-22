@@ -31,4 +31,3 @@ export function recordSuccessfulToolUse(
     canonicalGantryToolRuleName(hookInput.tool_name),
   );
 }
-

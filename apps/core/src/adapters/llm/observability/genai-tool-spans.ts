@@ -8,10 +8,7 @@ import {
   settleDelegationToolSpan,
   tracer,
 } from '../../../infrastructure/observability/tracing.js';
-import type {
-  SseAccumulatorResult,
-  SseStreamKind,
-} from './sse-accumulator.js';
+import type { SseAccumulatorResult, SseStreamKind } from './sse-accumulator.js';
 import {
   boundedToolJson,
   requestToolResults,
@@ -25,7 +22,10 @@ interface PendingToolSpan {
   unregisterTurnEnd: () => void;
 }
 
-export const pendingToolsByRun = new Map<string, Map<string, PendingToolSpan>>();
+export const pendingToolsByRun = new Map<
+  string,
+  Map<string, PendingToolSpan>
+>();
 
 function toolPayload(value: unknown): string {
   return typeof value === 'string'
