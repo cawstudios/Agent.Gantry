@@ -20,6 +20,7 @@ import {
 } from '../../config/settings/settings-import-service.js';
 import { PostgresSettingsRevisionWakeupSource } from '../../config/settings/settings-revision-notify.js';
 import type { AppId } from '../../domain/app/app.js';
+import type { RuntimeSettings } from '../../config/settings/runtime-settings-types.js';
 import { isDraining } from './draining-state.js';
 import type { SkillArtifactMaterializer } from '../../domain/ports/skill-artifact-store.js';
 import type { ToolchainArtifactMaterializer } from '../../domain/ports/toolchain-artifact-store.js';
@@ -148,7 +149,7 @@ export async function startFleetSubsystems(input: {
   /** Whether a settings revision was applied at boot (prepareFleetSettings). */
   settingsLoaded: boolean;
   /** Released once, with the held subsystems, on the first applied revision. */
-  onSettingsReady?: () => Promise<void> | void;
+  onSettingsReady?: (settings: RuntimeSettings) => Promise<void> | void;
 }): Promise<FleetSubsystems> {
   const storage = getRuntimeStorage();
   const workerInstanceId = currentWorkerInstanceId() ?? `fleet-${process.pid}`;
@@ -225,7 +226,7 @@ export async function startFleetSubsystems(input: {
       (context, message) => logger.warn(context, message),
     ),
     reloadRuntimeState: () => input.app.loadState(),
-    onFirstRevisionApplied: async () => {
+    onFirstRevisionApplied: async (settings) => {
       // No-op when everything already started at boot (settingsLoaded).
       if (capabilitySubsystemsStarted) return;
       // A revision NOTIFY can land mid-drain, after shutdown stopped the
@@ -235,7 +236,7 @@ export async function startFleetSubsystems(input: {
       if (isDraining()) return;
       registerBrowserSync();
       await startCapabilitySubsystems();
-      await input.onSettingsReady?.();
+      await input.onSettingsReady?.(settings);
       logger.info(
         'First settings revision applied; held fleet services started',
       );

@@ -704,7 +704,7 @@ describe('importFleetSettingsRevision', () => {
   });
 
   it('appends a revision stamped with the current reader version', async () => {
-    expect(CURRENT_SETTINGS_READER_VERSION).toBe(14);
+    expect(CURRENT_SETTINGS_READER_VERSION).toBe(15);
     capabilityErrors = [];
     const repo = new FakeRevisionRepo();
     const outcome = await importFleetSettingsRevision(
@@ -864,6 +864,16 @@ describe('importFleetSettingsRevision', () => {
       status: 'disabled',
       runtimeSecretRefs: { bot_token: 'env:TELEGRAM_PAUSED_BOT_TOKEN' },
     };
+    settings.conversations.owner_dm = {
+      providerConnection: 'telegram_main',
+      providerAccount: 'telegram_main',
+      externalId: '42',
+      kind: 'dm',
+      displayName: 'Owner DM',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['42'],
+      installedAgents: {},
+    };
     settings.conversations.shared_channel = {
       providerConnection: 'telegram_main',
       providerAccount: 'telegram_main',
@@ -883,6 +893,10 @@ describe('importFleetSettingsRevision', () => {
           permissionMode: 'auto',
         },
       },
+    };
+    settings.observer = {
+      enabled: true,
+      owner: { recipient: '42', conversation: 'owner_dm' },
     };
     const document = settingsToRevisionDocument(settings);
     // The stored/wire document is the typed object form, not the legacy
@@ -952,6 +966,10 @@ describe('importFleetSettingsRevision', () => {
         environment: 'test',
       },
     });
+    expect(document.observer).toEqual({
+      enabled: true,
+      owner: { recipient: '42', conversation: 'owner_dm' },
+    });
     expect(
       (
         (document.agents as Record<string, Record<string, unknown>>).researcher
@@ -1000,6 +1018,7 @@ describe('importFleetSettingsRevision', () => {
     expect(restored.agents.researcher.delegates).toEqual([]);
     expect(restored.permissions.autoMode).toEqual({ model: 'sonnet' });
     expect(restored.observability).toEqual(settings.observability);
+    expect(restored.observer).toEqual(settings.observer);
     expect(restored.agents.researcher).toMatchObject({
       maxTurns: 14,
       maxRunTokens: 32_000,

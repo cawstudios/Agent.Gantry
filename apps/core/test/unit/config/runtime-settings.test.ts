@@ -11,6 +11,7 @@ import {
   loadRuntimeSettings,
   mirrorAgentToolRulesToRuntimeSettings,
   parseRuntimeSettings,
+  readRuntimeObserverSettingsSnapshot,
   saveRuntimeSettings,
   withRuntimeModelAliases,
 } from '@core/config/settings/runtime-settings.js';
@@ -805,6 +806,93 @@ quoted_decimal: "0.5"
     });
     expect(quoteYamlString('171.222')).toBe('171.222');
     expect(quoteYamlString('1.2.3')).toBe('1.2.3');
+  });
+
+  it('defaults observer off and omits the default block', () => {
+    const settings = createDefaultRuntimeSettings();
+    expect(settings.observer).toEqual({ enabled: false });
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).not.toContain('observer:');
+    expect(parseRuntimeSettings(yaml).observer).toEqual(settings.observer);
+  });
+
+  it('parses, renders, and snapshots observer owner settings', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.observer = {
+      enabled: true,
+      owner: { recipient: 'U123', conversation: 'owner_dm' },
+    };
+
+    const yaml = renderRuntimeSettingsYaml(settings);
+    expect(yaml).toContain('observer:');
+    expect(yaml).toContain('recipient: U123');
+    expect(yaml).toContain('conversation: owner_dm');
+    expect(parseRuntimeSettings(yaml).observer).toEqual(settings.observer);
+
+    const runtimeHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'gantry-observer-settings-'),
+    );
+    try {
+      saveRuntimeSettings(runtimeHome, settings);
+      expect(readRuntimeObserverSettingsSnapshot(runtimeHome)).toEqual(
+        settings.observer,
+      );
+    } finally {
+      fs.rmSync(runtimeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('requires the observer owner to be a verified DM approver', () => {
+    const settings = createDefaultRuntimeSettings();
+    settings.providers.telegram = { enabled: true };
+    settings.providerAccounts.telegram_owner = {
+      agentId: 'main_agent',
+      provider: 'telegram',
+      label: 'Owner Telegram',
+      runtimeSecretRefs: { bot_token: 'env:TELEGRAM_BOT_TOKEN' },
+    };
+    settings.conversations.owner_dm = {
+      providerAccount: 'telegram_owner',
+      externalId: '42',
+      kind: 'dm',
+      displayName: 'Owner DM',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: ['someone-else'],
+      installedAgents: {},
+    };
+    settings.observer = {
+      enabled: true,
+      owner: { recipient: '42', conversation: 'owner_dm' },
+    };
+
+    const result = validateLoadedRuntimeSettings(
+      '/tmp/gantry-observer-owner',
+      settings,
+    );
+    expect(result.failure?.details.join('\n')).toContain(
+      'observer.owner.recipient must be a verified control approver of the owner conversation.',
+    );
+  });
+
+  it('rejects malformed observer settings', () => {
+    for (const [yaml, error] of [
+      ['observer: true\n', /observer must be a mapping/],
+      [
+        'observer:\n  enabled: "true"\n',
+        /observer\.enabled must be true\/false/,
+      ],
+      [
+        'observer:\n  owner:\n    recipient: U123\n',
+        /observer\.owner\.conversation must be a non-empty string/,
+      ],
+      [
+        'observer:\n  owner:\n    recipient: U123\n    conversation: owner_dm\n    role: admin\n',
+        /observer\.owner\.role is not supported/,
+      ],
+    ] as const) {
+      expect(() => parseRuntimeSettings(yaml)).toThrow(error);
+    }
   });
 
   it('defaults observability tracing and omits the default block', () => {

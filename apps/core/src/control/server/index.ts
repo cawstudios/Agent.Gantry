@@ -26,6 +26,10 @@ import {
   syncRuntimeSettingsFromProjection,
 } from '../../config/index.js';
 import {
+  RUNTIME_MEMORY_DREAMING_ENABLED,
+  RUNTIME_MEMORY_ENABLED,
+} from '../../config/memory.js';
+import {
   resolveRuntimeSecurityPosture,
   validateProductionSecurityGate,
 } from '../../shared/security-posture.js';
@@ -59,6 +63,7 @@ import { handleGuidedActionRoutes } from './routes/guided-actions.js';
 import { handleJobRoutes } from './routes/jobs.js';
 import { handleLlmRoutes } from './routes/llm.js';
 import { handleMemoryRoutes } from './routes/memory.js';
+import { handleObserverRoutes } from './routes/observer.js';
 import { handleMcpServerRoutes } from './routes/mcp-servers.js';
 import { handleModelRoutes } from './routes/models.js';
 import { handleOpenApiRoutes } from './routes/openapi.js';
@@ -166,6 +171,7 @@ function createControlRequestHandler(
       if (await handleProviderConversationRoutes(req, res, ctx, url, pathname))
         return;
       if (await handleMemoryRoutes(req, res, ctx, url, pathname)) return;
+      if (await handleObserverRoutes(req, res, ctx, url, pathname)) return;
       if (await handleBrainRoutes(req, res, ctx, url, pathname)) return;
       if (await handleCredentialRoutes(req, res, ctx, pathname)) return;
       if (await handleModelRoutes(req, res, ctx, pathname)) return;
@@ -241,6 +247,8 @@ export function startControlServer(input: {
   isSchedulerReady?: () => boolean;
   oldestWaitingLiveAdmissionSeconds?: () => number;
   liveCapacityLimit?: () => number;
+  /** Lifecycle-owned settings that are actually active in this process. */
+  getEffectiveRuntimeSettings?: ControlRouteContext['getEffectiveRuntimeSettings'];
 }): ControlServerHandle {
   configureDesiredSettingsStorageProvider(async () => {
     const storage = getRuntimeStorage();
@@ -307,6 +315,12 @@ export function startControlServer(input: {
     activeTriggerWaits: 0,
   };
   let webhookFlushInFlight = false;
+  let effectiveRuntimeSettings:
+    | ReturnType<typeof getRuntimeSettingsForConfig>
+    | undefined;
+  const getEffectiveRuntimeSettings =
+    input.getEffectiveRuntimeSettings ??
+    (() => (effectiveRuntimeSettings ??= getRuntimeSettingsForConfig()));
   const ctx: ControlRouteContext = {
     app: input.app,
     runtimeHome: GANTRY_HOME,
@@ -334,6 +348,11 @@ export function startControlServer(input: {
     triggerRateLimiter: createRateLimiter(),
     getRuntimeSettings: () => getPublicRuntimeSettings(),
     getInternalRuntimeSettings: () => getRuntimeSettingsForConfig(),
+    getEffectiveRuntimeSettings,
+    getEffectiveMemoryState: () => ({
+      enabled: RUNTIME_MEMORY_ENABLED,
+      dreamingEnabled: RUNTIME_MEMORY_DREAMING_ENABLED,
+    }),
     getEgressSettings: () => getRuntimeSettingsForConfig().permissions.egress,
     getDefaultModelConfig,
     getModelDefaults: getRuntimeModelDefaults,

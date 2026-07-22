@@ -70,6 +70,22 @@ export function renderObservabilitySettingsYaml(
   lines.push('');
 }
 
+export function renderObserverSettingsYaml(
+  lines: string[],
+  observer: RuntimeSettings['observer'],
+): void {
+  if (!observer.enabled && !observer.owner) return;
+  lines.push('observer:', `  enabled: ${observer.enabled ? 'true' : 'false'}`);
+  if (observer.owner) {
+    lines.push(
+      '  owner:',
+      `    recipient: ${quoteYamlString(observer.owner.recipient)}`,
+      `    conversation: ${quoteYamlString(observer.owner.conversation)}`,
+    );
+  }
+  lines.push('');
+}
+
 // Optional per-family member-order override. Omitted when no family has a
 // non-empty override.
 export function renderModelFamiliesYaml(

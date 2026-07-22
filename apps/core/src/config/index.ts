@@ -190,6 +190,7 @@ export function getPublicRuntimeSettings() {
         enabled: settings.memory.dreaming.enabled,
       },
     },
+    observer: settings.observer,
     runtime: {
       queue: settings.runtime.queue,
       sandbox: settings.runtime.sandbox,

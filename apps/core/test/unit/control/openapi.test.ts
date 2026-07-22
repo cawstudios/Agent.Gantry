@@ -17,6 +17,7 @@ import { handleGuidedActionRoutes } from '@core/control/server/routes/guided-act
 import { handleJobRoutes } from '@core/control/server/routes/jobs.js';
 import { handleLlmRoutes } from '@core/control/server/routes/llm.js';
 import { handleMemoryRoutes } from '@core/control/server/routes/memory.js';
+import { handleObserverRoutes } from '@core/control/server/routes/observer.js';
 import { handleMcpServerRoutes } from '@core/control/server/routes/mcp-servers.js';
 import { handleModelRoutes } from '@core/control/server/routes/models.js';
 import { handleOpenApiRoutes } from '@core/control/server/routes/openapi.js';
@@ -105,6 +106,8 @@ const expectedControlRoutes = [
   'GET /v1/memory/dreaming/status',
   'POST /v1/memory/dreaming/trigger',
   'POST /v1/memory/search',
+  'GET /v1/observer/insights',
+  'GET /v1/observer/status',
   'GET /v1/models',
   'GET /v1/models/defaults',
   'PATCH /v1/models/defaults',
@@ -281,6 +284,7 @@ async function isRecognizedByRuntime(method: string, pathname: string) {
     () => handleSessionRoutes(req, res, ctx, url, pathname),
     () => handleProviderConversationRoutes(req, res, ctx, url, pathname),
     () => handleMemoryRoutes(req, res, ctx, url, pathname),
+    () => handleObserverRoutes(req, res, ctx, url, pathname),
     () => handleBrainRoutes(req, res, ctx, url, pathname),
     () => handleModelRoutes(req, res, ctx, pathname),
     () => handleCredentialRoutes(req, res, ctx, pathname),

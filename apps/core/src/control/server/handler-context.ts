@@ -101,6 +101,11 @@ export type ControlRouteContext = {
   triggerRateLimiter: RateLimiter;
   getRuntimeSettings: () => RuntimeSettingsResponse['settings'];
   getInternalRuntimeSettings: () => InternalRuntimeSettings;
+  getEffectiveRuntimeSettings: () => InternalRuntimeSettings;
+  getEffectiveMemoryState?: () => {
+    enabled: boolean;
+    dreamingEnabled: boolean;
+  };
   getEgressSettings?: () => EgressSettings;
   getDefaultModelConfig: (
     kind?: 'interactive' | 'oneTimeJob' | 'recurringJob',

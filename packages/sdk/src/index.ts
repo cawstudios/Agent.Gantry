@@ -416,6 +416,19 @@ export class GantryClient {
       }),
   };
 
+  readonly observer = {
+    status: (input: OpenApi.GetObserverStatusQuery = {}) =>
+      this.transport.request<OpenApi.ObserverStatusResponse>({
+        method: 'GET',
+        path: `/v1/observer/status${querySuffix(input)}`,
+      }),
+    insights: (input: OpenApi.ListObserverInsightsQuery = {}) =>
+      this.transport.request<OpenApi.ObserverInsightListResponse>({
+        method: 'GET',
+        path: `/v1/observer/insights${querySuffix(input)}`,
+      }),
+  };
+
   readonly skills = createSkillsClient({ request: this.request });
   readonly mcpServers = mcpServerClients.createMcpServersClient({
     request: this.request,

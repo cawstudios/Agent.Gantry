@@ -279,6 +279,18 @@ export const RuntimeSettingsPublicSchema = z
           .strict(),
       })
       .strict(),
+    observer: z
+      .object({
+        enabled: z.boolean(),
+        owner: z
+          .object({
+            recipient: z.string().trim().min(1),
+            conversation: z.string().trim().min(1),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict(),
     runtime: z
       .object({
         queue: z

@@ -46,6 +46,7 @@ import { parseBrowserSettings } from './runtime-settings-browser-parser.js';
 import { parsePermissionSettings } from './runtime-settings-permissions-parser.js';
 import { parseLimitsSettings } from './runtime-settings-limits-parser.js';
 import { parseObservabilitySettings } from './runtime-settings-observability-parser.js';
+import { parseObserverSettings } from './runtime-settings-observer-parser.js';
 import { parseModelFamilies } from './runtime-settings-model-families-parser.js';
 import {
   modelAliasesToCatalogEntries,
@@ -958,11 +959,12 @@ export function parseRuntimeSettingsObject(
       key !== 'permissions' &&
       key !== 'limits' &&
       key !== 'observability' &&
+      key !== 'observer' &&
       key !== 'model_families' &&
       key !== 'model_aliases'
     ) {
       throw new Error(
-        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_accounts, conversations, agents, storage, agent, model_access, memory, runtime, browser, permissions, limits, observability, model_families, and model_aliases.`,
+        `${key} is not supported. Supported root keys are defaults, desired_state, providers, provider_accounts, conversations, agents, storage, agent, model_access, memory, runtime, browser, permissions, limits, observability, observer, model_families, and model_aliases.`,
       );
     }
   }
@@ -1008,6 +1010,7 @@ export function parseRuntimeSettingsObject(
     const permissions = parsePermissionSettings(root.permissions);
     const limits = parseLimitsSettings(root.limits);
     const observability = parseObservabilitySettings(root.observability);
+    const observer = parseObserverSettings(root.observer);
 
     return {
       desiredState,
@@ -1026,6 +1029,7 @@ export function parseRuntimeSettingsObject(
       permissions,
       limits,
       observability,
+      observer,
       modelFamilies,
       modelAliases,
     };

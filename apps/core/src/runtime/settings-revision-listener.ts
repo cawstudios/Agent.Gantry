@@ -13,6 +13,7 @@ import {
   settingsFromRevisionDocument,
 } from '../config/settings/settings-import-service.js';
 import type { SettingsRevisionWakeupSource } from '../config/settings/settings-revision-notify.js';
+import type { RuntimeSettings } from '../config/settings/runtime-settings-types.js';
 import {
   markSettingsLoaded,
   markSettingsNotLoaded,
@@ -44,7 +45,7 @@ export interface SettingsRevisionListenerDeps {
    * Errors are logged, not thrown — a failed deferred start must not poison
    * the applied revision.
    */
-  onFirstRevisionApplied?: () => Promise<void> | void;
+  onFirstRevisionApplied?: (settings: RuntimeSettings) => Promise<void> | void;
   logWarn?: (context: Record<string, unknown>, message: string) => void;
   logInfo?: (context: Record<string, unknown>, message: string) => void;
   setIntervalFn?: typeof setInterval;
@@ -198,7 +199,7 @@ export class SettingsRevisionListener {
     if (previousRevision === 0) {
       markSettingsLoaded();
       try {
-        await this.deps.onFirstRevisionApplied?.();
+        await this.deps.onFirstRevisionApplied?.(settings);
       } catch (err) {
         this.deps.logWarn?.(
           { err, revision: revision.revision },

@@ -48,6 +48,7 @@ import {
   renderLimitsSettingsYaml,
   renderModelAliasesYaml,
   renderModelFamiliesYaml,
+  renderObserverSettingsYaml,
   renderObservabilitySettingsYaml,
 } from './runtime-settings-optional-blocks-renderer.js';
 import { resolveConfiguredAgentRuntime } from './runtime-settings-agent-runtime.js';
@@ -716,6 +717,7 @@ export function renderRuntimeSettingsYaml(settings: RuntimeSettings): string {
   }
   renderLimitsSettingsYaml(lines, settings.limits);
   renderObservabilitySettingsYaml(lines, settings.observability);
+  renderObserverSettingsYaml(lines, settings.observer);
   renderModelFamiliesYaml(lines, settings.modelFamilies);
   renderModelAliasesYaml(lines, settings.modelAliases);
   return lines.join('\n');

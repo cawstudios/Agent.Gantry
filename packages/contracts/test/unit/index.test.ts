@@ -688,6 +688,7 @@ describe('contracts package', () => {
           },
         },
         memory: { enabled: true, dreaming: { enabled: false } },
+        observer: { enabled: false },
         runtime: {
           queue: {
             maxMessageRuns: 1,
@@ -756,6 +757,7 @@ describe('contracts package', () => {
         ?.permissionMode,
     ).toBe('auto_strict');
     expect(parsed.settings.permissions.autoMode).toEqual({ model: 'sonnet' });
+    expect(parsed.settings.observer).toEqual({ enabled: false });
     expectInvalid(RuntimeSettingsResponseSchema, {
       settings: {
         ...parsed.settings,

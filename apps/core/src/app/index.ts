@@ -127,13 +127,14 @@ export async function startGantryRuntime(
     isControlApproverAllowed: channelWiring.isControlApproverAllowed,
   });
 
-  let { runtimeSettings, closeTracing, initTracingFromSettings } =
-    await runStartup(app, {
-      settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
-      validateSettingsImportPreflight: options.skipPreflight
-        ? () => ({ ok: true })
-        : validateRuntimePreflight,
-    });
+  const startup = await runStartup(app, {
+    settingsAuthority: shouldDeferPreflightForFleetRole ? 'file' : 'revision',
+    validateSettingsImportPreflight: options.skipPreflight
+      ? () => ({ ok: true })
+      : validateRuntimePreflight,
+  });
+  let { runtimeSettings } = startup;
+  const { closeTracing, initTracingFromSettings } = startup;
   const storage = getRuntimeStorage();
   channelWiring.setRuntimeSecrets(
     createRepositoryRuntimeSecretProvider({
@@ -161,6 +162,7 @@ export async function startGantryRuntime(
       runtimeSettings = loadRuntimeSettings(GANTRY_HOME);
     }
   }
+  let effectiveRuntimeSettings = runtimeSettings;
   if (!options.skipPreflight && fleetSettingsLoaded) {
     const validation = await validateRuntimePreflightWithStorage(GANTRY_HOME);
     if (!validation.ok && validation.failure) {
@@ -363,7 +365,10 @@ export async function startGantryRuntime(
         bakeExecution: roleCaps.bakeExecution,
         capabilityReconciliation: roleCaps.workerRegistration,
         settingsLoaded: fleetSettingsLoaded,
-        onSettingsReady: async () => {
+        onSettingsReady: async (settings) => {
+          // Effective settings are a restart-owned snapshot. The held first
+          // fleet revision completes boot; later revisions stay pending.
+          effectiveRuntimeSettings = settings;
           // Tracing was skipped at boot (no revision yet); initialize from
           // the first authoritative revision BEFORE the scheduler guard —
           // control/live-worker roles never hold a scheduler start.
@@ -398,6 +403,7 @@ export async function startGantryRuntime(
       processRole,
       liveExecution: roleCaps.liveExecution,
       liveTurnsEnabled: runtimeSettings.runtime.liveTurns.enabled,
+      getEffectiveRuntimeSettings: () => effectiveRuntimeSettings,
       // Locked contract: the workstation `all` role keeps the historical
       // readiness check set (no role-specific checks); split roles gate on
       // exactly the subsystems they run.

@@ -232,6 +232,9 @@ export function createDefaultRuntimeSettings(): RuntimeSettings {
         sampleRate: 1,
       },
     },
+    observer: {
+      enabled: false,
+    },
     modelFamilies: {},
     modelAliases: {},
   };

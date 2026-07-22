@@ -1483,6 +1483,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/observer/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get observer status
+         * @description Returns the app-scoped observer activation state and evidence and insight counts.
+         */
+        get: operations["getObserverStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/observer/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List observer insights
+         * @description Lists app-scoped persisted observer insights with optional subject and state filters.
+         */
+        get: operations["listObserverInsights"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brain/import": {
         parameters: {
             query?: never;
@@ -2950,6 +2990,63 @@ export interface components {
             runs: {
                 [key: string]: unknown;
             }[];
+        };
+        ObserverOwner: {
+            recipient: string;
+            conversation: string;
+            conversationJid: string;
+            providerAccountId: string;
+        } | null;
+        ObserverStatusResponse: {
+            enabled: boolean;
+            /** @enum {string} */
+            activation: "disabled" | "configuration_required" | "evidence_accumulating" | "active";
+            message: string;
+            dreamingEnabled: boolean;
+            owner: components["schemas"]["ObserverOwner"];
+            counts: {
+                evidence: number;
+                insights: number;
+                pendingInsights: number;
+            };
+        };
+        ProactiveInsight: {
+            id: string;
+            appId: string;
+            subject: string;
+            /** @enum {string} */
+            insightType: "commitment" | "contradiction" | "open_question" | "stale_fact" | "decision_without_owner" | "duplicated_work" | "repetition";
+            title: string;
+            summary: string;
+            evidenceRefs: {
+                permalink: string;
+                messageId?: string;
+            }[];
+            /** Format: date-time */
+            batchSnapshotAt: string;
+            evidenceVersion: number;
+            canonicalSignature: string;
+            signatureEmbeddingRef: string | null;
+            confidence: number;
+            priorityScore: number;
+            /** @enum {string} */
+            state: "pending" | "claimed" | "sent" | "cooldown" | "resolved" | "dropped";
+            /** Format: date-time */
+            cooldownUntil: string | null;
+            /** Format: date-time */
+            resolvedAt: string | null;
+            /** Format: date-time */
+            surfacedAt: string | null;
+            recipient: string;
+            deliveryId: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ObserverInsightListResponse: {
+            insights: components["schemas"]["ProactiveInsight"][];
+            nextCursor: string | null;
         };
         Skill: {
             id: string;
@@ -6531,6 +6628,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryDreamingStatusResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getObserverStatus: {
+        parameters: {
+            query?: {
+                /** @description App id. Defaults to API key app. */
+                appId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObserverStatusResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listObserverInsights: {
+        parameters: {
+            query?: {
+                /** @description App id. Defaults to API key app. */
+                appId?: string;
+                /** @description Canonical memory subject filter. */
+                subject?: string;
+                /** @description Insight state filter. */
+                state?: "pending" | "claimed" | "sent" | "cooldown" | "resolved" | "dropped";
+                /** @description Maximum number of insights. */
+                limit?: number;
+                /** @description Opaque pagination cursor. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request succeeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObserverInsightListResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

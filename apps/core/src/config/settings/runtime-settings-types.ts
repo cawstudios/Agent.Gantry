@@ -333,6 +333,14 @@ export interface RuntimeObservabilitySettings {
   };
 }
 
+export interface RuntimeObserverSettings {
+  enabled: boolean;
+  owner?: {
+    recipient: string;
+    conversation: string;
+  };
+}
+
 export interface RuntimeCustomModelAliasSource {
   label: string;
   url: string;
@@ -381,6 +389,7 @@ export interface RuntimeSettings {
   // Absent/empty -> no caps. Restart-owned; no DB projection.
   limits: RuntimeLimitSettings;
   observability: RuntimeObservabilitySettings;
+  observer: RuntimeObserverSettings;
   // Optional per-family member-order override for model families. Maps a family
   // alias to a list of member aliases OR provider ids in preference order;
   // absent/empty -> the hardcoded MODEL_FAMILIES order. Unknown tokens are

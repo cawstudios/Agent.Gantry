@@ -344,6 +344,7 @@ describe('startFleetSubsystems', () => {
       expect(reconcilerInstances).toHaveLength(1);
       expect(reconcilerInstances[0]?.start).toHaveBeenCalledOnce();
       expect(onSettingsReady).toHaveBeenCalledOnce();
+      expect(onSettingsReady).toHaveBeenCalledWith({});
 
       // Subsequent revisions never double-start.
       latest.current = revisionRow(2);

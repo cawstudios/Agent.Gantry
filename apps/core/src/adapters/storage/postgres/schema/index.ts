@@ -19,6 +19,7 @@ export * from './messages.js';
 export * from './model-credentials.js';
 export * from './mcp-servers.js';
 export * from './outbound-delivery.js';
+export * from './observer-insights.js';
 export * from './pattern-candidates.js';
 export * from './proactive-surfacing.js';
 export * from './pending-access-requests.js';

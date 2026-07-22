@@ -103,6 +103,7 @@ import { PostgresSettingsRevisionRepository } from './settings-revision-reposito
 import { PostgresAsyncTaskRepository } from './async-task-repository.postgres.js';
 import { PostgresPatternCandidateRepository } from './pattern-candidate-repository.postgres.js';
 import { PostgresProactiveSurfacingRepository } from './proactive-surfacing-repository.postgres.js';
+import { PostgresObserverInsightRepository } from './observer-insight-repository.postgres.js';
 import type {
   RuntimeDependencyRepository,
   SettingsRevisionRepository,
@@ -110,6 +111,7 @@ import type {
 } from '../../../../domain/ports/fleet-capability-state.js';
 import type { AsyncTaskRepository } from '../../../../domain/ports/async-tasks.js';
 import type { PatternCandidateRepository } from '../../../../domain/ports/pattern-candidates.js';
+import type { ObserverInsightRepository } from '../../../../domain/ports/observer-insights.js';
 import type { PermissionPromotionRepository } from '../../../../domain/ports/permission-promotion.js';
 import type { GroupJoinOnboardingRepository } from '../../../../domain/ports/group-join-onboarding.js';
 import { PostgresPermissionPromotionRepository } from './permission-promotion-repository.postgres.js';
@@ -144,6 +146,7 @@ export interface PostgresDomainRepositoryBundle {
   asyncTasks: AsyncTaskRepository;
   patternCandidates: PatternCandidateRepository;
   proactiveSurfacing: PostgresProactiveSurfacingRepository;
+  observerInsights: ObserverInsightRepository;
   permissionPromotions: PermissionPromotionRepository;
   groupJoinOnboarding: GroupJoinOnboardingRepository;
 }
@@ -1770,6 +1773,7 @@ export function createPostgresDomainRepositories(
     asyncTasks: new PostgresAsyncTaskRepository(db),
     patternCandidates: new PostgresPatternCandidateRepository(db),
     proactiveSurfacing: new PostgresProactiveSurfacingRepository(db),
+    observerInsights: new PostgresObserverInsightRepository(db),
     permissionPromotions: new PostgresPermissionPromotionRepository(db),
     groupJoinOnboarding: new PostgresGroupJoinOnboardingRepository(db),
   };
