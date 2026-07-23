@@ -123,6 +123,15 @@ export async function resolvePermissionIpcDecision(input: {
             conversationId: input.request.targetJid ?? '',
           },
         ),
+        // Resolve `capability:<id>` rules against the same server-reviewed
+        // bundles the rules were projected from — trusted, no new state, and
+        // consistent with policy.rules (never runner-supplied definitions).
+        semanticCapabilityDefinitions: Object.fromEntries(
+          policy.semanticCapabilities.map((capability) => [
+            capability.capabilityId,
+            capability,
+          ]),
+        ),
         ...(input.request.jobId
           ? { autonomousAllowedToolRules: policy.rules }
           : { allowedToolRules: policy.rules }),
