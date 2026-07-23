@@ -29,6 +29,9 @@ export function SetupConnectionDetails({
   const selectedProvider = providers.data?.providers.find(
     (provider) => provider.id === providerId,
   );
+  const hasRequiredSecretReferences = (
+    selectedProvider?.runtimeSecretKeys ?? []
+  ).every((key) => secretRefs[key]?.trim());
   const accounts = (dashboard.data?.providerAccounts ?? []).filter(
     (account) => account.agentId === agentId,
   );
@@ -112,8 +115,19 @@ export function SetupConnectionDetails({
           Enter only stored secret references. Paste credential values through
           the CLI or another approved server-side secret path.
         </p>
+        {selectedProvider && !hasRequiredSecretReferences ? (
+          <p className="m-0 text-xs leading-5 text-status-idle">
+            Add a reference for each required secret before creating this
+            connection.
+          </p>
+        ) : null}
         <Button
-          disabled={!providerId || !label.trim() || createAccount.isPending}
+          disabled={
+            !providerId ||
+            !label.trim() ||
+            !hasRequiredSecretReferences ||
+            createAccount.isPending
+          }
           onClick={() =>
             createAccount.mutate(
               {
