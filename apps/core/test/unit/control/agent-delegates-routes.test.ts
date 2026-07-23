@@ -138,6 +138,49 @@ describe('agent delegates control routes', () => {
     expect(wrongScope.statusCode).toBe(403);
   });
 
+  it('persists a catalog model alias through the narrow agent model route', async () => {
+    const context = mockContext(['agents:admin']);
+    const writeAgentModelSetting = vi.fn(async () => undefined);
+    context.agentSettings.writeAgentModelSetting = writeAgentModelSetting;
+    const req = request('PATCH', { modelAlias: 'sonnet' }, 'test-token');
+    const res = responseRecorder();
+
+    await handleAgentRoutes(
+      req,
+      res,
+      context,
+      '/v1/agents/agent%3Aorchestrator/model',
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ modelAlias: 'sonnet' });
+    expect(writeAgentModelSetting).toHaveBeenCalledWith({
+      runtimeHome: '/tmp/gantry-test',
+      appId: 'app:tenant',
+      folder: 'orchestrator',
+      name: 'Orchestrator',
+      modelAlias: 'sonnet',
+    });
+  });
+
+  it('rejects an unregistered model alias before settings mutation', async () => {
+    const context = mockContext(['agents:admin']);
+    const writeAgentModelSetting = vi.fn(async () => undefined);
+    context.agentSettings.writeAgentModelSetting = writeAgentModelSetting;
+    const req = request('PATCH', { modelAlias: 'not-a-model' }, 'test-token');
+    const res = responseRecorder();
+
+    await handleAgentRoutes(
+      req,
+      res,
+      context,
+      '/v1/agents/agent%3Aorchestrator/model',
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(writeAgentModelSetting).not.toHaveBeenCalled();
+  });
+
   it('GET returns persona and only the bound callable roster', async () => {
     const res = await invoke('GET');
 
@@ -447,6 +490,7 @@ function mockContext(scopes: string[]): ControlRouteContext {
       },
     ],
     getInternalRuntimeSettings: () => fallbackSettings,
+    getSelectedAgentHarness: () => 'auto',
     agentSettings: {
       decodeRevisionDocument: settingsFromRevisionDocument,
       defaultSettings: createDefaultRuntimeSettings,
