@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
@@ -26,6 +26,11 @@ const persistedDraftSchema = draftSchema.extend({
   ]),
   connection: z.record(z.string(), z.unknown()).nullable(),
 });
+const providerAccountsSchema = z.object({
+  providerAccounts: z.array(
+    z.object({ id: z.string(), label: z.string(), providerId: z.string() }),
+  ),
+});
 
 export function AgentSetupDialog({
   open,
@@ -43,11 +48,21 @@ export function AgentSetupDialog({
   const [draftId, setDraftId] = useState<string>();
   const [version, setVersion] = useState<number>();
   const [modelAlias, setModelAlias] = useState('');
-  const [stage, setStage] = useState<'agent' | 'model'>('agent');
+  const [stage, setStage] = useState<'agent' | 'model' | 'connection'>('agent');
+  const [providerAccountId, setProviderAccountId] = useState('');
   const [confirmClose, setConfirmClose] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const dirty = Boolean(name.trim() || purpose.trim());
+  const providerAccounts = useQuery({
+    queryKey: ['agent-setup', 'provider-accounts'],
+    enabled: stage === 'connection' && Boolean(connection.transport),
+    queryFn: () =>
+      connection.transport!.request({
+        path: '/provider-accounts',
+        schema: providerAccountsSchema,
+      }),
+  });
 
   useEffect(() => {
     if (!open || !setupId || setupId === 'new' || !connection.transport) return;
@@ -124,6 +139,27 @@ export function AgentSetupDialog({
     }
   }
 
+  async function saveConnection() {
+    if (!connection.transport || !draftId || !version || !providerAccountId)
+      return;
+    setSaving(true);
+    try {
+      const result = await connection.transport.request({
+        path: `/agent-setups/${encodeURIComponent(draftId)}`,
+        method: 'PATCH',
+        body: {
+          step: 'connection',
+          expectedVersion: version,
+          connection: { providerAccountId },
+        },
+        schema: persistedDraftSchema,
+      });
+      setVersion(result.version);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function discardDraft() {
     if (draftId && connection.transport) {
       await connection.transport.request({
@@ -143,6 +179,7 @@ export function AgentSetupDialog({
     setVersion(undefined);
     setModelAlias('');
     setStage('agent');
+    setProviderAccountId('');
     setConfirmClose(false);
   }
 
@@ -251,7 +288,7 @@ export function AgentSetupDialog({
                     ) : null}
                   </div>
                 </>
-              ) : (
+              ) : stage === 'model' ? (
                 <>
                   <TextField
                     id="setup-model-alias"
@@ -269,6 +306,41 @@ export function AgentSetupDialog({
                       onClick={() => void saveModel()}
                     >
                       {saving ? 'Saving…' : 'Save model'}
+                    </Button>
+                    <Button
+                      disabled={!modelAlias.trim()}
+                      variant="primary"
+                      onClick={() => setStage('connection')}
+                    >
+                      Continue
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="grid gap-1.5 text-xs font-semibold text-text">
+                    Provider connection
+                    <select
+                      className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text"
+                      value={providerAccountId}
+                      onChange={(event) => setProviderAccountId(event.target.value)}
+                    >
+                      <option value="">Select a connection</option>
+                      {providerAccounts.data?.providerAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.label} — {account.providerId}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex justify-between gap-2">
+                    <Button onClick={() => setStage('model')}>Back</Button>
+                    <Button
+                      disabled={!providerAccountId || saving}
+                      variant="primary"
+                      onClick={() => void saveConnection()}
+                    >
+                      {saving ? 'Saving…' : 'Save connection'}
                     </Button>
                   </div>
                 </>
