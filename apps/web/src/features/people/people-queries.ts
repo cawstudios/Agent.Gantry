@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
+import { previewPeopleDataSource } from './people-data-source';
 import { mergeHistory, people } from './people-preview';
 
 export const peopleQueryKeys = {
@@ -10,12 +11,12 @@ export const peopleQueryKeys = {
 
 export const peoplePreviewQuery = queryOptions({
   queryKey: peopleQueryKeys.list(),
-  queryFn: () => people,
+  queryFn: () => previewPeopleDataSource.listPeople(),
   initialData: people,
 });
 
 export const mergeHistoryPreviewQuery = queryOptions({
   queryKey: peopleQueryKeys.mergeHistory(),
-  queryFn: () => mergeHistory,
+  queryFn: () => previewPeopleDataSource.listMergeHistory(),
   initialData: mergeHistory,
 });
