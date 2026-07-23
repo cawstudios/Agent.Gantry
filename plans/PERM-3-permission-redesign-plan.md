@@ -1,6 +1,6 @@
 # PERM-3 — Permission redesign implementation (F1–F5) plan
 
-## 1. Problem
+## Problem
 The permission engine (PERM-2 coordinator, now on main) over-asks the human for
 benign actions and its saved grants silently fail to match. Live-log field audit
 (goal doc `docs/architecture/permission-engine-redesign-goal-prompt.md`): 285 asks,
@@ -12,7 +12,7 @@ commands are treated as "incomplete input → ask". Secondary: benign first-part
 tools have no birthright (F4); an unresolved capability poisons unrelated tools
 (F3); the classifier conflates risk with authorization (F5).
 
-## 2. Scope / Non-goals
+## Scope / Non-goals
 In scope: F1 real-command decision view; F4 birthright + known-safe catalog; F3
 capability resolution; F5 risk-only classifier with engine-owned authorization +
 codex calibration lines. Per-conversation cache/grant scoping (threads inherit).
@@ -21,7 +21,7 @@ add only if latency demands); SANDBOX-1 escape-as-new-action; connectors/OAuth;
 the fuller two-factor LLM schema (superseded by risk-only). No change to
 `sandbox_runtime` confinement. No new persisted exact-command rules (deprecated).
 
-## 3. Acceptance Criteria
+## Acceptance Criteria
 1. Ordinary shell commands (incl. the host-env-prefixed render `RunCommand`s) are
    NOT marked "incomplete input"; rails/classifier/effect-key/reviewed-rule matcher
    evaluate the real, prefix-stripped command. (F1)
@@ -37,7 +37,7 @@ the fuller two-factor LLM schema (superseded by risk-only). No change to
 6. `python3 .agents/scripts/verify.py` green; existing permission unit + postgres
    suites green; no test deleted for convenience.
 
-## 4. Technical Approach
+## Technical Approach
 **F1 (first — unblocks 2/3/4). Simplest shape (grill-reduced):** In
 `ipc-parsing.ts`, strip the host env-prefix (`stripHostInjectedEnvPrefix`) from
 shell command fields BEFORE sanitizing. Once the ~740-char prefix is gone, ordinary
@@ -72,7 +72,7 @@ codex RISK calibration lines verbatim (outside-workspace ≠ high; sandbox-retry
 suspicious; benign local FS = low; scoped user-requested `rm -rf` = low/med).
 Cache the risk verdict per-conversation.
 
-## 5. Decisions
+## Decisions
 - `docs/decisions/0042-decision-view-16k-prefix-stripped.md` — the decision path
   (rails/effect-key/classifier) consumes a prefix-stripped 16k command view;
   `toolInput` stays 500-char display-only. (Rejected: raise `toolInput` to 16k
@@ -83,7 +83,7 @@ Cache the risk verdict per-conversation.
 - Everything else derives from the accepted goal doc + existing decision records
   (0040 two-axis, capabilities framing, cache scoping, birthright, requester/approver).
 
-## 6. Surface Impact
+## Surface Impact
 | Surface | Class | Reason |
 |---|---|---|
 | Runtime behavior | Changed | fewer human asks; real-command decisioning; risk-only classifier |
@@ -94,7 +94,7 @@ Cache the risk verdict per-conversation.
 | Docs | Changed | goal doc already on main; add decisions 0042/0043 |
 | Tests | Changed | update incomplete-input/classifier suites to real-command behavior; add F1/F3/F4/F5 tests |
 
-## 7. Task Decomposition (bounded, capability-driven, disjoint scope)
+## Task Decomposition (bounded, capability-driven, disjoint scope)
 - **T-F1** — real-command decision view: prefix-strip at ipc-parse + rails/effect-key
   consume 16k view + `inputIsIncomplete` refinement + tests. → verify: AC-1, AC-6.
 - **T-F4** — birthright known-safe catalog + first-party benign MCP allow-set + tests.
@@ -104,7 +104,7 @@ Cache the risk verdict per-conversation.
   calibration lines + per-conversation risk cache + tests. → verify: AC-4, AC-5.
 T-F1 lands first (unblocks the others); F4/F3 are independent; F5 last (depends on F1).
 
-## 8. Risks
+## Risks
 - Under-stripping/over-stripping the host prefix → a real command mis-normalized.
   Mitigation: `stripHostInjectedEnvPrefix` is value-validated (loopback proxies,
   `netdns=go`, trusted CA paths only); pin with a byte-equality test.
@@ -115,7 +115,7 @@ T-F1 lands first (unblocks the others); F4/F3 are independent; F5 last (depends 
   Mitigation: high/critical never auto-allows without held authorization; test.
 - Capability resolution must be source-type-agnostic. Mitigation: test each source type.
 
-## 9. Verify Plan
+## Verify Plan
 ```bash
 npm run typecheck
 npm run test:unit        # focused permission suites per task; full at closeout
