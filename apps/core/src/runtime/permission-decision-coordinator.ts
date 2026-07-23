@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
 import { decisionForMode } from '../domain/permission-decision.js';
 import type {
   PermissionApprovalDecision,
+  PermissionApprovalDecisionMode,
   PermissionApprovalRequest,
 } from '../domain/types.js';
 import {
@@ -9,7 +12,15 @@ import {
   type PermissionDeterministicRailsInput,
 } from '../domain/permission-deterministic-rails.js';
 import type { ToolPolicyDecision } from '../shared/tool-execution-policy-service.js';
-import type { PermissionDecisionMemoryRepository } from '../domain/ports/permission-decision-memory.js';
+import type {
+  PermissionDecisionMemoryRepository,
+  PermissionDecisionMemoryRow,
+} from '../domain/ports/permission-decision-memory.js';
+import {
+  EFFECT_SCHEMA_VERSION,
+  RAIL_CATALOG_VERSION,
+} from '../domain/permission-effect-key.js';
+import { canonicalizeTrustedRoot } from '../shared/permission-trusted-paths.js';
 
 export type DeterministicPermissionRails = (
   input: PermissionDeterministicRailsInput,
@@ -66,17 +77,22 @@ export async function coordinatePermissionDecision(
     input.request.decisionReason = reviewedRuleDecision.reason;
     input.request.closestRule = reviewedRuleDecision.closestRule;
   }
-  const railDecision = (
-    input.deterministicRails ?? evaluatePermissionDeterministicRails
-  )({
+  const railFn = input.deterministicRails ?? evaluatePermissionDeterministicRails;
+  const railsInput: PermissionDeterministicRailsInput = {
     request: input.request,
     ...input.deterministicRailsInput,
-  });
+  };
+  const railDecision = railFn(railsInput);
   // Rails re-run on EVERY call, BEFORE any cache read (re-run-every-hit): a
   // deny/allow floor wins unchanged, and an ask-floor overrides even a cached
   // allow — so the cache is consulted ONLY when rails fall through entirely.
   if (railDecision) {
     if (railDecision.railOutcome === 'ask') {
+      // Trusted-root stage (Task G): an out-of-root ask can be covered by a
+      // learned grant, or offered as an ask-once "remember this folder". Rails
+      // still ran first, so a destructive/secret/escape ask is never learnable.
+      const trustedRoot = await resolveTrustedRootStage(input, railFn, railsInput);
+      if (trustedRoot) return trustedRoot;
       input.request.decisionReason = railDecision.reason;
       return input.tail();
     }
@@ -102,6 +118,116 @@ export async function coordinatePermissionDecision(
     }
   }
   return input.tail();
+}
+
+const TRUSTED_ROOT_LEARN_OPTIONS: PermissionApprovalDecisionMode[] = [
+  // Renders with existing labels: "Allow for future" = remember this folder,
+  // "Allow once" = once, "Cancel" = deny. No new decision mode threaded through
+  // the channels — the persistent-rule option carries the "this folder" intent.
+  'allow_persistent_rule',
+  'allow_once',
+  'cancel',
+];
+
+/**
+ * Learned trusted-root stage (Task G). Reached only when rails ASK, so a
+ * destructive/secret/escape command has already asked and can never be learned.
+ * A grant that covers the command's canonical cwd/targets auto-allows it; a
+ * first, coherent out-of-root command is offered an ask-once "remember this
+ * folder" and, on approval, persisted so later ops in that root auto-allow.
+ */
+async function resolveTrustedRootStage(
+  input: CoordinatePermissionDecisionInput,
+  railFn: DeterministicPermissionRails,
+  railsInput: PermissionDeterministicRailsInput,
+): Promise<PermissionApprovalDecision | undefined> {
+  const workspaceRoot = input.deterministicRailsInput?.workspaceRoot;
+  const memory = input.decisionMemory;
+  // No repository ⇒ no grant to read and nowhere to persist one, so leave the
+  // ask untouched for the normal classifier/human tail.
+  if (!workspaceRoot || !memory) return undefined;
+
+  // "root clears the ask" ⇔ trusting `root` removes the sole ASK reason. It
+  // re-runs the SAME rails with `root` added, so containment, sibling scoping
+  // and symlink-escape all reuse PERM-1's realpath check (a destructive/secret
+  // ask survives the extra root, so the grant/learn paths never fire for it).
+  const clears = (root: string): boolean => {
+    const rerun = railFn({
+      ...railsInput,
+      trustedRoots: [...(railsInput.trustedRoots ?? []), root],
+    });
+    return !rerun || rerun.railOutcome !== 'ask';
+  };
+
+  const grants = await memory
+    .list({
+      appId: input.request.appId ?? 'default',
+      agentFolder: input.request.sourceAgentFolder,
+      kind: 'trusted_root',
+    })
+    // ponytail: queried on every ASK; gate on `clears(cwd)` first if the
+    // scoped list ever shows up hot.
+    .catch(() => [] as PermissionDecisionMemoryRow[]);
+  const now = new Date().toISOString();
+  for (const grant of grants) {
+    if (
+      grant.canonicalRoot &&
+      isActiveGrant(grant, now) &&
+      clears(grant.canonicalRoot)
+    ) {
+      return grantAllow(input.request, grant.canonicalRoot);
+    }
+  }
+
+  const canonicalRoot = canonicalizeTrustedRoot(workspaceRoot);
+  // Only a coherent single folder is learnable: trusting the cwd must clear the
+  // ask. If a target escapes the cwd, the ask survives and we fall to a plain
+  // prompt rather than offering to remember a root that would not cover it.
+  if (!clears(canonicalRoot)) return undefined;
+
+  input.request.decisionReason = `First command in a new folder: ${canonicalRoot}.`;
+  input.request.decisionOptions = [...TRUSTED_ROOT_LEARN_OPTIONS];
+  input.request.trustedRootLearn = true;
+  const decision = await input.tail();
+  if (decision.approved && decision.mode === 'allow_persistent_rule') {
+    const principal = decision.decidedBy ?? 'owner';
+    await memory
+      .put({
+        id: randomUUID(),
+        appId: input.request.appId ?? 'default',
+        agentFolder: input.request.sourceAgentFolder,
+        kind: 'trusted_root',
+        lookupIdentity: `${canonicalRoot}\u0000${principal}`,
+        reason: `Owner granted trusted root ${canonicalRoot}.`,
+        canonicalRoot,
+        principal,
+        effectSchemaVersion: EFFECT_SCHEMA_VERSION,
+        railVersion: RAIL_CATALOG_VERSION,
+        provenance: 'human_trusted_root',
+        nowIso: new Date().toISOString(),
+      })
+      // ponytail: a grant-write failure must never block the live allow.
+      .catch(() => undefined);
+    return grantAllow(input.request, canonicalRoot);
+  }
+  return decision;
+}
+
+function isActiveGrant(
+  grant: PermissionDecisionMemoryRow,
+  nowIso: string,
+): boolean {
+  return !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > nowIso);
+}
+
+function grantAllow(
+  request: PermissionApprovalRequest,
+  canonicalRoot: string,
+): PermissionApprovalDecision {
+  return {
+    ...decisionForMode(request, 'allow_once', 'trusted_root_grant'),
+    reason: `Command runs inside a granted trusted root: ${canonicalRoot}.`,
+  };
 }
 
 interface PermissionRunRestriction {

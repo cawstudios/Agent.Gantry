@@ -162,6 +162,9 @@ export interface PermissionApprovalRequest {
   semanticCapabilityDefinitions?: Record<string, SemanticCapabilityDefinition>;
   suggestions?: PermissionApprovalUpdate[];
   decisionOptions?: PermissionApprovalDecisionMode[];
+  /** Learned-root ask-once (PERM-2 Task G): the persistent-rule option means
+   *  "remember this folder", so it approves without a tool-rule suggestion. */
+  trustedRootLearn?: boolean;
   promotionHintCount?: number;
   interaction?: InteractionDescriptor;
   permissionBatch?: {

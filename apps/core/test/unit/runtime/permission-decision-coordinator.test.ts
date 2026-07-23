@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { PermissionApprovalRequest } from '@core/domain/types.js';
 import type { ToolPolicyDecision } from '@core/shared/tool-execution-policy-service.js';
+import { decisionForMode } from '@core/domain/permission-decision.js';
 import { buildSdkFilesystemSandbox } from '@core/adapters/llm/anthropic-claude-agent/runner/filesystem-sandbox.js';
 import {
   coordinatePermissionDecision,
@@ -353,6 +354,156 @@ describe('coordinatePermissionDecision', () => {
     ).resolves.toEqual(tailDecision);
     expect(getClassifierVerdict).not.toHaveBeenCalled();
     expect(tail).toHaveBeenCalledOnce();
+  });
+
+  // Task G — learned trusted-root ask-once `[this folder][once][deny]`.
+  const shellIn = (root: string) => ({
+    workspaceRoot: root,
+    trustedRoots: [] as string[],
+  });
+  const grantRow = (canonicalRoot: string) =>
+    ({ canonicalRoot }) as never;
+
+  it('offers ask-once "this folder" on the first command in a new root and persists the grant', async () => {
+    const list = vi.fn(async () => []);
+    const put = vi.fn(async () => {});
+    // The human picks the persistent-rule option ("this folder"), which for a
+    // trustedRootLearn request approves without a tool-rule suggestion.
+    const tail = vi.fn(async () => ({
+      approved: true,
+      mode: 'allow_persistent_rule' as const,
+      decidedBy: 'owner-1',
+    }));
+    const req = {
+      ...request,
+      toolName: 'RunCommand',
+      toolInput: { command: 'git status' },
+    };
+    const decision = await coordinatePermissionDecision({
+      request: req,
+      decisionMemory: { list, put } as never,
+      deterministicRailsInput: shellIn('/perm2test/project'),
+      tail,
+    });
+    expect(tail).toHaveBeenCalledOnce();
+    expect(req.decisionOptions).toEqual([
+      'allow_persistent_rule',
+      'allow_once',
+      'cancel',
+    ]);
+    expect(req.trustedRootLearn).toBe(true);
+    expect(put).toHaveBeenCalledOnce();
+    expect(put.mock.calls[0][0]).toMatchObject({
+      kind: 'trusted_root',
+      canonicalRoot: '/perm2test/project',
+      principal: 'owner-1',
+      lookupIdentity: '/perm2test/project\u0000owner-1',
+      provenance: 'human_trusted_root',
+    });
+    expect(decision).toMatchObject({
+      approved: true,
+      decidedBy: 'trusted_root_grant',
+    });
+  });
+
+  it('auto-allows a benign op inside a granted trusted root WITHOUT prompting', async () => {
+    const tail = vi.fn();
+    const list = vi.fn(async () => [grantRow('/perm2test/project')]);
+    const req = {
+      ...request,
+      toolName: 'RunCommand',
+      toolInput: { command: 'git status' },
+    };
+    const decision = await coordinatePermissionDecision({
+      request: req,
+      decisionMemory: { list, put: vi.fn() } as never,
+      deterministicRailsInput: shellIn('/perm2test/project'),
+      tail,
+    });
+    expect(tail).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({
+      approved: true,
+      decidedBy: 'trusted_root_grant',
+    });
+  });
+
+  it('still ASKs for a destructive command inside a granted root (rails override)', async () => {
+    const tail = vi.fn(async () => ({
+      approved: false,
+      mode: 'cancel' as const,
+      decidedBy: 'human',
+    }));
+    const put = vi.fn(async () => {});
+    const req = {
+      ...request,
+      toolName: 'RunCommand',
+      toolInput: { command: 'rm -rf ./build' },
+    };
+    await coordinatePermissionDecision({
+      request: req,
+      decisionMemory: {
+        list: vi.fn(async () => [grantRow('/perm2test/project')]),
+        put,
+      } as never,
+      deterministicRailsInput: shellIn('/perm2test/project'),
+      tail,
+    });
+    expect(tail).toHaveBeenCalledOnce();
+    expect(req.decisionReason).toContain('Destructive');
+    // Destructive commands are never offered as a learnable root.
+    expect(req.trustedRootLearn).toBeUndefined();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('scopes a grant to its canonical root (a sibling root is not covered)', async () => {
+    const tail = vi.fn(async () => ({
+      approved: false,
+      mode: 'cancel' as const,
+      decidedBy: 'human',
+    }));
+    const put = vi.fn(async () => {});
+    const req = {
+      ...request,
+      toolName: 'RunCommand',
+      toolInput: { command: 'git status' },
+    };
+    const decision = await coordinatePermissionDecision({
+      request: req,
+      decisionMemory: {
+        list: vi.fn(async () => [grantRow('/perm2test/project-a')]),
+        put,
+      } as never,
+      // Sibling of the granted root — the project-a grant must NOT auto-allow.
+      deterministicRailsInput: shellIn('/perm2test/project-b'),
+      tail,
+    });
+    expect(tail).toHaveBeenCalledOnce();
+    expect(req.decisionOptions).toEqual([
+      'allow_persistent_rule',
+      'allow_once',
+      'cancel',
+    ]);
+    expect(put).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({ approved: false });
+  });
+
+  it('domain guard: "this folder" approves a trustedRootLearn request with no suggestion', () => {
+    const learnReq: PermissionApprovalRequest = {
+      ...request,
+      decisionOptions: ['allow_persistent_rule', 'allow_once', 'cancel'],
+      trustedRootLearn: true,
+    };
+    expect(
+      decisionForMode(learnReq, 'allow_persistent_rule', 'owner-1'),
+    ).toMatchObject({ approved: true, mode: 'allow_persistent_rule' });
+    // Without the flag the same suggestion-less request collapses to cancel.
+    const plainReq: PermissionApprovalRequest = {
+      ...request,
+      decisionOptions: ['allow_persistent_rule', 'allow_once', 'cancel'],
+    };
+    expect(
+      decisionForMode(plainReq, 'allow_persistent_rule', 'owner-1'),
+    ).toMatchObject({ approved: false, mode: 'cancel' });
   });
 
   it('spawn registration stores and removes the host restriction by agent/run key', () => {

@@ -34,6 +34,12 @@ export function outOfTrustedRootReason(
   return undefined;
 }
 
+// Canonical (symlink-resolved) form of a learned trusted root, so the stored
+// root and the containment checks share PERM-1's realpath semantics.
+export function canonicalizeTrustedRoot(target: string): string {
+  return realResolve(target);
+}
+
 function leafCwd(leaf: BashCommandLeaf, workspaceRoot: string): string {
   let cwd = path.resolve(workspaceRoot);
   if (bashExecutableName(leaf.argv[0] ?? '') !== 'git') return cwd;
