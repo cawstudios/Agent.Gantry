@@ -19,15 +19,27 @@ const stages = [
     title: 'Agent',
     description: 'Name the agent and describe the work it should own.',
     fields: [
-      { label: 'Agent name', placeholder: 'e.g. Operations Assistant' },
-      { label: 'Purpose', placeholder: 'What should this agent help with?' },
+      {
+        label: 'Agent name',
+        placeholder: 'e.g. Operations Assistant',
+        required: true,
+      },
+      {
+        label: 'Purpose',
+        placeholder: 'What should this agent help with?',
+        required: true,
+      },
     ],
   },
   {
     title: 'Model access',
     description: 'Choose a model from the live catalog and confirm access.',
     fields: [
-      { label: 'Model', placeholder: 'Available models load when connected' },
+      {
+        label: 'Model',
+        placeholder: 'Available models load when connected',
+        required: false,
+      },
     ],
   },
   {
@@ -37,6 +49,7 @@ const stages = [
       {
         label: 'Provider connection',
         placeholder: 'Available connections load when connected',
+        required: false,
       },
     ],
   },
@@ -48,6 +61,7 @@ const stages = [
       {
         label: 'Conversation',
         placeholder: 'Search available conversations when connected',
+        required: false,
       },
     ],
   },
@@ -58,6 +72,7 @@ const stages = [
       {
         label: 'Profile summary',
         placeholder: 'Profile loading is available when connected',
+        required: false,
       },
     ],
   },
@@ -70,10 +85,15 @@ const stages = [
 
 export function SetupRoute() {
   const [activeStage, setActiveStage] = useState(0);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [showValidation, setShowValidation] = useState(false);
   const connection = useRuntimeConnection();
   const { requestConnection } = useConnectionGate();
   const stage = stages[activeStage];
   const isFinalStage = activeStage === stages.length - 1;
+  const invalidFields = stage.fields.filter(
+    (field) => field.required && !draft[field.label]?.trim(),
+  );
 
   return (
     <div className="mx-auto grid w-full max-w-[1120px] gap-6">
@@ -101,18 +121,35 @@ export function SetupRoute() {
 
       <Panel title={stage.title} description={stage.description}>
         <div className="grid gap-5 p-5">
-          {stage.fields.map((field) => (
-            <label
-              className="grid gap-1.5 text-xs font-semibold text-text"
-              key={field.label}
-            >
-              {field.label}
-              <input
-                className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text placeholder:text-text-muted"
-                placeholder={field.placeholder}
-              />
-            </label>
-          ))}
+          {stage.fields.map((field) => {
+            const invalid = showValidation && invalidFields.includes(field);
+
+            return (
+              <label
+                className="grid gap-1.5 text-xs font-semibold text-text"
+                key={field.label}
+              >
+                {field.label}
+                <input
+                  aria-invalid={invalid || undefined}
+                  className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text placeholder:text-text-muted aria-invalid:border-danger"
+                  placeholder={field.placeholder}
+                  value={draft[field.label] ?? ''}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      [field.label]: event.target.value,
+                    }))
+                  }
+                />
+                {invalid ? (
+                  <span className="font-normal text-danger">
+                    Enter a {field.label.toLowerCase()} to continue.
+                  </span>
+                ) : null}
+              </label>
+            );
+          })}
           {isFinalStage ? (
             <ReviewSummary connected={Boolean(connection.transport)} />
           ) : null}
@@ -130,6 +167,11 @@ export function SetupRoute() {
                   requestConnection('Verify agent setup');
                   return;
                 }
+                if (invalidFields.length) {
+                  setShowValidation(true);
+                  return;
+                }
+                setShowValidation(false);
                 setActiveStage((current) =>
                   Math.min(current + 1, stages.length - 1),
                 );
