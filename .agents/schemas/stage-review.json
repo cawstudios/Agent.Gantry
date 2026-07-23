@@ -1,0 +1,17 @@
+{
+  "artifact": "stage-review",
+  "phase": "implementing (per-stage, pre-done)",
+  "recorded_by": "record_stage_review_from_json.py --stage <id>",
+  "generated_by": ["reviewer", "codex-reviewer", "claude-code:autoreview"],
+  "required": {
+    "generated_by": "str",
+    "verdict": "str",
+    "findings": "list"
+  },
+  "optional": {
+    "summary": "str",
+    "passes": "int",
+    "reviewed_scope": "list"
+  },
+  "verdict_note": "verdict: clean | blocked. `forge stage done` refuses unless the LATEST recorded stage review is `clean` AND its reviewed_sha equals current HEAD — so any fix after a clean review (which moves HEAD) staleness-fails the gate until the final commit is re-reviewed clean. This makes 'LOCAL autoreview until clean before done' an enforced gate, not advice."
+}

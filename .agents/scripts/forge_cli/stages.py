@@ -13,9 +13,36 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from factory_lib import dump_json, load_json, now_iso, repo_root
+from factory_lib import (
+    dump_json, factory_dir, head_sha, load_json, now_iso, repo_root,
+)
 
 from .common import fail
+
+
+def _require_clean_stage_review(base: Path, stage_id: str) -> None:
+    """Gate: `stage done` refuses unless the latest stage review is `clean`
+    AND bound to the current HEAD. A fix after a clean review advances HEAD →
+    the review goes stale → the gate refuses until the final commit is
+    re-reviewed. This enforces "LOCAL autoreview until clean before done"
+    (WORKFLOW.md Stage Loop) instead of trusting the operator to remember it."""
+    path = factory_dir(base) / "stage-reviews" / f"{stage_id}.json"
+    if not path.exists():
+        fail(f"{stage_id} has no recorded stage review — LOCAL autoreview until "
+             "clean is the gate for done. Review the COMMITTED diff, then record: "
+             f"record_stage_review_from_json.py --stage {stage_id} (verdict clean).")
+    review = load_json(path) or {}
+    if str(review.get("verdict", "")).lower() != "clean":
+        fail(f"{stage_id} stage review verdict is "
+             f"{review.get('verdict', 'missing')!r}, not 'clean' — fix the "
+             "findings, re-review the new commit, and record again before done.")
+    head = head_sha(base)
+    reviewed = review.get("reviewed_sha")
+    if head and reviewed and reviewed != head:
+        fail(f"{stage_id} stage review is STALE — HEAD moved since the clean "
+             f"review (reviewed {str(reviewed)[:12]}, HEAD {head[:12]}). A fix "
+             "after review is unreviewed; re-review the final commit and record "
+             f"again: record_stage_review_from_json.py --stage {stage_id}.")
 
 
 def stages_path(base: Path) -> Path:
@@ -75,7 +102,9 @@ def cmd_start(args: argparse.Namespace) -> None:
     dump_json(stages_path(base), data)
     print(f"Stage {args.id} active — {stage.get('title')}")
     print("Loop: implement via /codex:rescue → inspect diff → validate assumptions → "
-          "smallest checks → LOCAL autoreview until clean → commit → forge stage done "
+          "smallest checks → commit → LOCAL autoreview of the commit UNTIL CLEAN "
+          f"(record_stage_review_from_json.py --stage {args.id}, verdict clean; a fix "
+          "moves HEAD and staleness-fails the gate → re-review) → forge stage done "
           f"{args.id}")
 
 
@@ -88,6 +117,7 @@ def cmd_done(args: argparse.Namespace) -> None:
     if stage.get("status") != "active":
         fail(f"{args.id} is {stage.get('status', 'pending')!r}, not active — "
              "`forge stage start` it first; done attests a stage that actually ran.")
+    _require_clean_stage_review(base, args.id)
     stage["status"] = "done"
     stage["completed_at"] = now_iso()
     dump_json(stages_path(base), data)
