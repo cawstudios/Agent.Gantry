@@ -5,6 +5,7 @@ import {
   CreateAgentRequestSchema,
   PutAgentProfileFileRequestSchema,
   ReplaceAgentDelegatesRequestSchema,
+  SetAgentModelRequestSchema,
   UpdateAgentRequestSchema,
 } from '@gantry/contracts';
 
@@ -40,6 +41,7 @@ import {
 } from '../handler-context.js';
 import { readJson, sendError, sendJson } from '../http.js';
 import { nowIso } from '../../../shared/time/datetime.js';
+import { resolveModelSelectionForWorkload } from '../../../shared/model-catalog.js';
 import { writeControlDesiredState } from './settings.js';
 import {
   agentIdentityMap,
@@ -176,6 +178,49 @@ export async function handleAgentRoutes(
     if (!settingsWritten)
       await ctx.syncSettingsFromProjection(auth.appId as AppId);
     sendJson(res, 201, agentToResponse(ctx, agent));
+    return true;
+  }
+
+  const agentModelMatch = pathname.match(/^\/v1\/agents\/([^/]+)\/model$/);
+  if (agentModelMatch && req.method === 'PATCH') {
+    const auth = authorizeControlRequest(req, res, ctx.keys, ['agents:admin']);
+    if (!auth) return true;
+    const parsed = SetAgentModelRequestSchema.safeParse(await readJson(req));
+    if (!parsed.success) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Invalid agent model');
+      return true;
+    }
+    const resolved = resolveModelSelectionForWorkload(
+      parsed.data.modelAlias,
+      'chat',
+    );
+    if (!resolved.ok) {
+      sendError(res, 400, 'INVALID_REQUEST', resolved.message);
+      return true;
+    }
+    const agentId = decodeURIComponent(agentModelMatch[1]) as AgentId;
+    const agent =
+      await getRuntimeStorage().repositories.agents.getAgent(agentId);
+    if (!agent || agent.appId !== auth.appId) {
+      sendError(res, 404, 'NOT_FOUND', 'Agent not found');
+      return true;
+    }
+    const folder = folderForAgentId(agent.id);
+    if (!folder) {
+      sendError(res, 400, 'INVALID_REQUEST', 'Agent has no settings folder');
+      return true;
+    }
+    await ctx.agentSettings.writeAgentModelSetting({
+      runtimeHome: ctx.runtimeHome,
+      appId: auth.appId as AppId,
+      folder,
+      name: agent.name,
+      modelAlias: resolved.alias,
+    });
+    sendJson(res, 200, {
+      ...agentToResponse(ctx, agent),
+      modelAlias: resolved.alias,
+    });
     return true;
   }
 

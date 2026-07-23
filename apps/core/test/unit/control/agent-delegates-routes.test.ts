@@ -453,6 +453,7 @@ function mockContext(scopes: string[]): ControlRouteContext {
       serializeRevisionDocument: (settings) =>
         settingsToRevisionDocument(settings as RuntimeSettings),
       writeAgentHarnessSetting: async () => undefined,
+      writeAgentModelSetting: async () => undefined,
     },
   } as ControlRouteContext;
 }

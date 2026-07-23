@@ -98,6 +98,13 @@ export const UpdateAgentRequestSchema = z
   .strict();
 export type UpdateAgentRequest = z.infer<typeof UpdateAgentRequestSchema>;
 
+export const SetAgentModelRequestSchema = z
+  .object({
+    modelAlias: z.string().trim().min(1),
+  })
+  .strict();
+export type SetAgentModelRequest = z.infer<typeof SetAgentModelRequestSchema>;
+
 export const ReplaceAgentDelegatesRequestSchema = z
   .object({
     delegates: z.array(z.string().trim().min(1).max(160)).max(100),

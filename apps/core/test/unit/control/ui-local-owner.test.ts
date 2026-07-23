@@ -143,6 +143,17 @@ describe('local-owner UI request guard', () => {
     ).toContain('not available');
   });
 
+  it('allows the scoped agent model selection action', () => {
+    const mutation = request({
+      method: 'PATCH',
+      headers: { ...browserHeaders, 'content-type': 'application/json' },
+    });
+
+    expect(
+      validateLocalOwnerUiRequest(mutation, '/v1/agents/agent-1/model'),
+    ).toBeUndefined();
+  });
+
   it('allows only the named profile files needed by agent setup', () => {
     const mutation = request({
       method: 'PUT',

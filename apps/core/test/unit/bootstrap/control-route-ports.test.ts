@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 
 describe('control route port composition', () => {
-  it('decodes and serializes the narrow agent view and writes harness settings', async () => {
+  it('decodes and serializes the narrow agent view and writes agent settings', async () => {
     const port = createControlAgentSettingsPort();
     state.settings.agents.worker = {
       name: 'Worker',
@@ -101,6 +101,24 @@ describe('control route port composition', () => {
       appId: 'default',
       revisionMirrorRequired: true,
       revisionMirror: { createdBy: 'control-api:agent-harness' },
+    });
+
+    importWorkstation.mockClear();
+    await port.writeAgentModelSetting({
+      runtimeHome: '/tmp/gantry-test',
+      appId: 'default' as never,
+      folder: 'worker',
+      name: 'Worker Two',
+      modelAlias: 'sonnet',
+    });
+
+    expect(importWorkstation).toHaveBeenCalledOnce();
+    expect(importWorkstation.mock.calls[0]?.[1].agents.worker).toMatchObject({
+      name: 'Worker Two',
+      model: 'sonnet',
+    });
+    expect(importWorkstation.mock.calls[0]?.[0]).toMatchObject({
+      revisionMirror: { createdBy: 'control-api:agent-model' },
     });
   });
 
