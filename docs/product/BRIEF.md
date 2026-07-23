@@ -13,6 +13,9 @@ need AI agents to run safely inside product and operations workflows.
 ## Current Scope
 
 - CLI and package-based runtime setup.
+- A generic owner web setup flow for configuring any agent, model access,
+  provider connection, conversation policy, and agent profile without
+  persona- or channel-specific defaults.
 - Slack, Telegram, Teams, Discord, and web or SDK-facing runtime concepts.
 - Postgres-backed settings, credential references, memory, jobs, events, and audit state.
 - Provider-neutral model routing through catalog aliases and gateway-owned credentials.
