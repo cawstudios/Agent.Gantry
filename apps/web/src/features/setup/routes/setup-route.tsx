@@ -16,6 +16,7 @@ import { Button } from '../../../ui/primitives/button';
 import { useConversationDashboard } from '../../operations/use-conversations';
 import { useModelDashboard } from '../../runtime/use-model-dashboard';
 import { SetupAgentDetails } from '../components/setup-agent-details';
+import { SetupConnectionDetails } from '../components/setup-connection-details';
 import { SetupConversationDetails } from '../components/setup-conversation-details';
 import { SetupProfileDetails } from '../components/setup-profile-details';
 
@@ -164,15 +165,9 @@ export function SetupRoute() {
               }
             />
           ) : stage.id === 'connection' ? (
-            <LiveSelect
-              label="Provider connection"
-              value={draft['Provider connection'] ?? ''}
-              options={(conversationQuery.data?.providerAccounts ?? []).map(
-                (account) => ({ label: account.label, value: account.id }),
-              )}
-              loading={conversationQuery.isPending}
-              emptyMessage="No provider connections are available."
-              onChange={(value) =>
+            <SetupConnectionDetails
+              selectedAccountId={draft['Provider connection'] ?? ''}
+              onSelect={(value) =>
                 setDraft((current) => ({
                   ...current,
                   'Provider connection': value,
