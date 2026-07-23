@@ -1010,6 +1010,7 @@ describe('ipc-interaction-handler', () => {
         classifierConsult,
         publishRuntimeEvent: vi.fn(async () => undefined),
         getPermissionDecisionMemoryRepository: () => ({
+          list: async () => [],
           getClassifierVerdict,
           putClassifierVerdict,
         }),
@@ -1061,6 +1062,7 @@ describe('ipc-interaction-handler', () => {
         conversationRoutes: () => ({}),
         requestPermissionApproval,
         getPermissionDecisionMemoryRepository: () => ({
+          list: async () => [],
           getClassifierVerdict: vi.fn(async () => null),
           putClassifierVerdict,
         }),
@@ -1108,6 +1110,7 @@ describe('ipc-interaction-handler', () => {
         classifierConsult,
         publishRuntimeEvent: vi.fn(async () => undefined),
         getPermissionDecisionMemoryRepository: () => ({
+          list: async () => [],
           getClassifierVerdict,
           putClassifierVerdict,
         }),

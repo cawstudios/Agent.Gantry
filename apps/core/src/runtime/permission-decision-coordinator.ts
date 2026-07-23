@@ -148,9 +148,11 @@ async function resolveTrustedRootStage(
 ): Promise<PermissionApprovalDecision | undefined> {
   const workspaceRoot = input.deterministicRailsInput?.workspaceRoot;
   const memory = input.decisionMemory;
-  // No repository ⇒ no grant to read and nowhere to persist one, so leave the
-  // ask untouched for the normal classifier/human tail.
-  if (!workspaceRoot || !memory) return undefined;
+  // No repository (or one without trusted-root support) ⇒ no grant to read and
+  // nowhere to persist one, so leave the ask for the normal classifier/human
+  // tail. `typeof list` guards partial memory ports (a synchronous "not a
+  // function" throw would slip past the .catch on the list() call below).
+  if (!workspaceRoot || typeof memory?.list !== 'function') return undefined;
 
   // "root clears the ask" ⇔ trusting `root` removes the sole ASK reason. It
   // re-runs the SAME rails with `root` added, so containment, sibling scoping

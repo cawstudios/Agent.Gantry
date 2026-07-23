@@ -710,9 +710,9 @@ describe('inline core tool bootstrap', () => {
     await expect(
       tools.authorizeThirdPartyMcpTool('mcp__crm__read', { id: 'crm-1' }),
     ).resolves.toEqual({ allowed: true });
-    expect(classifierConsult).toHaveBeenCalledWith(
-      expect.objectContaining({ posture: 'allow_leaning' }),
-    );
+    // posture was removed in PERM-2 A (one empowered classifier); assert the
+    // classifier was consulted, not the retired posture argument.
+    expect(classifierConsult).toHaveBeenCalled();
     expect(requestPermissionApproval).not.toHaveBeenCalled();
     expect(input.emitOutput).not.toHaveBeenCalled();
     expect(publishRuntimeEvent).toHaveBeenCalledWith(
