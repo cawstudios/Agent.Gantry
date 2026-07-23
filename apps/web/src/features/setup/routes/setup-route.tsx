@@ -16,6 +16,7 @@ import { Button } from '../../../ui/primitives/button';
 import { useConversationDashboard } from '../../operations/use-conversations';
 import { useModelDashboard } from '../../runtime/use-model-dashboard';
 import { SetupAgentDetails } from '../components/setup-agent-details';
+import { SetupConversationDetails } from '../components/setup-conversation-details';
 import { SetupProfileDetails } from '../components/setup-profile-details';
 
 const stages = [
@@ -179,21 +180,20 @@ export function SetupRoute() {
               }
             />
           ) : stage.id === 'conversation' ? (
-            <LiveSelect
-              label="Conversation"
-              value={draft.Conversation ?? ''}
-              options={(conversationQuery.data?.conversations ?? []).map(
-                (conversation) => ({
-                  label: `${conversation.name} · ${conversation.provider}`,
-                  value: conversation.id,
-                }),
-              )}
-              loading={conversationQuery.isPending}
-              emptyMessage="No conversations are available for this runtime."
-              onChange={(value) =>
-                setDraft((current) => ({ ...current, Conversation: value }))
-              }
-            />
+            conversationQuery.isPending ? (
+              <p className="m-0 text-sm text-text-secondary">
+                Loading conversations…
+              </p>
+            ) : (
+              <SetupConversationDetails
+                agentId={createdAgentId}
+                conversations={conversationQuery.data?.conversations ?? []}
+                selectedConversationId={draft.Conversation ?? ''}
+                onSelect={(value) =>
+                  setDraft((current) => ({ ...current, Conversation: value }))
+                }
+              />
+            )
           ) : stage.id === 'profile' ? (
             <SetupProfileDetails agentId={createdAgentId} />
           ) : null}
