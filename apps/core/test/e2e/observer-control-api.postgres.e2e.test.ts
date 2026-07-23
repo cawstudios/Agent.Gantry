@@ -9,9 +9,23 @@ import { PostgresCanonicalGraphRepository } from '@core/adapters/storage/postgre
 import type { BrainDreamProposal } from '@core/brain/brain-dreaming.js';
 import type { BrainService as Brain } from '@core/brain/brain-service.js';
 import { resolveObserverOwnerRoute } from '@core/config/settings/observer-activation.js';
-import type { ObserverSubjectKey } from '@core/domain/ports/observer-insights.js';
+import { createResolveObserverStatus } from '@core/application/control-plane/control-plane-storage-model.js';
+import {
+  loadRuntimeSettings,
+  RUNTIME_MEMORY_DREAMING_ENABLED,
+  RUNTIME_MEMORY_ENABLED,
+} from '@core/config/index.js';
+import {
+  isObserverSubjectKey,
+  type ObserverSubjectKey,
+} from '@core/domain/ports/observer-insights.js';
 import { listObserverActiveMemoryValues } from '@core/memory/app-memory-item-queries.js';
+import {
+  memoryAgentIdForWorkspaceFolder,
+  subjectIdFor,
+} from '@core/memory/app-memory-boundaries.js';
 import type { EmbeddingProvider } from '@core/memory/memory-embeddings.js';
+import { resolveScopedMemorySubject } from '@core/memory/app-memory-subject-resolver.js';
 
 import {
   createDefaultRuntimeSettings,
@@ -39,6 +53,20 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
   let embedding: EmbeddingProvider;
   let cursorSubject: ObserverSubjectKey;
   let runBrainDreamBatch: typeof import('@core/brain/brain-dreaming.js').runBrainDreamBatch;
+  let observedSubject: ObserverSubjectKey;
+  const buildObserverPort = () => {
+    const snapshot = loadRuntimeSettings(runtimeHome);
+    return createResolveObserverStatus({
+      getEffectiveRuntimeSettings: () => snapshot as never,
+      getInternalRuntimeSettings: () => snapshot as never,
+      getEffectiveMemoryState: () => ({
+        enabled: snapshot.memory?.enabled ?? RUNTIME_MEMORY_ENABLED,
+        dreamingEnabled:
+          snapshot.memory?.dreaming?.enabled ?? RUNTIME_MEMORY_DREAMING_ENABLED,
+      }),
+      conversations: runtime.repositories.conversations,
+    });
+  };
   const settings = createDefaultRuntimeSettings();
 
   beforeAll(async () => {
@@ -138,7 +166,7 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
       id: conversationId,
       appId: 'default' as never,
       providerAccountId: 'telegram_default' as never,
-      externalRef: { kind: 'conversation', value: 'owner-1' },
+      externalRef: { kind: 'conversation', value: 'tg:owner-1' },
       kind: 'direct',
       title: 'Owner DM',
       status: 'active',
@@ -163,6 +191,7 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
       token: TOKEN,
       appId: 'default',
       scopes: ['memory:read'],
+      resolveObserverStatus: buildObserverPort(),
     });
   }, 60_000);
 
@@ -197,6 +226,7 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
       token: TOKEN,
       appId: 'default',
       scopes: ['memory:read'],
+      resolveObserverStatus: buildObserverPort(),
     });
     client = createClient({ apiKey: TOKEN, baseUrl: server.baseUrl });
     await expect(client.observer.status()).resolves.toMatchObject({
