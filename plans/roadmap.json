@@ -19,7 +19,7 @@
       "history": ".factory/history/PAY-1/"
     },
     {
-      "status": "active",
+      "status": "done",
       "key": "PERM-1",
       "title": "Permission engine: git deterministic-gate slice",
       "epic": "permission-engine",
@@ -34,7 +34,9 @@
         "hard-deny/locked/fixed-image restrictions resolve BEFORE any cache or classifier allow",
         "RunCommand telemetry records the command text (closes the RCA blind spot)",
         "goal-prompt slice-1 acceptance list satisfied with tests pinning the ordering invariant"
-      ]
+      ],
+      "completed_at": "2026-07-23T07:39:30+00:00",
+      "history": ".factory/history/PERM-1/"
     },
     {
       "status": "pending",
@@ -421,5 +423,5 @@
     }
   ],
   "generated_by": "human",
-  "updated_at": "2026-07-23T03:18:19+00:00"
+  "updated_at": "2026-07-23T07:39:30+00:00"
 }
