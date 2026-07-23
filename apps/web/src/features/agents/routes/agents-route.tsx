@@ -131,10 +131,14 @@ export function AgentsRoute() {
         }
       />
       <AgentSetupDialog
-        open={search.setup === 'new'}
+        open={Boolean(search.setup)}
+        setupId={search.setup}
         onOpenChange={(open) =>
           void navigate({
-            search: { ...search, setup: open ? 'new' : undefined },
+            search: {
+              ...search,
+              setup: open ? (search.setup ?? 'new') : undefined,
+            },
           })
         }
       />

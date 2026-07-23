@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 
 import { useRuntimeConnection } from '../../../lib/api/runtime-connection';
@@ -9,22 +9,45 @@ import { IconButton } from '../../../ui/primitives/icon-button';
 import { TextField } from '../../../ui/compositions/text-field';
 
 const draftSchema = z.object({ agentId: z.string() });
+const persistedDraftSchema = draftSchema.extend({
+  name: z.string(),
+  purpose: z.string().nullable(),
+  version: z.number(),
+});
 
 export function AgentSetupDialog({
   open,
+  setupId,
   onOpenChange,
 }: {
   open: boolean;
+  setupId?: string;
   onOpenChange: (open: boolean) => void;
 }) {
   const connection = useRuntimeConnection();
   const [name, setName] = useState('');
   const [purpose, setPurpose] = useState('');
   const [draftId, setDraftId] = useState<string>();
+  const [version, setVersion] = useState<number>();
   const [confirmClose, setConfirmClose] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const dirty = Boolean(name.trim() || purpose.trim());
+
+  useEffect(() => {
+    if (!open || !setupId || setupId === 'new' || !connection.transport) return;
+    void connection.transport
+      .request({
+        path: `/agent-setups/${encodeURIComponent(setupId)}`,
+        schema: persistedDraftSchema,
+      })
+      .then((draft) => {
+        setDraftId(draft.agentId);
+        setVersion(draft.version);
+        setName(draft.name);
+        setPurpose(draft.purpose ?? '');
+      });
+  }, [connection.transport, open, setupId]);
 
   function requestClose() {
     if (dirty && !confirmClose) {
@@ -39,13 +62,23 @@ export function AgentSetupDialog({
     if (!connection.transport || !name.trim()) return;
     setSaving(true);
     try {
-      const result = await connection.transport.request({
-        path: '/agent-setups',
-        method: 'POST',
-        body: { appId: 'default', name, purpose: purpose || undefined },
-        schema: draftSchema,
-      });
+      const result = draftId
+        ? await connection.transport.request({
+            path: `/agent-setups/${encodeURIComponent(draftId)}`,
+            method: 'PATCH',
+            body: { step: 'agent', expectedVersion: version, name, purpose },
+            schema: persistedDraftSchema,
+          })
+        : await connection.transport.request({
+            path: '/agent-setups',
+            method: 'POST',
+            body: { appId: 'default', name, purpose: purpose || undefined },
+            schema: draftSchema,
+          });
       setDraftId(result.agentId);
+      if ('version' in result && typeof result.version === 'number') {
+        setVersion(result.version);
+      }
       if (confirmClose) {
         reset();
         onOpenChange(false);
@@ -71,6 +104,7 @@ export function AgentSetupDialog({
     setName('');
     setPurpose('');
     setDraftId(undefined);
+    setVersion(undefined);
     setConfirmClose(false);
   }
 
