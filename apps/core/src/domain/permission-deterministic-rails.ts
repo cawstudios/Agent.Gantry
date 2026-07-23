@@ -106,6 +106,14 @@ export function evaluatePermissionDeterministicRails(
  * Sensitive-key redaction replaces secret VALUES — not the risk-relevant
  * verbs/paths — and 500-char display alteration is not a risk gap now that the
  * host env-prefix is stripped, so neither alone marks the input incomplete.
+ *
+ * SECURITY COUPLING: this command/cmd-only narrowing is safe ONLY because the
+ * rails cannot auto-allow a non-shell tool in the current wiring (the IPC path
+ * omits reviewedMcpReadBindings, so evaluateMcpRead is always blocked → the
+ * non-shell path falls to the classifier). If a future change EVER passes
+ * reviewedMcpReadBindings into the rails input, revisit this: a redacted (not
+ * command/cmd) field on an auto-allowable non-shell tool would then pass the
+ * gate without the classifier's any-path completeness check.
  */
 function inputIsIncomplete(request: PermissionApprovalRequest): boolean {
   const ipc = request as PermissionApprovalRequest & {
