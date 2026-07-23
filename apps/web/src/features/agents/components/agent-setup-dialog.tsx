@@ -323,14 +323,18 @@ export function AgentSetupDialog({
                     <select
                       className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text"
                       value={providerAccountId}
-                      onChange={(event) => setProviderAccountId(event.target.value)}
+                      onChange={(event) =>
+                        setProviderAccountId(event.target.value)
+                      }
                     >
                       <option value="">Select a connection</option>
-                      {providerAccounts.data?.providerAccounts.map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.label} — {account.providerId}
-                        </option>
-                      ))}
+                      {providerAccounts.data?.providerAccounts.map(
+                        (account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.label} — {account.providerId}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </label>
                   <div className="flex justify-between gap-2">
