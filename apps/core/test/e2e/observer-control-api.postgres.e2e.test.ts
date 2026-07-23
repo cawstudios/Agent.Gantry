@@ -6,6 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { PostgresCanonicalGraphRepository } from '@core/adapters/storage/postgres/repositories/canonical-graph-repository.postgres.js';
 import { resolveObserverOwnerRoute } from '@core/config/settings/observer-activation.js';
+import { createResolveObserverStatus } from '@core/application/control-plane/control-plane-storage-model.js';
+import {
+  loadRuntimeSettings,
+  RUNTIME_MEMORY_DREAMING_ENABLED,
+  RUNTIME_MEMORY_ENABLED,
+} from '@core/config/index.js';
 import {
   isObserverSubjectKey,
   type ObserverSubjectKey,
@@ -35,6 +41,18 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
   let runtimeHome: string;
   let previousRuntimeHome: string | undefined;
   let observedSubject: ObserverSubjectKey;
+  const buildObserverPort = () => {
+    const snapshot = loadRuntimeSettings(runtimeHome);
+    return createResolveObserverStatus({
+      getEffectiveRuntimeSettings: () => snapshot as never,
+      getInternalRuntimeSettings: () => snapshot as never,
+      getEffectiveMemoryState: () => ({
+        enabled: RUNTIME_MEMORY_ENABLED,
+        dreamingEnabled: RUNTIME_MEMORY_DREAMING_ENABLED,
+      }),
+      conversations: runtime.repositories.conversations,
+    });
+  };
   const settings = createDefaultRuntimeSettings();
 
   beforeAll(async () => {
@@ -119,7 +137,7 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
       id: conversationId,
       appId: 'default' as never,
       providerAccountId: 'telegram_default' as never,
-      externalRef: { kind: 'conversation', value: 'owner-1' },
+      externalRef: { kind: 'conversation', value: 'tg:owner-1' },
       kind: 'direct',
       title: 'Owner DM',
       status: 'active',
@@ -144,6 +162,7 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
       token: TOKEN,
       appId: 'default',
       scopes: ['memory:read'],
+      resolveObserverStatus: buildObserverPort(),
     });
 
     await runtime.repositories.observerInsights.create({
@@ -195,6 +214,7 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
       token: TOKEN,
       appId: 'default',
       scopes: ['memory:read'],
+      resolveObserverStatus: buildObserverPort(),
     });
     client = createClient({ apiKey: TOKEN, baseUrl: server.baseUrl });
     await expect(client.observer.status()).resolves.toMatchObject({
