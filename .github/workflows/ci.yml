@@ -120,9 +120,16 @@ jobs:
       # restricts unprivileged user namespaces by default, which bwrap needs.
       - name: Prepare agent sandbox deps (bubblewrap + socat)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq bubblewrap socat
-          sudo sysctl -q kernel.apparmor_restrict_unprivileged_userns=0 || true
+          # Self-hosted runners pre-install these and lack passwordless sudo
+          # (a bare `sudo apt-get` hangs to timeout). Only invoke sudo when a
+          # tool is actually missing (GitHub-hosted ubuntu case).
+          if command -v bwrap >/dev/null && command -v socat >/dev/null; then
+            echo "bubblewrap + socat already present; skipping apt install"
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq bubblewrap socat
+          fi
+          sudo sysctl -q kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
 
       # Real-model turn: the key is a protected secret (empty on fork PRs, so
       # the scenario self-skips). The key reaches ONLY this step's env.
