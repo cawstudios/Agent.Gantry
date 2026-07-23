@@ -7,12 +7,14 @@ import { useReplaceConversationInstall } from '../../operations/use-conversation
 export function SetupConversationDetails({
   agentId,
   conversations,
+  providerAccountId,
   selectedConversationId,
   onSelect,
   onSaved,
 }: {
   agentId?: string;
   conversations: ConversationView[];
+  providerAccountId: string;
   selectedConversationId: string;
   onSelect: (conversationId: string) => void;
   onSaved: (conversationId: string) => void;
@@ -22,7 +24,12 @@ export function SetupConversationDetails({
   const [trigger, setTrigger] = useState('');
   const [replaceApprovers, setReplaceApprovers] = useState(false);
   const [approverIds, setApproverIds] = useState('');
-  const selectedConversation = conversations.find(
+  const availableConversations = providerAccountId
+    ? conversations.filter(
+        (conversation) => conversation.providerAccountId === providerAccountId,
+      )
+    : [];
+  const selectedConversation = availableConversations.find(
     (conversation) => conversation.id === selectedConversationId,
   );
   const missingRequiredTrigger = requiresTrigger && !trigger.trim();
@@ -38,16 +45,18 @@ export function SetupConversationDetails({
         Conversation
         <select
           className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text disabled:text-text-muted"
-          disabled={conversations.length === 0}
+          disabled={availableConversations.length === 0}
           value={selectedConversationId}
           onChange={(event) => onSelect(event.target.value)}
         >
           <option value="">
-            {conversations.length === 0
-              ? 'No conversations are available.'
-              : 'Choose a conversation'}
+            {providerAccountId
+              ? availableConversations.length === 0
+                ? 'No conversations are available for this connection.'
+                : 'Choose a conversation'
+              : 'Choose a provider connection first.'}
           </option>
-          {conversations.map((conversation) => (
+          {availableConversations.map((conversation) => (
             <option key={conversation.id} value={conversation.id}>
               {conversation.name} · {conversation.provider}
             </option>

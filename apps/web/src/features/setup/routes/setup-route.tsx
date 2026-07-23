@@ -191,12 +191,14 @@ export function SetupRoute() {
             <SetupConnectionDetails
               agentId={createdAgentId}
               selectedAccountId={draft['Provider connection'] ?? ''}
-              onSelect={(value) =>
+              onSelect={(value) => {
+                setSavedConversationId('');
                 setDraft((current) => ({
                   ...current,
                   'Provider connection': value,
-                }))
-              }
+                  Conversation: '',
+                }));
+              }}
             />
           ) : stage.id === 'conversation' ? (
             conversationQuery.isPending ? (
@@ -207,6 +209,7 @@ export function SetupRoute() {
               <SetupConversationDetails
                 agentId={createdAgentId}
                 conversations={conversationQuery.data?.conversations ?? []}
+                providerAccountId={draft['Provider connection'] ?? ''}
                 selectedConversationId={draft.Conversation ?? ''}
                 onSelect={(value) => {
                   setSavedConversationId('');
