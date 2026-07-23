@@ -16,6 +16,7 @@ import type { Agent, AgentId } from '../../../domain/agent/agent.js';
 import type { AgentSetupDraft } from '../../../domain/agent/agent-setup-draft.js';
 import type { AppId } from '../../../domain/app/app.js';
 import { nowIso } from '../../../shared/time/datetime.js';
+import { RUNTIME_EVENT_TYPES } from '../../../domain/events/runtime-event-types.js';
 import {
   authorizeControlRequest,
   type ControlRouteContext,
@@ -116,6 +117,20 @@ function service(): AgentSetupDraftService {
     drafts: repositories.agentSetupDrafts,
     ids: { generate: randomUUID },
     clock: { now: nowIso },
+    audit: async (input) => {
+      await getRuntimeStorage().runtimeEvents.publish({
+        appId: input.appId,
+        agentId: input.agentId,
+        eventType:
+          input.action === 'created'
+            ? RUNTIME_EVENT_TYPES.AGENT_SETUP_DRAFT_CREATED
+            : input.action === 'saved'
+              ? RUNTIME_EVENT_TYPES.AGENT_SETUP_DRAFT_SAVED
+              : RUNTIME_EVENT_TYPES.AGENT_SETUP_DRAFT_DISCARDED,
+        actor: 'control',
+        payload: {},
+      });
+    },
   });
 }
 

@@ -26,6 +26,11 @@ export class AgentSetupDraftService {
       drafts: AgentSetupDraftRepository;
       ids: IdGenerator;
       clock: Clock;
+      audit?: (input: {
+        action: 'created' | 'saved' | 'discarded';
+        appId: AppId;
+        agentId: AgentId;
+      }) => Promise<void>;
     },
   ) {}
 
@@ -56,6 +61,7 @@ export class AgentSetupDraftService {
     };
     await this.deps.agents.saveAgent(agent);
     await this.deps.drafts.saveDraft(draft);
+    await this.deps.audit?.({ action: 'created', appId: input.appId, agentId });
     return { agent, draft };
   }
 
@@ -132,6 +138,11 @@ export class AgentSetupDraftService {
       updatedAt: now,
     };
     await this.deps.agents.saveAgent(agent);
+    await this.deps.audit?.({
+      action: 'saved',
+      appId: input.appId,
+      agentId: input.agentId,
+    });
     return { agent, draft: saved };
   }
 
@@ -139,6 +150,11 @@ export class AgentSetupDraftService {
     await this.get(input);
     const deleted = await this.deps.agents.deleteDisabledAgent(input);
     if (!deleted) throw new AgentSetupDraftConflictError();
+    await this.deps.audit?.({
+      action: 'discarded',
+      appId: input.appId,
+      agentId: input.agentId,
+    });
   }
 }
 
@@ -155,6 +171,20 @@ function assertNoRawSecrets(value: unknown, path: string): void {
     return;
   }
   for (const [key, nested] of Object.entries(value)) {
+    if (key === 'runtimeSecretRefs') {
+      if (
+        !nested ||
+        typeof nested !== 'object' ||
+        Array.isArray(nested) ||
+        Object.values(nested).some((ref) => typeof ref !== 'string')
+      ) {
+        throw new ApplicationError(
+          'INVALID_REQUEST',
+          `${path}.runtimeSecretRefs must contain only string references.`,
+        );
+      }
+      continue;
+    }
     if (SECRET_KEY_PATTERN.test(key)) {
       throw new ApplicationError(
         'INVALID_REQUEST',
