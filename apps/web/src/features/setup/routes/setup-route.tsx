@@ -13,9 +13,12 @@ import { PageHeader } from '../../../ui/compositions/page-header';
 import { PageState } from '../../../ui/compositions/page-state';
 import { Panel } from '../../../ui/compositions/panel';
 import { Button } from '../../../ui/primitives/button';
+import { useConversationDashboard } from '../../operations/use-conversations';
+import { useModelDashboard } from '../../runtime/use-model-dashboard';
 
 const stages = [
   {
+    id: 'agent',
     title: 'Agent',
     description: 'Name the agent and describe the work it should own.',
     fields: [
@@ -32,6 +35,7 @@ const stages = [
     ],
   },
   {
+    id: 'model',
     title: 'Model access',
     description: 'Choose a model from the live catalog and confirm access.',
     fields: [
@@ -43,6 +47,7 @@ const stages = [
     ],
   },
   {
+    id: 'connection',
     title: 'Channel connection',
     description: 'Connect a provider and verify that Gantry can use it.',
     fields: [
@@ -54,6 +59,7 @@ const stages = [
     ],
   },
   {
+    id: 'conversation',
     title: 'Conversation access',
     description:
       'Choose where the agent can respond and set its access policy.',
@@ -66,6 +72,7 @@ const stages = [
     ],
   },
   {
+    id: 'profile',
     title: 'Profile',
     description: 'Review the agent’s operating instructions and boundaries.',
     fields: [
@@ -77,6 +84,7 @@ const stages = [
     ],
   },
   {
+    id: 'review',
     title: 'Review',
     description: 'Check readiness before you make the agent available.',
     fields: [],
@@ -89,6 +97,8 @@ export function SetupRoute() {
   const [showValidation, setShowValidation] = useState(false);
   const connection = useRuntimeConnection();
   const { requestConnection } = useConnectionGate();
+  const modelQuery = useModelDashboard();
+  const conversationQuery = useConversationDashboard();
   const stage = stages[activeStage];
   const isFinalStage = activeStage === stages.length - 1;
   const invalidFields = stage.fields.filter(
@@ -121,35 +131,83 @@ export function SetupRoute() {
 
       <Panel title={stage.title} description={stage.description}>
         <div className="grid gap-5 p-5">
-          {stage.fields.map((field) => {
-            const invalid = showValidation && invalidFields.includes(field);
+          {stage.id === 'model' ? (
+            <LiveSelect
+              label="Model"
+              value={draft.Model ?? ''}
+              options={(modelQuery.data?.models ?? []).map((model) => ({
+                label: `${model.alias} — ${model.displayName}`,
+                value: model.alias,
+              }))}
+              loading={modelQuery.isPending}
+              emptyMessage="No models are available for this runtime."
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, Model: value }))
+              }
+            />
+          ) : stage.id === 'connection' ? (
+            <LiveSelect
+              label="Provider connection"
+              value={draft['Provider connection'] ?? ''}
+              options={(conversationQuery.data?.providerAccounts ?? []).map(
+                (account) => ({ label: account.label, value: account.id }),
+              )}
+              loading={conversationQuery.isPending}
+              emptyMessage="No provider connections are available."
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  'Provider connection': value,
+                }))
+              }
+            />
+          ) : stage.id === 'conversation' ? (
+            <LiveSelect
+              label="Conversation"
+              value={draft.Conversation ?? ''}
+              options={(conversationQuery.data?.conversations ?? []).map(
+                (conversation) => ({
+                  label: `${conversation.name} · ${conversation.provider}`,
+                  value: conversation.id,
+                }),
+              )}
+              loading={conversationQuery.isPending}
+              emptyMessage="No conversations are available for this runtime."
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, Conversation: value }))
+              }
+            />
+          ) : (
+            stage.fields.map((field) => {
+              const invalid = showValidation && invalidFields.includes(field);
 
-            return (
-              <label
-                className="grid gap-1.5 text-xs font-semibold text-text"
-                key={field.label}
-              >
-                {field.label}
-                <input
-                  aria-invalid={invalid || undefined}
-                  className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text placeholder:text-text-muted aria-invalid:border-danger"
-                  placeholder={field.placeholder}
-                  value={draft[field.label] ?? ''}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      [field.label]: event.target.value,
-                    }))
-                  }
-                />
-                {invalid ? (
-                  <span className="font-normal text-danger">
-                    Enter a {field.label.toLowerCase()} to continue.
-                  </span>
-                ) : null}
-              </label>
-            );
-          })}
+              return (
+                <label
+                  className="grid gap-1.5 text-xs font-semibold text-text"
+                  key={field.label}
+                >
+                  {field.label}
+                  <input
+                    aria-invalid={invalid || undefined}
+                    className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text placeholder:text-text-muted aria-invalid:border-danger"
+                    placeholder={field.placeholder}
+                    value={draft[field.label] ?? ''}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        [field.label]: event.target.value,
+                      }))
+                    }
+                  />
+                  {invalid ? (
+                    <span className="font-normal text-danger">
+                      Enter a {field.label.toLowerCase()} to continue.
+                    </span>
+                  ) : null}
+                </label>
+              );
+            })
+          )}
           {isFinalStage ? (
             <ReviewSummary connected={Boolean(connection.transport)} />
           ) : null}
@@ -186,6 +244,41 @@ export function SetupRoute() {
         </div>
       </Panel>
     </div>
+  );
+}
+
+function LiveSelect({
+  emptyMessage,
+  label,
+  loading,
+  onChange,
+  options,
+  value,
+}: {
+  emptyMessage: string;
+  label: string;
+  loading: boolean;
+  onChange: (value: string) => void;
+  options: Array<{ label: string; value: string }>;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-1.5 text-xs font-semibold text-text">
+      {label}
+      <select
+        className="h-9 rounded-md border border-border-strong bg-surface px-3 text-[13px] font-normal text-text disabled:text-text-muted"
+        disabled={loading || options.length === 0}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">{loading ? 'Loading options…' : emptyMessage}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
