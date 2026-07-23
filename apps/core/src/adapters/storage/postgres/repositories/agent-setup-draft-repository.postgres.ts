@@ -60,6 +60,33 @@ export class PostgresAgentSetupDraftRepository implements AgentSetupDraftReposit
       });
   }
 
+  async compareAndSetDraft(input: {
+    draft: AgentSetupDraft;
+    expectedVersion: number;
+  }): Promise<AgentSetupDraft | null> {
+    const { draft } = input;
+    const rows = await this.db
+      .update(pgSchema.agentSetupDraftsPostgres)
+      .set({
+        purpose: draft.purpose ?? null,
+        modelAlias: draft.modelAlias ?? null,
+        connectionJson: draft.connection ?? null,
+        conversationJson: draft.conversation ?? null,
+        currentStage: draft.currentStage,
+        version: draft.version,
+        updatedAt: draft.updatedAt,
+      })
+      .where(
+        and(
+          eq(pgSchema.agentSetupDraftsPostgres.appId, draft.appId),
+          eq(pgSchema.agentSetupDraftsPostgres.agentId, draft.agentId),
+          eq(pgSchema.agentSetupDraftsPostgres.version, input.expectedVersion),
+        ),
+      )
+      .returning();
+    return rows[0] ? mapRow(rows[0]) : null;
+  }
+
   async deleteDraft(input: {
     appId: AgentSetupDraft['appId'];
     agentId: AgentSetupDraft['agentId'];

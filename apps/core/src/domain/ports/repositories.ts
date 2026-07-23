@@ -129,6 +129,10 @@ export interface AgentRepository {
     agentId: AgentId;
     updatedAt: string;
   }): Promise<Agent | null>;
+  deleteDisabledAgent(input: {
+    appId: AppId;
+    agentId: AgentId;
+  }): Promise<boolean>;
 }
 
 export interface AgentSetupDraftRepository {
@@ -138,6 +142,10 @@ export interface AgentSetupDraftRepository {
   }): Promise<AgentSetupDraft | null>;
   listDrafts(appId: AppId): Promise<AgentSetupDraft[]>;
   saveDraft(draft: AgentSetupDraft): Promise<void>;
+  compareAndSetDraft(input: {
+    draft: AgentSetupDraft;
+    expectedVersion: number;
+  }): Promise<AgentSetupDraft | null>;
   deleteDraft(input: { appId: AppId; agentId: AgentId }): Promise<boolean>;
 }
 
