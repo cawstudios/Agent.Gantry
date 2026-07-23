@@ -32,6 +32,8 @@ export function AgentSetupDialog({
   const [purpose, setPurpose] = useState('');
   const [draftId, setDraftId] = useState<string>();
   const [version, setVersion] = useState<number>();
+  const [modelAlias, setModelAlias] = useState('');
+  const [stage, setStage] = useState<'agent' | 'model'>('agent');
   const [confirmClose, setConfirmClose] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -49,6 +51,7 @@ export function AgentSetupDialog({
         setVersion(draft.version);
         setName(draft.name);
         setPurpose(draft.purpose ?? '');
+        setStage('agent');
       });
   }, [connection.transport, open, setupId]);
 
@@ -93,6 +96,23 @@ export function AgentSetupDialog({
     await queryClient.invalidateQueries({ queryKey: agentQueryKeys.list() });
   }
 
+  async function saveModel() {
+    if (!connection.transport || !draftId || !version || !modelAlias.trim())
+      return;
+    setSaving(true);
+    try {
+      const result = await connection.transport.request({
+        path: `/agent-setups/${encodeURIComponent(draftId)}`,
+        method: 'PATCH',
+        body: { step: 'model', expectedVersion: version, modelAlias },
+        schema: persistedDraftSchema,
+      });
+      setVersion(result.version);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function discardDraft() {
     if (draftId && connection.transport) {
       await connection.transport.request({
@@ -110,6 +130,8 @@ export function AgentSetupDialog({
     setPurpose('');
     setDraftId(undefined);
     setVersion(undefined);
+    setModelAlias('');
+    setStage('agent');
     setConfirmClose(false);
   }
 
@@ -168,31 +190,78 @@ export function AgentSetupDialog({
                   <X size={17} aria-hidden="true" />
                 </IconButton>
               </div>
-              <TextField
-                id="setup-agent-name"
-                label="Agent name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-              />
-              <label className="grid gap-1.5 text-xs font-semibold text-text">
-                Purpose
-                <textarea
-                  className="min-h-24 resize-y rounded-md border border-border-strong bg-surface px-3 py-2 text-[13px] font-normal text-text"
-                  value={purpose}
-                  onChange={(event) => setPurpose(event.target.value)}
-                />
-              </label>
-              <div className="flex justify-end gap-2">
-                <Button onClick={requestClose}>Cancel</Button>
-                <Button
-                  disabled={!name.trim() || saving}
-                  variant="primary"
-                  onClick={() => void saveDraft()}
-                >
-                  {draftId ? 'Draft saved' : saving ? 'Saving…' : 'Save draft'}
-                </Button>
+              <div className="flex gap-2 text-xs font-semibold text-text-secondary">
+                <span className={stage === 'agent' ? 'text-text' : ''}>
+                  1. Agent
+                </span>
+                <span>2. Model</span>
+                <span>3. Connection</span>
+                <span>4. Conversation</span>
+                <span>5. Profile</span>
+                <span>6. Review</span>
               </div>
+              {stage === 'agent' ? (
+                <>
+                  <TextField
+                    id="setup-agent-name"
+                    label="Agent name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    required
+                  />
+                  <label className="grid gap-1.5 text-xs font-semibold text-text">
+                    Purpose
+                    <textarea
+                      className="min-h-24 resize-y rounded-md border border-border-strong bg-surface px-3 py-2 text-[13px] font-normal text-text"
+                      value={purpose}
+                      onChange={(event) => setPurpose(event.target.value)}
+                    />
+                  </label>
+                  <div className="flex justify-end gap-2">
+                    <Button onClick={requestClose}>Cancel</Button>
+                    <Button
+                      disabled={!name.trim() || saving}
+                      variant="primary"
+                      onClick={() => void saveDraft()}
+                    >
+                      {draftId
+                        ? 'Draft saved'
+                        : saving
+                          ? 'Saving…'
+                          : 'Save draft'}
+                    </Button>
+                    {draftId ? (
+                      <Button
+                        variant="primary"
+                        onClick={() => setStage('model')}
+                      >
+                        Continue
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <TextField
+                    id="setup-model-alias"
+                    label="Model alias"
+                    placeholder="e.g. sonnet"
+                    value={modelAlias}
+                    onChange={(event) => setModelAlias(event.target.value)}
+                    required
+                  />
+                  <div className="flex justify-between gap-2">
+                    <Button onClick={() => setStage('agent')}>Back</Button>
+                    <Button
+                      disabled={!modelAlias.trim() || saving}
+                      variant="primary"
+                      onClick={() => void saveModel()}
+                    >
+                      {saving ? 'Saving…' : 'Save model'}
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </Dialog.Content>
