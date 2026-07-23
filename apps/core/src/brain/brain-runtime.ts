@@ -9,6 +9,7 @@ import {
 import { loadRuntimeSettings } from '../config/settings/runtime-settings.js';
 import type { AppId } from '../domain/app/app.js';
 import { DEFAULT_MEMORY_APP_ID } from '../memory/app-memory-boundaries.js';
+import { listObserverActiveMemoryValues } from '../memory/app-memory-item-queries.js';
 import { CachedEmbeddingProvider } from '../memory/memory-embedding-cache.js';
 import { PostgresEmbeddingCacheStore } from '../memory/memory-embedding-cache-store.js';
 import { createEmbeddingProvider } from '../memory/memory-embeddings.js';
@@ -129,7 +130,14 @@ export async function runRuntimeBrainDreamBatch(input: {
           cursorSubject: OBSERVER_CURSOR_SUBJECT,
           repository: storage.repositories.observerInsights,
           patterns: storage.repositories.patternCandidates,
-          db: storage.service.db,
+          activeMemory: {
+            listActiveValues: ({ appId, subject }) =>
+              listObserverActiveMemoryValues({
+                db: storage.service.db,
+                appId,
+                subject,
+              }),
+          },
           embedding: observerEmbedding,
           embeddingModel: MEMORY_EMBED_MODEL,
           embeddingDimensions: MEMORY_EMBED_DIMENSIONS,

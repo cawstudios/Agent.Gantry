@@ -10,6 +10,7 @@ import type { BrainDreamProposal } from '@core/brain/brain-dreaming.js';
 import type { BrainService as Brain } from '@core/brain/brain-service.js';
 import { resolveObserverOwnerRoute } from '@core/config/settings/observer-activation.js';
 import type { ObserverSubjectKey } from '@core/domain/ports/observer-insights.js';
+import { listObserverActiveMemoryValues } from '@core/memory/app-memory-item-queries.js';
 import type { EmbeddingProvider } from '@core/memory/memory-embeddings.js';
 
 import {
@@ -253,7 +254,13 @@ maybeDescribe('observer Control API SDK round trip (Postgres)', () => {
         cursorSubject,
         repository: runtime.repositories.observerInsights,
         patterns: runtime.repositories.patternCandidates,
-        db: runtime.service.db,
+        activeMemory: {
+          listActiveValues: (input) =>
+            listObserverActiveMemoryValues({
+              db: runtime.service.db,
+              ...input,
+            }),
+        },
         embedding,
         embeddingModel: MODEL,
         embeddingDimensions: DIMENSIONS,

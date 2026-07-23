@@ -16,6 +16,7 @@ import {
   type ObserverInsightEmissionRuntime,
 } from '@core/brain/observer-insight-emission.js';
 import { BrainService } from '@core/brain/brain-service.js';
+import { listObserverActiveMemoryValues } from '@core/memory/app-memory-item-queries.js';
 import { CachedEmbeddingProvider } from '@core/memory/memory-embedding-cache.js';
 import { PostgresEmbeddingCacheStore } from '@core/memory/memory-embedding-cache-store.js';
 import type { EmbeddingProvider } from '@core/memory/memory-embeddings.js';
@@ -451,7 +452,13 @@ function observerRuntime(
     cursorSubject: OBSERVER_CURSOR_SUBJECT,
     repository: runtimeForHelpers.repositories.observerInsights,
     patterns: runtimeForHelpers.repositories.patternCandidates,
-    db: runtimeForHelpers.service.db,
+    activeMemory: {
+      listActiveValues: (input) =>
+        listObserverActiveMemoryValues({
+          db: runtimeForHelpers.service.db,
+          ...input,
+        }),
+    },
     embedding: provider,
     embeddingModel: MODEL,
     embeddingDimensions: DIMENSIONS,

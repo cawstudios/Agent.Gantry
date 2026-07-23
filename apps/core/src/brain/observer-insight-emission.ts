@@ -1,9 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { PatternCandidate } from '@gantry/contracts';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import * as pgSchema from '../adapters/storage/postgres/schema/schema.js';
 import type {
   ObserverInsightCursor,
   ObserverInsightRepository,
@@ -12,7 +10,10 @@ import type {
 } from '../domain/ports/observer-insights.js';
 import { OBSERVER_INSIGHT_TYPES } from '../domain/ports/observer-insights.js';
 import type { PatternCandidateRepository } from '../domain/ports/pattern-candidates.js';
-import { loadCanonicalActiveMemoryValues } from '../memory/observer-active-memory.js';
+import {
+  loadCanonicalActiveMemoryValues,
+  type ObserverActiveMemoryReadPort,
+} from '../memory/observer-active-memory.js';
 import { isUniqueViolation } from '../memory/app-memory-service-helpers.js';
 import { embeddingCacheTextHash } from '../memory/memory-embedding-cache.js';
 import type { EmbeddingProvider } from '../memory/memory-embeddings.js';
@@ -52,7 +53,7 @@ export type ObserverInsightEmissionRuntime =
       cursorSubject: ObserverSubjectKey;
       repository: ObserverInsightRepository;
       patterns: PatternCandidateRepository;
-      db: NodePgDatabase<typeof pgSchema>;
+      activeMemory: ObserverActiveMemoryReadPort;
       embedding?: EmbeddingProvider;
       embeddingModel: string;
       embeddingDimensions: number;
@@ -141,7 +142,7 @@ export async function emitObserverInsights(input: {
   cursorSubject: ObserverSubjectKey;
   repository: ObserverInsightRepository;
   patterns: PatternCandidateRepository;
-  db: NodePgDatabase<typeof pgSchema>;
+  activeMemory: ObserverActiveMemoryReadPort;
   embedding?: EmbeddingProvider;
   embeddingModel: string;
   embeddingDimensions: number;
@@ -231,7 +232,7 @@ export async function emitObserverInsights(input: {
           [
             subject,
             await loadCanonicalActiveMemoryValues({
-              db: input.db,
+              memory: input.activeMemory,
               appId: input.appId,
               subject,
             }),

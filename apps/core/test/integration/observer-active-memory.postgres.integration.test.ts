@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import * as pgSchema from '@core/adapters/storage/postgres/schema/schema.js';
+import { listObserverActiveMemoryValues } from '@core/memory/app-memory-item-queries.js';
 import { hasExactActiveMemoryMatch } from '@core/memory/observer-active-memory.js';
 import { conversationIdForChannel } from '@core/memory/app-memory-service-record-mappers.js';
 
@@ -23,6 +24,16 @@ const OTHER_CONVERSATION = conversationIdForChannel(
 
 maybeDescribe('observer active-memory dedup', () => {
   let runtime: PostgresIntegrationRuntime;
+  const memory = {
+    listActiveValues: (input: {
+      appId: string;
+      subject: `conversation:${string}` | 'observer:app';
+    }) =>
+      listObserverActiveMemoryValues({
+        db: runtime.service.db,
+        ...input,
+      }),
+  };
 
   beforeAll(async () => {
     runtime = await createPostgresIntegrationRuntime({
@@ -106,7 +117,7 @@ maybeDescribe('observer active-memory dedup', () => {
   it('matches canonicalized active values only in the source conversation', async () => {
     await expect(
       hasExactActiveMemoryMatch({
-        db: runtime.service.db,
+        memory,
         appId: APP_ID,
         subject: SAME_CONVERSATION,
         candidateText: 'ship the report',
@@ -114,7 +125,7 @@ maybeDescribe('observer active-memory dedup', () => {
     ).resolves.toBe(true);
     await expect(
       hasExactActiveMemoryMatch({
-        db: runtime.service.db,
+        memory,
         appId: APP_ID,
         subject: SAME_CONVERSATION,
         candidateText: 'Other conversation fact',
@@ -122,7 +133,7 @@ maybeDescribe('observer active-memory dedup', () => {
     ).resolves.toBe(false);
     await expect(
       hasExactActiveMemoryMatch({
-        db: runtime.service.db,
+        memory,
         appId: APP_ID,
         subject: SAME_CONVERSATION,
         candidateText: 'Inactive fact',
@@ -133,7 +144,7 @@ maybeDescribe('observer active-memory dedup', () => {
   it('uses only active common memory for the observer:app fallback', async () => {
     await expect(
       hasExactActiveMemoryMatch({
-        db: runtime.service.db,
+        memory,
         appId: APP_ID,
         subject: 'observer:app',
         candidateText: 'shared—app fact',
@@ -141,7 +152,7 @@ maybeDescribe('observer active-memory dedup', () => {
     ).resolves.toBe(true);
     await expect(
       hasExactActiveMemoryMatch({
-        db: runtime.service.db,
+        memory,
         appId: APP_ID,
         subject: 'observer:app',
         candidateText: 'Other conversation fact',
