@@ -47,3 +47,17 @@ filesystem credential-deny interim, and the exact-target rails work is scoped to
 THIS case only (dev-mode, lower priority). NB the Chrome/Mach-registration block
 is macOS-Seatbelt-specific; Linux/ECS (bubblewrap, no Mach) likely renders fine
 already, so the video-render motivation is a workstation-only concern. -->
+
+<!-- Classifier design synthesis (client 2026-07-23), for PERM-2 stages 4-5:
+The empowered classifier's RISK THRESHOLD is deployment-aware, not fixed.
+Stateless ECS (ephemeral + container-isolated + no on-disk creds): almost
+nothing is genuinely risky (nothing to steal, blast radius = throwaway task) =>
+classifier allows aggressively, user essentially never prompted. Workstation/
+personal (operator's real ~/.ssh + persistent state): same effect warrants more
+caution. One classifier, threshold parameterized by runtime.sandbox posture /
+deployment mode. Combined with: cache verdict by versioned effect-key (stop
+re-judging repeats), empower to ALLOW safe (not just ask), judge the EXACT
+canonical effect (not truncated toolInput), fail-closed on error/timeout, rails
+as the hard backstop so the classifier only decides the uncertain middle. Net:
+safe majority auto-allows with no prompt; only genuine uncertainty asks once and
+is remembered. This is the "like Claude Code" model. -->
