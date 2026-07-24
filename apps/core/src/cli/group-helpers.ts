@@ -289,6 +289,39 @@ function resolveBareJidRoute(
   return { found: { jid, group } };
 }
 
+function resolveAgentIdRoute(
+  groups: Record<string, ConversationRoute>,
+  selector: string,
+): { found: { jid: string; group: ConversationRoute } | null; error?: string } {
+  const matches = Object.entries(groups).filter(
+    ([jid]) => parseAgentThreadQueueKey(jid).agentId === selector,
+  );
+  if (matches.length === 0) return { found: null };
+  const folders = new Set(matches.map(([, group]) => group.folder));
+  if (folders.size > 1) {
+    return {
+      found: null,
+      error: `Selector "${selector}" resolves to multiple agents (${[...folders].join(', ')}). Use the exact folder or route JID.`,
+    };
+  }
+  // This resolver's contract returns ONE {jid, group}, so it cannot faithfully
+  // represent an agent that owns several routes: silently picking one would let
+  // an agent-level command act on a single route and leave the rest live.
+  // Refuse instead of narrowing. The {agentId, folder, routeKeys[]} contract
+  // that makes multi-route agents addressable is tracked in issue #283.
+  if (matches.length > 1) {
+    const routes = matches
+      .map(([jid]) => jid)
+      .sort((a, b) => a.localeCompare(b));
+    return {
+      found: null,
+      error: `Selector "${selector}" matches an agent with ${routes.length} routes; this command targets a single route. Use an exact route JID: ${routes.join(', ')}.`,
+    };
+  }
+  const [jid, group] = matches[0]!;
+  return { found: { jid, group } };
+}
+
 export function resolveGroupSelector(
   groups: Record<string, ConversationRoute>,
   rawSelector: string,
@@ -296,6 +329,16 @@ export function resolveGroupSelector(
   const selector = rawSelector.trim();
   if (!selector) return { found: null };
 
+  // The canonical `agent:<folder>` id surfaced by `gantry status`, `gantry jobs
+  // list`, and system-job ids is embedded (url-encoded) in every route key.
+  // It is an agent-only form: never fall back to folder/JID matching for it.
+  if (selector.startsWith('agent:')) {
+    return resolveAgentIdRoute(groups, selector);
+  }
+
+  // An exact route key keeps precedence even when it also matches another
+  // agent's folder: `agent:<folder>` above now gives the folder side its own
+  // unambiguous namespace, so there is always a way to address either one.
   const directJid = groups[selector]
     ? { jid: selector, group: groups[selector] }
     : null;
