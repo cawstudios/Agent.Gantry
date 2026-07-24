@@ -53,7 +53,7 @@ model:
 - NO runtime/image surface change from a test provider (that idea is dropped).
   Surface matrix Runtime row reverts to Read-only/observable.
 
-## Current CI runner boundary (decision 0040)
+## Current CI runner boundary (decision 0044)
 
 All current workflow jobs run on GitHub-hosted ephemeral `ubuntu-latest`
 runners, including the pull-request agent E2E lane. The real-model step keeps

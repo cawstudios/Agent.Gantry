@@ -98,7 +98,7 @@ export async function handleLlmRoutes(
     }
   ).runtime.llmAdmission;
   const admissionKey = `${auth.appId}:${auth.kid}`;
-  // Deliberately process-local per decision 0042. SPS-4 owns any future
+  // Deliberately process-local per decision 0046. SPS-4 owns any future
   // cluster-wide admission authority.
   const releaseAdmission = tryAcquireLlmAdmission(admissionKey, limits);
   if (!releaseAdmission) {
