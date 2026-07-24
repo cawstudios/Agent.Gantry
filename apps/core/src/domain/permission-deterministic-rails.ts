@@ -35,6 +35,20 @@ export type PermissionDeterministicRailDecision =
     });
 
 const SHELL_TOOLS = new Set(['Bash', 'RunCommand']);
+// First-party gantry control-plane tools that are low-risk by construction:
+// the agent's own messaging/progress surface plus scheduler READS. Scheduler
+// mutations (run_now, create/update/pause/resume/delete_job, …) are absent by
+// design and fall through to the normal rails.
+const BENIGN_GANTRY_MCP_TOOLS = new Set([
+  'send_message',
+  'todo_update',
+  'render_progress',
+  'scheduler_list_jobs',
+  'scheduler_list_runs',
+  'scheduler_list_events',
+  'scheduler_list_models',
+  'scheduler_get_job',
+]);
 const DESTRUCTIVE_EXECUTABLE =
   /^(?:dd|mkfs(?:\..+)?|rm|rmdir|shred|truncate|unlink)$/;
 const PRIVILEGED_EXECUTABLE = /^(?:doas|launchctl|pkexec|su|sudo|systemctl)$/;
@@ -48,9 +62,20 @@ export function evaluatePermissionDeterministicRails(
 ): PermissionDeterministicRailDecision | undefined {
   const { request } = input;
   if (inputIsIncomplete(request)) {
-    return ask('Exact tool input is missing, sanitized, or altered.');
+    return ask('Exact tool input is missing, redacted, or truncated.');
   }
-  const toolInput = request.toolInput;
+  if (
+    isBenignGantryTool(request.toolName) &&
+    !hasRiskRelevantSanitization(request)
+  ) {
+    return allow(
+      request,
+      `Benign first-party gantry control-plane tool ${request.toolName}.`,
+    );
+  }
+  // Evaluate the 16K classifier view, not the 500-char display copy, so the
+  // command we inspect matches the truncation signal inputIsIncomplete guards.
+  const toolInput = request.classifierToolInput ?? request.toolInput;
   if (!toolInput) return ask('Exact tool input is missing.');
 
   const readOnly = evaluateAutoPermissionReadOnlyGate({
@@ -97,18 +122,57 @@ export function evaluatePermissionDeterministicRails(
   return readOnly.allowed ? allow(request, readOnly.reason) : undefined;
 }
 
+/**
+ * Incomplete ⇒ the risk-relevant input is genuinely unavailable, so we must
+ * ask. Without a classifier view, display sanitization is relevant only when
+ * its altered paths implicate the effect-bearing input: command/cmd for shell
+ * tools, or any field for non-shell tools. With a classifier view, its existing
+ * redaction/truncation metadata remains authoritative.
+ *
+ * SECURITY COUPLING: benign first-party MCP tools are a separate auto-allow
+ * shortcut. That shortcut is gated on zero redaction/sanitization metadata, so
+ * the classifier sees any request whose displayed input differs from execution.
+ */
 function inputIsIncomplete(request: PermissionApprovalRequest): boolean {
   const ipc = request as PermissionApprovalRequest & {
     toolInputRedactedPaths?: string[];
     toolInputTruncatedPaths?: string[];
   };
+  if (!request.toolInput) return true;
+  if (!request.classifierToolInput) {
+    return SHELL_TOOLS.has(request.toolName)
+      ? hasCommandPath(request.toolInputSanitizedPaths)
+      : (request.toolInputSanitizedPaths?.length ?? 0) > 0;
+  }
+  if ((ipc.toolInputTruncatedPaths?.length ?? 0) > 0) return true;
+  if (!SHELL_TOOLS.has(request.toolName)) {
+    // Mirror the effect-key no-cache invariant: any hidden non-shell field may
+    // be effect-bearing, so it must not reach a deterministic auto-allow.
+    return (ipc.toolInputRedactedPaths?.length ?? 0) > 0;
+  }
+  return hasCommandPath(ipc.toolInputRedactedPaths);
+}
+
+function hasCommandPath(paths: readonly string[] | undefined): boolean {
+  return paths?.some((path) => path === 'command' || path === 'cmd') ?? false;
+}
+
+function hasRiskRelevantSanitization(
+  request: PermissionApprovalRequest,
+): boolean {
+  const ipc = request as PermissionApprovalRequest & {
+    toolInputRedactedPaths?: string[];
+  };
   return (
-    !request.toolInput ||
     request.toolInputSanitized === true ||
-    Boolean(request.toolInputSanitizedPaths?.length) ||
-    Boolean(ipc.toolInputRedactedPaths?.length) ||
-    Boolean(ipc.toolInputTruncatedPaths?.length)
+    (request.toolInputSanitizedPaths?.length ?? 0) > 0 ||
+    (ipc.toolInputRedactedPaths?.length ?? 0) > 0
   );
+}
+
+function isBenignGantryTool(toolName: string): boolean {
+  const match = /^mcp__gantry__(.+)$/.exec(toolName);
+  return match !== null && BENIGN_GANTRY_MCP_TOOLS.has(match[1]!);
 }
 
 function isInterpreterString(leaf: BashCommandLeaf): boolean {

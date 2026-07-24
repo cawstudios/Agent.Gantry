@@ -31,6 +31,10 @@ import {
 import { parseTaskIpcData } from '@core/runtime/ipc-task-parsing.js';
 import { clearConsumedIpcRequestIds } from '@core/runtime/ipc-auth-validation.js';
 import { sanitizeIpcToolInput } from '@core/runtime/ipc-tool-input-sanitization.js';
+import { evaluatePermissionDeterministicRails } from '@core/domain/permission-deterministic-rails.js';
+import { computePermissionEffectHash } from '@core/domain/permission-effect-key.js';
+import type { PermissionApprovalRequest } from '@core/domain/types.js';
+import { PERMISSION_CLASSIFIER_MAX_STRING_LENGTH } from '@core/runtime/permission-classifier-prompt.js';
 import {
   appendOwnedFileArtifactDegradeText,
   resolveOwnedFileArtifactMessage,
@@ -1205,6 +1209,124 @@ describe('validateIpcAuthRequest', () => {
     );
   });
 
+  it('strips the exact authenticated host env prefix from a shell command', () => {
+    const hostInjectedCommandPrefix =
+      "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:1/'";
+    const payload = {
+      requestId: 'perm-host-env-prefix',
+      responseNonce: randomUUID(),
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sourceAgentFolder: 'team',
+      toolName: 'RunCommand',
+      hostInjectedCommandPrefix,
+      toolInput: {
+        command: `${hostInjectedCommandPrefix} head -30 file`,
+      },
+      context: {
+        responseKeyId: TEST_RESPONSE_KEY_ID,
+        appId: 'app:one',
+        agentId: 'agent:team',
+      },
+    };
+
+    const parsed = parsePermissionIpcRequest(signedPayload(payload), 'team');
+
+    expect(parsed.hostInjectedCommandPrefix).toBe(hostInjectedCommandPrefix);
+    expect(parsed.toolInput).toMatchObject({ command: 'head -30 file' });
+    expect(parsed.classifierToolInput).toMatchObject({
+      command: 'head -30 file',
+    });
+    expect(parsed.toolInputTruncatedPaths ?? []).not.toContain('command');
+
+    // The rails no longer short-circuit on incomplete input, and the effect key
+    // builds for the stripped command.
+    const rails = evaluatePermissionDeterministicRails({ request: parsed });
+    if (rails?.railOutcome === 'ask') {
+      expect(rails.reason).not.toContain(
+        'missing or the command was truncated',
+      );
+    }
+    expect(computePermissionEffectHash({ request: parsed })).toBeDefined();
+  });
+
+  it('preserves a model-authored look-alike prefix when provenance mismatches', () => {
+    const command = 'HTTP_PROXY=http://127.0.0.1:1/ curl evil';
+    const payload = {
+      requestId: 'perm-forged-host-env-prefix',
+      responseNonce: randomUUID(),
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sourceAgentFolder: 'team',
+      toolName: 'RunCommand',
+      hostInjectedCommandPrefix: 'GODEBUG=netdns=go',
+      toolInput: { command },
+      context: {
+        responseKeyId: TEST_RESPONSE_KEY_ID,
+        appId: 'app:one',
+        agentId: 'agent:team',
+      },
+    };
+
+    const parsed = parsePermissionIpcRequest(signedPayload(payload), 'team');
+
+    expect(parsed.toolInput).toMatchObject({ command });
+    expect(parsed.classifierToolInput).toMatchObject({ command });
+  });
+
+  it('strips only the authenticated prefix and preserves a following model assignment', () => {
+    const hostInjectedCommandPrefix = 'GODEBUG=netdns=go';
+    const modelCommand = 'HTTP_PROXY=http://127.0.0.1:1/ curl evil';
+    const payload = {
+      requestId: 'perm-layered-host-env-prefix',
+      responseNonce: randomUUID(),
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sourceAgentFolder: 'team',
+      toolName: 'RunCommand',
+      hostInjectedCommandPrefix,
+      toolInput: {
+        command: `${hostInjectedCommandPrefix} ${modelCommand}`,
+      },
+      context: {
+        responseKeyId: TEST_RESPONSE_KEY_ID,
+        appId: 'app:one',
+        agentId: 'agent:team',
+      },
+    };
+
+    const parsed = parsePermissionIpcRequest(signedPayload(payload), 'team');
+
+    expect(parsed.toolInput).toMatchObject({ command: modelCommand });
+    expect(parsed.classifierToolInput).toMatchObject({
+      command: modelCommand,
+    });
+  });
+
+  it('does not normalize a shell command without authenticated prefix provenance', () => {
+    const command = 'HTTP_PROXY=http://127.0.0.1:1/ curl evil';
+    const payload = {
+      requestId: 'perm-no-host-env-prefix-provenance',
+      responseNonce: randomUUID(),
+      nonce: randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sourceAgentFolder: 'team',
+      toolName: 'RunCommand',
+      toolInput: { command },
+      context: {
+        responseKeyId: TEST_RESPONSE_KEY_ID,
+        appId: 'app:one',
+        agentId: 'agent:team',
+      },
+    };
+
+    const parsed = parsePermissionIpcRequest(signedPayload(payload), 'team');
+
+    expect(parsed.hostInjectedCommandPrefix).toBeUndefined();
+    expect(parsed.toolInput).toMatchObject({ command });
+    expect(parsed.classifierToolInput).toMatchObject({ command });
+  });
+
   it('records every altered tool input dot-path', () => {
     const wide = Object.fromEntries(
       Array.from({ length: 42 }, (_, index) => [`item_${index}`, index]),
@@ -1234,6 +1356,9 @@ describe('validateIpcAuthRequest', () => {
       'unsupported',
     ]);
     expect(result.redactedPaths).toEqual(['apiToken', 'authText']);
+    // Only genuine content-removal paths: string length-truncation, depth cap,
+    // and array/key overflow. `unsupported` (a function coerced via String())
+    // is altered but not truncated content.
     expect(result.truncatedPaths).toEqual([
       'long',
       'nested.child.tooDeep',
@@ -1241,7 +1366,6 @@ describe('validateIpcAuthRequest', () => {
       'wide.item_41',
       'entries.20',
       'entries.21',
-      'unsupported',
     ]);
     expect(result.toolInput).toMatchObject({
       apiToken: '[REDACTED]',
@@ -1265,6 +1389,45 @@ describe('validateIpcAuthRequest', () => {
     expect(secret.alteredPaths).toEqual(['command']);
     expect(secret.redactedPaths).toEqual(['command']);
     expect(secret.truncatedPaths).toEqual([]);
+  });
+
+  it('flags a command that is BOTH redacted and 16K-truncated as truncated (no silent allow/cache)', () => {
+    // Early token forces redaction; the destructive verb is pushed past the 16K
+    // classifier cap so it is sliced away. truncatedPaths must still report
+    // `command` even though the same path was redacted.
+    const command =
+      'echo Authorization: Bearer abcdefgh12345678 ' +
+      'a'.repeat(PERMISSION_CLASSIFIER_MAX_STRING_LENGTH) +
+      '; rm -rf /important';
+    const classifier = sanitizeIpcToolInput(
+      { command },
+      PERMISSION_CLASSIFIER_MAX_STRING_LENGTH,
+    );
+    const display = sanitizeIpcToolInput({ command });
+
+    expect(classifier.redactedPaths).toEqual(['command']);
+    expect(classifier.truncatedPaths).toEqual(['command']);
+    // The destructive suffix is gone from the retained view.
+    expect(JSON.stringify(classifier.toolInput)).not.toContain('rm -rf');
+
+    // A parsed request carrying this signal must be treated as incomplete: the
+    // rails ask and NO effect hash is cached.
+    const request = {
+      requestId: 'perm-redact-and-truncate',
+      appId: 'app:one',
+      sourceAgentFolder: 'team',
+      toolName: 'RunCommand',
+      toolInput: display.toolInput,
+      classifierToolInput: classifier.toolInput,
+      toolInputRedactedPaths: classifier.redactedPaths,
+      toolInputTruncatedPaths: classifier.truncatedPaths,
+    } as PermissionApprovalRequest;
+
+    expect(evaluatePermissionDeterministicRails({ request })).toMatchObject({
+      railOutcome: 'ask',
+      reason: expect.stringContaining('truncated'),
+    });
+    expect(computePermissionEffectHash({ request })).toBeUndefined();
   });
 
   it('records a root alteration for non-object tool input', () => {

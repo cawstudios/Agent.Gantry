@@ -16,11 +16,11 @@ agent-side:
 
 - The agent renders with `npx remotion render` (Remotion `4.0.290`, `@remotion/cli`)
   inside its workspace, under the **direct** sandbox provider.
-- Remotion resolves `chrome-headless-shell` itself and launches it via
-  `@remotion/renderer/dist/open-browser.js`. `--no-sandbox` is **already**
-  always in the arg list; `--single-process` is added **only** when
+- Remotion resolves `chrome-headless-shell` itself and launches it via the
+  `@remotion/renderer` package's open-browser launcher. `--no-sandbox` is
+  **already** always in the arg list; `--single-process` is added **only** when
   `chromiumOptions.enableMultiProcessOnLinux === false` (applies to macOS +
-  Linux despite the name — `open-browser.js` gates on
+  Linux despite the name — that launcher gates on
   `process.platform === 'linux' || 'darwin'`).
 - The BROWSER-capability plumbing in `apps/core/src/runtime/browser-config.ts`
   / `browser-capability.ts` builds `--user-data-dir` for the *browser tool* and
@@ -62,7 +62,7 @@ config option makes the wrapper unnecessary.
 ## Files changed
 
 All skill-side (no Gantry source change — nothing on the render path lives in
-this repo). `remotion-render/SKILL.md` now leads with the macOS setup
+this repo). The `remotion-render` skill definition now leads with the macOS setup
 (`remotion.config.ts` + `HOME`/`TMPDIR`) and bakes the env into the canonical
 render/still commands:
 

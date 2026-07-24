@@ -29,7 +29,7 @@ import {
 import { sandboxBlockedRuntimeEvents } from './sandbox-events.js';
 import { decideSdkSandboxNetworkAccess } from './sdk-sandbox-network-gate.js';
 import { readExternalMcpAllowedTools } from './external-mcp-tool-rules.js';
-import { applyBashTrustEnv } from './bash-trust-env.js';
+import { applyBashTrustEnvWithProvenance } from './bash-trust-env.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
 import { RUNTIME_EVENT_TYPES } from '../../../../domain/events/runtime-event-types.js';
@@ -192,12 +192,12 @@ export function createCanUseToolCallback(
         interrupt: false,
       };
     }
-    const trustInput = () =>
-      applyBashTrustEnv(
-        toolName,
-        toolInput,
-        input.agentInput.toolNetworkEnv ?? {},
-      );
+    const trustedInput = applyBashTrustEnvWithProvenance(
+      toolName,
+      toolInput,
+      input.agentInput.toolNetworkEnv ?? {},
+    );
+    const trustInput = () => trustedInput.toolInput;
     const sdkApprovalPrincipal =
       permissionOpts.agentID?.trim() ||
       input.agentInput.agentId ||

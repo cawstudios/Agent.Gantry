@@ -175,6 +175,47 @@ describe('requestPermissionApproval', () => {
     });
   });
 
+  it('serializes the authenticated host-injected command prefix', async () => {
+    process.env.GANTRY_JOB_ID = 'job-prefix';
+    process.env.GANTRY_JOB_RUN_ID = 'run-prefix';
+    process.env.GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS = '0';
+    process.env.GANTRY_PERMISSION_MODE = 'ask';
+    process.env.GANTRY_IPC_AUTH_TOKEN = 'signed-prefix-test-token';
+    vi.resetModules();
+    const { requestPermissionApproval } =
+      await import('@core/adapters/llm/anthropic-claude-agent/runner/permission-callback.js');
+    const hostInjectedCommandPrefix =
+      "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/'";
+
+    await requestPermissionApproval({
+      appId: 'default',
+      agentId: 'agent:main_agent',
+      workspaceFolder: 'main_agent',
+      targetJid: 'tg:test',
+      toolName: 'Bash',
+      hostInjectedCommandPrefix,
+      toolInput: {
+        command: `${hostInjectedCommandPrefix} git status --short`,
+      },
+    });
+
+    const requestDir = path.join(
+      tempDir,
+      'ipc',
+      'main_agent',
+      'permission-requests',
+    );
+    const [requestFile] = await waitForFiles(requestDir, 1);
+    const request = JSON.parse(
+      fs.readFileSync(path.join(requestDir, requestFile), 'utf-8'),
+    ) as {
+      hostInjectedCommandPrefix?: string;
+      signature?: string;
+    };
+    expect(request.hostInjectedCommandPrefix).toBe(hostInjectedCommandPrefix);
+    expect(request.signature).toEqual(expect.any(String));
+  });
+
   it('waits for and honors a late host allow response for zero-timeout auto mode', async () => {
     process.env.GANTRY_JOB_ID = 'job-auto';
     process.env.GANTRY_JOB_RUN_ID = 'run-auto';

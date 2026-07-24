@@ -73,6 +73,7 @@ export interface PermissionApprovalRequestOptions {
   };
   blockedPath?: string;
   toolInput?: unknown;
+  hostInjectedCommandPrefix?: string;
   toolUseID?: string;
   agentID?: string;
   suggestions?: unknown[];
@@ -132,6 +133,11 @@ export async function requestPermissionApprovalViaIpc(
       ...(options.blockedPath ? { blockedPath: options.blockedPath } : {}),
       ...(isPlainObject(options.toolInput)
         ? { toolInput: options.toolInput }
+        : {}),
+      ...(options.hostInjectedCommandPrefix
+        ? {
+            hostInjectedCommandPrefix: options.hostInjectedCommandPrefix,
+          }
         : {}),
       ...(options.toolUseID ? { toolUseID: options.toolUseID } : {}),
       ...(options.agentID ? { agentID: options.agentID } : {}),
