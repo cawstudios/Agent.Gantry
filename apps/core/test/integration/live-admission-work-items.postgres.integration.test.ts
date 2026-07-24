@@ -1,6 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { quotePostgresIdentifier } from '@core/adapters/storage/postgres/storage-service.js';
+import { PostgresCanonicalMessageRepository } from '@core/adapters/storage/postgres/repositories/canonical-message-repository.postgres.js';
+import { PostgresLiveTurnRepository } from '@core/adapters/storage/postgres/repositories/live-turn-repository.postgres.js';
+import { CanonicalMessageOpsService } from '@core/adapters/storage/postgres/services/canonical-message-ops-service.js';
 import {
   DEFAULT_AGENT_ID,
   DEFAULT_APP_ID,
@@ -98,6 +101,162 @@ maybeDescribe('live admission work items (Postgres)', () => {
       id: 'admission-id-replay',
       idempotencyKey: 'telegram:delivery:id-replay:root',
     });
+  });
+
+  it('atomically caps concurrent active admissions per app', async () => {
+    const cap = 3;
+    const appId = 'app-cap-flood';
+    const cappedLiveTurns = new PostgresLiveTurnRepository(
+      runtime.service.db,
+      undefined,
+      cap,
+    );
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        cappedLiveTurns.enqueueLiveAdmissionWorkItem({
+          id: `admission-cap-flood-${index}`,
+          ...base,
+          appId,
+          messageId: `message:cap-flood:${index}`,
+          messageCursor: `2026-06-16T00:00:00.000Z::cap-flood-${index}`,
+          idempotencyKey: `telegram:delivery:cap-flood-${index}`,
+        }),
+      ),
+    );
+
+    expect(
+      results.filter((result) => result.outcome === 'enqueued'),
+    ).toHaveLength(cap);
+    expect(
+      results.filter((result) => result.outcome === 'overloaded'),
+    ).toHaveLength(12 - cap);
+
+    const tableName = `${quotePostgresIdentifier(
+      runtime.schemaName,
+    )}.${quotePostgresIdentifier('live_admission_work_items')}`;
+    const { rows } = await runtime.service.pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM ${tableName}
+       WHERE app_id = $1
+         AND state IN ('queued', 'claimed', 'deferred')`,
+      [appId],
+    );
+    expect(Number(rows[0]?.count ?? 0)).toBe(cap);
+  });
+
+  it('replays duplicates at capacity and frees capacity only for terminal rows', async () => {
+    const cap = 2;
+    const appId = 'app-cap-replay';
+    const cappedLiveTurns = new PostgresLiveTurnRepository(
+      runtime.service.db,
+      undefined,
+      cap,
+    );
+    const inputs = [0, 1].map((index) => ({
+      id: `admission-cap-replay-${index}`,
+      ...base,
+      appId,
+      messageId: `message:cap-replay:${index}`,
+      messageCursor: `2026-06-16T00:00:00.000Z::cap-replay-${index}`,
+      idempotencyKey: `telegram:delivery:cap-replay-${index}`,
+    }));
+    await Promise.all(
+      inputs.map((input) =>
+        cappedLiveTurns.enqueueLiveAdmissionWorkItem(input),
+      ),
+    );
+
+    const replay = await cappedLiveTurns.enqueueLiveAdmissionWorkItem({
+      ...inputs[0],
+      id: 'admission-cap-replay-duplicate-id',
+    });
+    expect(replay).toMatchObject({
+      outcome: 'replayed',
+      item: { id: inputs[0].id },
+    });
+    await expect(
+      cappedLiveTurns.enqueueLiveAdmissionWorkItem({
+        ...inputs[0],
+        id: 'admission-cap-replay-overloaded',
+        messageId: 'message:cap-replay:overloaded',
+        messageCursor: '2026-06-16T00:00:00.000Z::cap-replay-overloaded',
+        idempotencyKey: 'telegram:delivery:cap-replay-overloaded',
+      }),
+    ).resolves.toEqual({ outcome: 'overloaded' });
+
+    const [claimed] = await cappedLiveTurns.claimLiveAdmissionWorkItems({
+      appId,
+      workerInstanceId: 'worker-cap-replay',
+      claimToken: 'claim-token-cap-replay',
+      claimExpiresAt: toIso(nowMs() + 60_000),
+      limit: 1,
+    });
+    await cappedLiveTurns.settleLiveAdmissionWorkItem({
+      id: claimed.id,
+      workerInstanceId: 'worker-cap-replay',
+      claimToken: 'claim-token-cap-replay',
+      state: 'completed',
+    });
+    await expect(
+      cappedLiveTurns.enqueueLiveAdmissionWorkItem({
+        ...inputs[0],
+        id: 'admission-cap-replay-after-terminal',
+        messageId: 'message:cap-replay:after-terminal',
+        messageCursor: '2026-06-16T00:00:00.000Z::cap-replay-after-terminal',
+        idempotencyKey: 'telegram:delivery:cap-replay-after-terminal',
+      }),
+    ).resolves.toMatchObject({ outcome: 'enqueued' });
+  });
+
+  it('persists an overloaded canonical message without a work row or wakeup', async () => {
+    const notifyLiveAdmissionWorkItem = vi.fn(async () => undefined);
+    const messages = new CanonicalMessageOpsService(
+      new PostgresCanonicalMessageRepository(runtime.service.db, 1),
+      { notifyLiveAdmissionWorkItem },
+    );
+    const appId = 'app-overloaded-canonical-message';
+    const makeMessage = (index: number) => ({
+      id: `msg-overloaded-${index}`,
+      chat_jid: 'tg:overloaded-canonical-message',
+      provider: 'telegram',
+      sender: 'user-overloaded',
+      sender_name: 'Overloaded User',
+      content: `canonical message ${index}`,
+      timestamp: `2026-06-16T00:00:0${index}.000Z`,
+      is_from_me: false,
+      is_bot_message: false,
+    });
+
+    await expect(
+      messages.storeMessageWithLiveAdmission(makeMessage(1), { appId }),
+    ).resolves.toMatchObject({ outcome: 'enqueued' });
+    await expect(
+      messages.storeMessageWithLiveAdmission(makeMessage(2), { appId }),
+    ).resolves.toEqual({ outcome: 'overloaded' });
+    expect(notifyLiveAdmissionWorkItem).toHaveBeenCalledTimes(1);
+
+    const workItemsTable = `${quotePostgresIdentifier(
+      runtime.schemaName,
+    )}.${quotePostgresIdentifier('live_admission_work_items')}`;
+    const messagesTable = `${quotePostgresIdentifier(
+      runtime.schemaName,
+    )}.${quotePostgresIdentifier('messages')}`;
+    const [workItems, canonicalMessages] = await Promise.all([
+      runtime.service.pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM ${workItemsTable}
+         WHERE app_id = $1`,
+        [appId],
+      ),
+      runtime.service.pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM ${messagesTable}
+         WHERE external_message_id = ANY($1::text[])`,
+        [['msg-overloaded-1', 'msg-overloaded-2']],
+      ),
+    ]);
+    expect(Number(workItems.rows[0]?.count ?? 0)).toBe(1);
+    expect(Number(canonicalMessages.rows[0]?.count ?? 0)).toBe(2);
   });
 
   it('claims due rows in durable FIFO order without prompt text payloads', async () => {
