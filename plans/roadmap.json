@@ -331,6 +331,38 @@
         "TTL janitor covered by tests",
         "local backend remains the default"
       ]
+    },
+    {
+      "key": "SEC-1",
+      "title": "Audit paydown: security blockers (CI runner isolation, inbound attachment writers, LLM concurrency admission)",
+      "order": 21,
+      "status": "active",
+      "epic": "Audit paydown 2026-07",
+      "skill": "backend"
+    },
+    {
+      "key": "PERF-1",
+      "title": "Audit paydown: performance fixes (IPC replay scan, jobs N+1, SSE permit race, live-admission caps)",
+      "order": 22,
+      "status": "pending",
+      "epic": "Audit paydown 2026-07",
+      "skill": "backend"
+    },
+    {
+      "key": "SIMP-1",
+      "title": "Audit paydown: simplifications (queue defaults, control service construction, test consolidation)",
+      "order": 23,
+      "status": "pending",
+      "epic": "Audit paydown 2026-07",
+      "skill": "backend"
+    },
+    {
+      "key": "SPS-4",
+      "title": "Audit paydown: architecture decisions (cluster rate-limit authority, mandatory durable coordination, LLM loopback collapse, live-admission retention)",
+      "order": 24,
+      "status": "pending",
+      "epic": "Audit paydown 2026-07",
+      "skill": "backend"
     }
   ],
   "epics": [
@@ -419,5 +451,5 @@
     }
   ],
   "generated_by": "human",
-  "updated_at": "2026-07-22T17:32:45+00:00"
+  "updated_at": "2026-07-24T08:34:33+00:00"
 }
