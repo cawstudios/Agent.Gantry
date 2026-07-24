@@ -277,18 +277,22 @@ through the loop:
 3. the orchestrator inspects the diff and rejects overbuilt code
 4. that stage's assumption rows are validated (`forge assumptions list --open`)
 5. smallest relevant checks run
-6. **local autoreview until clean** — invoke the autoreview SKILL HELPER
-   DIRECTLY (`"$AUTOREVIEW" --mode local` on the uncommitted diff, or
-   `--mode commit --commit HEAD` after committing); the helper spawns the Codex
-   engine in an isolated sandbox and returns a definitive exit code. NEVER a
-   `/codex:rescue`/companion `review` job — it hangs at finalization. A stage
-   is clean only on a clean helper run
-7. commit, then `forge stage done <id>`
+6. **commit** the stage
+7. **autoreview the COMMIT until clean** — invoke the autoreview SKILL HELPER
+   DIRECTLY (`"$AUTOREVIEW" --mode commit --commit HEAD`, or `--mode branch
+   --base origin/main`); the helper spawns the Codex engine in an isolated
+   sandbox and returns a definitive exit code. NEVER a `/codex:rescue`/companion
+   `review` job — it hangs at finalization. A finding means fix, re-commit, and
+   autoreview the NEW commit again — the review binds to a commit SHA.
+8. **record the clean review** — `record_stage_review_from_json.py --stage <id>`
+   with the reviewed HEAD SHA (verdict `clean`), then `forge stage done <id>`.
 
-Per-stage local reviews are pre-commit hygiene and record nothing; the ONE
-branch-wide autoreview at the review phase remains the only review gate and
-sole producer of `.factory/reviews/*` (decision 0001 D6 unchanged — it
-catches cross-stage issues the local passes cannot see). `pr_ready.py`
+The `stage done` gate is enforced: it refuses unless the stage's recorded review
+is `clean`, its `reviewed_sha` equals current HEAD, and the tracked worktree is
+clean — so a fix after review (which moves HEAD or dirties the tree) staleness-
+fails until the final commit is re-reviewed. The ONE branch-wide autoreview at
+the review phase remains the producer of `.factory/reviews/*` (decision 0001 D6
+— it catches cross-stage issues the local passes cannot see). `pr_ready.py`
 refuses while any stage is not done; `forge next` shows stage progress; the
 tracker archives to `.factory/history/<issue>/` at ship.
 

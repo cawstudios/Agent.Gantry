@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -32,6 +33,16 @@ def main() -> None:
     parser.add_argument("--input", help="Path to review JSON; stdin if omitted")
     args = parser.parse_args()
 
+    # The stage id is interpolated into the artifact path; reject anything that
+    # is not a bare separator-free identifier so `--stage ../stages` cannot
+    # escape .factory or overwrite the stage database.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", args.stage) or args.stage in (
+        ".", "..",
+    ):
+        raise SystemExit(
+            f"invalid --stage {args.stage!r}: must be a bare identifier "
+            "(letters, digits, dot, dash, underscore; no path separators).")
+
     raw = Path(args.input).read_text() if args.input else sys.stdin.read()
     payload = json.loads(raw)
 
@@ -42,15 +53,24 @@ def main() -> None:
     if verdict not in ("clean", "blocked"):
         raise SystemExit("stage-review verdict must be 'clean' or 'blocked'.")
 
+    # A clean verdict may carry ZERO blocking findings. Reviewers use either a
+    # `severity` (blocker/major) or a `priority` (P0/P1) field; both are treated
+    # as blocking so a clean verdict cannot smuggle an unaddressed P0/P1.
     findings = payload.get("findings") or []
-    if verdict == "clean" and any(
-        str(f.get("severity", "")).lower() in ("blocker", "major")
-        for f in findings if isinstance(f, dict)
-    ):
+
+    def _is_blocking(f: object) -> bool:
+        if not isinstance(f, dict):
+            return False
+        sev = str(f.get("severity", "")).strip().lower()
+        pri = str(f.get("priority", "")).strip().upper()
+        return sev in ("blocker", "major") or pri in ("P0", "P1")
+
+    if verdict == "clean" and any(_is_blocking(f) for f in findings):
         raise SystemExit(
-            "verdict 'clean' contradicts a blocker/major finding — a clean "
-            "review has zero unresolved blocking findings. Fix them and "
-            "re-review, or record verdict 'blocked'.")
+            "verdict 'clean' contradicts a blocking finding (severity "
+            "blocker/major or priority P0/P1) — a clean review has zero "
+            "unresolved blocking findings. Fix them and re-review, or record "
+            "verdict 'blocked'.")
 
     sha = head_sha(root)
     if not sha:
