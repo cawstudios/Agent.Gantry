@@ -426,17 +426,12 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
         p.log.error(
           'Refusing destructive removal in non-interactive mode without --yes.',
         );
-        p.log.info(
-          'Next action: rerun with `--yes` (and `--delete-folder` if you want to remove files too).',
-        );
+        p.log.info('Next action: rerun with `--yes`.');
         return 1;
       }
 
-      const folderPath = path.join(runtimeHome, 'agents', found.group.folder);
       const decision = await p.select({
-        message: parsed.deleteFolder
-          ? `Remove ${found.group.name} (${found.jid}) and delete folder ${folderPath}?`
-          : `Remove ${found.group.name} (${found.jid}) from the database?`,
+        message: `Remove ${found.group.name} (${found.jid})?`,
         options: [
           { label: 'Yes, remove it', value: 'yes' },
           { label: 'No, cancel', value: 'no' },
@@ -521,26 +516,7 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
       );
     }
 
-    if (parsed.deleteFolder) {
-      const folderPath = path.join(runtimeHome, 'agents', found.group.folder);
-      try {
-        if (fs.existsSync(folderPath)) {
-          fs.rmSync(folderPath, { recursive: true, force: false });
-        }
-      } catch (err) {
-        p.log.warn(
-          `Agent removed from database, but folder cleanup failed: ${folderPath}. Details: ${errorMessage(err)}`,
-        );
-        return 1;
-      }
-    }
-
     p.log.success(`Removed agent ${found.group.name} (${found.jid}).`);
-    if (!parsed.deleteFolder) {
-      p.log.info(
-        `Agent folder preserved at ${path.join(runtimeHome, 'agents', found.group.folder)}. Use --delete-folder to remove it.`,
-      );
-    }
     return 0;
   } finally {
     await db?.close();

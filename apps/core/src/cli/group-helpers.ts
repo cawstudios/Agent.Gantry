@@ -32,7 +32,7 @@ export function usage(): string {
     '  gantry agent info <jid|folder>',
     '  gantry agent name <name>',
     '  gantry agent add <jid|chat-id> [--name <name>] [--folder <folder>] [--trigger <word>] [--requires-trigger true|false] [--test-message|--no-test-message]',
-    '  gantry agent remove <jid|folder> [--delete-folder] [--yes]',
+    '  gantry agent remove <jid|folder> [--yes]',
     '  gantry agent trigger <jid|folder> <word>',
     '  gantry agent trigger <jid|folder> --off',
     '  gantry conversation approvers <conversation-id> [--allow <userId,userId>]',
@@ -208,21 +208,39 @@ export async function pruneDesiredStateAgent(input: {
       for (const [conversationId, conversation] of Object.entries(
         settings.conversations,
       )) {
-        if (conversation.providerAccount === accountId) {
-          delete settings.conversations[conversationId];
-          continue;
-        }
-        // A conversation primarily on another account can still hold this
-        // account in a secondary install; that reference would dangle once the
-        // account is deleted.
+        // Drop only the installs backed by this account -- a conversation can
+        // host other agents, and deleting it wholesale would silently discard
+        // their configuration.
         for (const [installKey, install] of Object.entries(
           conversation.installedAgents,
         )) {
-          if (install.providerAccountId !== accountId) continue;
+          if (
+            install.providerAccountId !== accountId &&
+            install.agentId !== input.folder
+          ) {
+            continue;
+          }
           delete conversation.installedAgents[installKey];
         }
-        if (Object.keys(conversation.installedAgents).length === 0) {
+        const survivingInstalls = Object.values(conversation.installedAgents);
+        if (survivingInstalls.length === 0) {
           delete settings.conversations[conversationId];
+          continue;
+        }
+        // Others remain: hand the conversation to a surviving install's
+        // account so its primary reference never points at a deleted account.
+        if (conversation.providerAccount === accountId) {
+          const replacement = survivingInstalls.find(
+            (install) =>
+              install.providerAccountId &&
+              install.providerAccountId !== accountId,
+          )?.providerAccountId;
+          if (!replacement) {
+            throw new Error(
+              `cannot remove ${input.folder}: conversation ${conversationId} still hosts ${survivingInstalls.length} agent(s) but has no other provider account to own it`,
+            );
+          }
+          conversation.providerAccount = replacement;
         }
       }
       delete settings.providerAccounts[accountId];
