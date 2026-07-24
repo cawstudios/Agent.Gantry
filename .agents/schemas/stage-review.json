@@ -6,7 +6,8 @@
   "required": {
     "generated_by": "str",
     "verdict": "str",
-    "findings": "list"
+    "findings": "list",
+    "reviewed_sha": "str"
   },
   "optional": {
     "summary": "str",

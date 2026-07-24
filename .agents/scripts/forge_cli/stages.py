@@ -37,10 +37,14 @@ def _require_clean_stage_review(base: Path, stage_id: str) -> None:
              f"{review.get('verdict', 'missing')!r}, not 'clean' — fix the "
              "findings, re-review the new commit, and record again before done.")
     head = head_sha(base)
-    reviewed = review.get("reviewed_sha")
-    if head and reviewed and reviewed != head:
+    reviewed = str(review.get("reviewed_sha") or "").strip()
+    if not reviewed:
+        fail(f"{stage_id} stage review has no reviewed_sha — it cannot attest "
+             "which commit was reviewed. Re-review the current HEAD and record "
+             f"again: record_stage_review_from_json.py --stage {stage_id}.")
+    if head and reviewed != head:
         fail(f"{stage_id} stage review is STALE — HEAD moved since the clean "
-             f"review (reviewed {str(reviewed)[:12]}, HEAD {head[:12]}). A fix "
+             f"review (reviewed {reviewed[:12]}, HEAD {head[:12]}). A fix "
              "after review is unreviewed; re-review the final commit and record "
              f"again: record_stage_review_from_json.py --stage {stage_id}.")
 

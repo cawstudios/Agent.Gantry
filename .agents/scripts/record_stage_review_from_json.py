@@ -58,12 +58,28 @@ def main() -> None:
             "no HEAD commit — commit the stage first; a stage review attests "
             "the COMMITTED diff (review HEAD, then record, then `stage done`).")
 
+    # The review OUTPUT must attest the commit it actually reviewed, and that
+    # commit must be the CURRENT HEAD. Otherwise a clean review of commit A
+    # could be recorded after commit B is created and be mis-stamped as B —
+    # the recorder must never fabricate the reviewed_sha from HEAD.
+    attested = str(payload.get("reviewed_sha") or "").strip()
+    if not attested:
+        raise SystemExit(
+            "stage-review JSON must carry `reviewed_sha` — the exact commit the "
+            "autoreview ran against (the HEAD you reviewed). Re-run the "
+            "autoreview helper on HEAD and record its attested SHA.")
+    if attested != sha:
+        raise SystemExit(
+            f"reviewed_sha {attested[:12]} does not match current HEAD "
+            f"{sha[:12]} — the review is of a different commit (a fix landed "
+            "after it). Re-review the current HEAD and record again.")
+
     record = {
         "stage": args.stage,
         "generated_by": payload["generated_by"],
         "verdict": verdict,
         "findings": findings,
-        "reviewed_sha": sha,
+        "reviewed_sha": attested,
         "recorded_at": now_iso(),
         **({"summary": payload["summary"]} if payload.get("summary") else {}),
         **({"passes": payload["passes"]} if payload.get("passes") else {}),
