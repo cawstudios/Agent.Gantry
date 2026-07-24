@@ -216,10 +216,12 @@ describe('system memory dreaming jobs', () => {
     expect(revived?.[1]).toMatchObject({
       status: 'active',
       pause_reason: null,
-      lease_run_id: null,
-      lease_expires_at: null,
       consecutive_failures: 0,
     });
+    // Lease fields are deliberately NOT written: a concurrent scheduler may
+    // have leased the row, and revival must never erase a live lease.
+    expect(revived?.[1]).not.toHaveProperty('lease_run_id');
+    expect(revived?.[1]).not.toHaveProperty('lease_expires_at');
     expect((revived?.[1] as { next_run?: string }).next_run).toBeTruthy();
   });
 

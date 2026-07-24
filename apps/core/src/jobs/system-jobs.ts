@@ -135,6 +135,22 @@ async function reviveDeadLetteredSystemJob(input: {
   ) {
     return false;
   }
+  // Re-read immediately before writing: another scheduler process may have
+  // revived, paused, or leased this row since the checks above. This narrows
+  // the window; the write itself deliberately does NOT clear lease fields, so
+  // even if a worker leases the row in the remaining microseconds we cannot
+  // erase a live lease -- the destructive half of the race is removed rather
+  // than merely made unlikely. (A fully atomic transition would need a
+  // conditional repository update, tracked in #283 follow-up.)
+  const current = await input.deps.opsRepository.getJobById(input.jobId);
+  if (
+    !current ||
+    current.status !== 'dead_lettered' ||
+    current.lease_run_id ||
+    current.lease_expires_at
+  ) {
+    return false;
+  }
   await input.deps.opsRepository.updateJob(input.jobId, {
     status: 'active',
     next_run: computeNextJobRun(
@@ -142,8 +158,6 @@ async function reviveDeadLetteredSystemJob(input: {
       input.nowIso,
     ),
     pause_reason: null,
-    lease_run_id: null,
-    lease_expires_at: null,
     consecutive_failures: 0,
   });
   revivedSystemJobIds.add(input.jobId);

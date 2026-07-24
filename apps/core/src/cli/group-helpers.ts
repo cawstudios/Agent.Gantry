@@ -159,6 +159,7 @@ export async function pruneDesiredStateAgent(input: {
 }): Promise<{
   pruned: boolean;
   providerAccountsPruned: number;
+  keptForDelegates?: string[];
   error?: string;
 }> {
   if (input.remainingRoutes > 0) {
@@ -169,6 +170,27 @@ export async function pruneDesiredStateAgent(input: {
     const previousSettings = structuredClone(settings);
     if (!settings.agents[input.folder]) {
       return { pruned: false, providerAccountsPruned: 0 };
+    }
+    // Routes are not the only liveness signal: another agent may still list
+    // this one as a delegate. Deleting it would break delegation (or leave an
+    // invalid inbound reference), so keep the definition and say why.
+    const delegateReferences = Object.entries(settings.agents)
+      .filter(
+        ([folder, agent]) =>
+          folder !== input.folder &&
+          (agent.delegates ?? []).some(
+            (delegate) =>
+              delegate === input.folder ||
+              (delegate as { agent?: string })?.agent === input.folder,
+          ),
+      )
+      .map(([folder]) => folder);
+    if (delegateReferences.length > 0) {
+      return {
+        pruned: false,
+        providerAccountsPruned: 0,
+        keptForDelegates: delegateReferences,
+      };
     }
     delete settings.agents[input.folder];
 
