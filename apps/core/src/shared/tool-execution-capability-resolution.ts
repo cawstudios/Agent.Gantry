@@ -44,7 +44,10 @@ export function resolveCapabilityRules(
       add(rule);
       continue;
     }
-    const definition = definitions?.[capabilityId];
+    const definition =
+      definitions && Object.hasOwn(definitions, capabilityId)
+        ? definitions[capabilityId]
+        : undefined;
     if (!definition) {
       if (!loggedUnresolvedCapabilities.has(capabilityId)) {
         loggedUnresolvedCapabilities.add(capabilityId);

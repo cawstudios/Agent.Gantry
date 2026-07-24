@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ToolExecutionClassifier,
@@ -859,6 +859,45 @@ describe('ToolExecutionPolicyService semantic capability resolution', () => {
     });
     expect(result).toMatchObject({ status: 'allow', matchedRule: 'FileRead' });
     expect(result.reason).not.toContain('Unsupported autonomous tool rule');
+  });
+
+  it('skips an inherited prototype capability id while resolving an owned definition', () => {
+    const readCapability = capability({
+      capabilityId: 'files.read',
+      credentialSource: 'none',
+      risk: 'read',
+      implementationBindings: [{ kind: 'tool_rule', rule: 'FileRead' }],
+    });
+    const request = classifier.classify({
+      origin: 'sdk',
+      toolName: 'Read',
+      toolInput: { file_path: '/repo/notes.md' },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const result = policy.evaluate({
+        request,
+        allowedToolRules: [
+          'capability:constructor',
+          'capability:toString',
+          'capability:files.read',
+        ],
+        semanticCapabilityDefinitions: definitionsById(readCapability),
+      });
+
+      expect(result).toMatchObject({
+        status: 'allow',
+        reason: 'Allowed by selected capability files.read.',
+        matchedRule: 'FileRead',
+      });
+      expect(warn).toHaveBeenCalledWith(
+        '[tool-execution-policy] skipping unresolved capability rule capability:constructor (no reviewed definition available)',
+      );
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('does not turn an unrelated tool into a capability-mismatch deny when a capability rule is unresolvable', () => {
