@@ -180,20 +180,17 @@ describe('system memory dreaming jobs', () => {
     expect(deleteJob).not.toHaveBeenCalled();
   });
 
-  it('revives an old dead-lettered dreaming job so restarts recover it', async () => {
+  it('re-stamps silent on dead-lettered dreaming jobs without reviving them', async () => {
     const { registerSystemJobs } = await loadSystemJobs();
     const upsertJob = vi.fn().mockResolvedValue({ created: true });
     const updateJob = vi.fn(async () => undefined);
     const getJobById = vi.fn(async (id: string) =>
       id.startsWith('system:dreaming:')
-        ? makeJob({
-            id,
-            status: 'dead_lettered',
-            silent: false,
-            last_run: '2026-05-08T00:00:00.000Z',
-          })
+        ? makeJob({ id, status: 'dead_lettered', silent: false })
         : undefined,
     );
+    const getAllJobs = vi.fn(async () => []);
+    const deleteJob = vi.fn(async () => undefined);
 
     await registerSystemJobs({
       conversationRoutes: () => ({
@@ -201,112 +198,23 @@ describe('system memory dreaming jobs', () => {
       }),
       opsRepository: {
         getJobById,
-        getAllJobs: vi.fn(async () => []),
-        deleteJob: vi.fn(async () => undefined),
+        getAllJobs,
+        deleteJob,
         upsertJob,
         updateJob,
       },
     } as never);
 
-    const revived = updateJob.mock.calls.find(
-      (call) => (call[1] as { status?: string }).status === 'active',
+    expect(updateJob).toHaveBeenCalledTimes(1);
+    expect(updateJob).toHaveBeenCalledWith(
+      expect.stringMatching(/^system:dreaming:/),
+      { silent: true },
     );
-    expect(revived).toBeDefined();
-    expect(revived?.[0]).toMatch(/^system:dreaming:/);
-    expect(revived?.[1]).toMatchObject({
-      status: 'active',
-      pause_reason: null,
-      consecutive_failures: 0,
-    });
-    // Lease fields are deliberately NOT written: a concurrent scheduler may
-    // have leased the row, and revival must never erase a live lease.
-    expect(revived?.[1]).not.toHaveProperty('lease_run_id');
-    expect(revived?.[1]).not.toHaveProperty('lease_expires_at');
-    expect((revived?.[1] as { next_run?: string }).next_run).toBeTruthy();
-  });
-
-  it('does not revive a recently dead-lettered job, a paused job, or a leased job', async () => {
-    const recent = new Date(Date.now() - 60_000).toISOString();
-
-    for (const [label, job] of [
-      ['recent', makeJob({ status: 'dead_lettered', last_run: recent })],
-      [
-        'paused',
-        makeJob({ status: 'paused', last_run: '2026-05-08T00:00:00.000Z' }),
-      ],
-      [
-        'leased',
-        makeJob({
-          status: 'dead_lettered',
-          last_run: '2026-05-08T00:00:00.000Z',
-          lease_run_id: 'run-1',
-        }),
-      ],
-    ] as const) {
-      const { registerSystemJobs } = await loadSystemJobs();
-      const updateJob = vi.fn(async () => undefined);
-      await registerSystemJobs({
-        conversationRoutes: () => ({
-          'sl:C123': makeRoute({
-            folder: 'agent',
-            conversationKind: 'channel',
-          }),
-        }),
-        opsRepository: {
-          getJobById: vi.fn(async (id: string) =>
-            id.startsWith('system:dreaming:') ? { ...job, id } : undefined,
-          ),
-          getAllJobs: vi.fn(async () => []),
-          deleteJob: vi.fn(async () => undefined),
-          upsertJob: vi.fn().mockResolvedValue({ created: true }),
-          updateJob,
-        },
-      } as never);
-
-      expect(
-        updateJob.mock.calls.filter(
-          (call) => (call[1] as { status?: string }).status === 'active',
-        ),
-        `${label} job must not be revived`,
-      ).toHaveLength(0);
-    }
-  });
-
-  it('revives at most once per process, not on every registration sync', async () => {
-    const { registerSystemJobs } = await loadSystemJobs();
-    const updateJob = vi.fn(async () => undefined);
-    const deps = {
-      conversationRoutes: () => ({
-        'sl:C123': makeRoute({ folder: 'agent', conversationKind: 'channel' }),
-      }),
-      opsRepository: {
-        getJobById: vi.fn(async (id: string) =>
-          id.startsWith('system:dreaming:')
-            ? makeJob({
-                id,
-                status: 'dead_lettered',
-                last_run: '2026-05-08T00:00:00.000Z',
-              })
-            : undefined,
-        ),
-        getAllJobs: vi.fn(async () => []),
-        deleteJob: vi.fn(async () => undefined),
-        upsertJob: vi.fn().mockResolvedValue({ created: true }),
-        updateJob,
-      },
-    } as never;
-
-    await registerSystemJobs(deps);
-    const afterFirst = updateJob.mock.calls.filter(
-      (call) => (call[1] as { status?: string }).status === 'active',
-    ).length;
-    await registerSystemJobs(deps);
-    const afterSecond = updateJob.mock.calls.filter(
-      (call) => (call[1] as { status?: string }).status === 'active',
-    ).length;
-
-    expect(afterFirst).toBeGreaterThan(0);
-    expect(afterSecond).toBe(afterFirst);
+    expect(
+      upsertJob.mock.calls.filter(
+        (call) => call[0].prompt === '__system:memory_dream',
+      ),
+    ).toHaveLength(0);
   });
 
   it('registers per-conversation dreaming jobs non-silent when dreaming alerts are enabled', async () => {

@@ -75,95 +75,6 @@ const MEMORY_EMBEDDING_BACKFILL_TIMEOUT_MS = 10 * 60 * 1000;
 const BRAIN_DREAMING_TIMEOUT_MS = 10 * 60 * 1000;
 const MEMORY_REVIEW_NOTIFICATION_LOOKUP_TIMEOUT_MS = 2_000;
 
-/**
- * A system job that dead-letters stays dead forever: registration deliberately
- * skips dead-lettered jobs, and the scheduler re-runs registration on every
- * sync, so no restart recovers it. These jobs are runtime-owned infrastructure
- * (not user jobs), so a transient failure must not retire them permanently.
- *
- * Revival is deliberately conservative: once per process, only for jobs this
- * module registers, never for operator-paused or currently leased jobs, and
- * only after a cooldown so a job failing every run cannot restart-loop and
- * burn model spend.
- */
-const SYSTEM_JOB_REVIVE_COOLDOWN_MS = 60 * 60 * 1000;
-/**
- * Job ids already revived by this process. Tracked per job rather than with a
- * single one-shot flag: a job still inside its cooldown on the first pass (or a
- * route that only registers later) must remain eligible on a later sync, while
- * an already-revived job is never revived twice.
- */
-const revivedSystemJobIds = new Set<string>();
-
-/** Test seam: clear the per-process revival record. */
-export function resetSystemJobRevivalForTests(): void {
-  revivedSystemJobIds.clear();
-}
-
-function isTrustedSystemJobId(jobId: string): boolean {
-  return (
-    jobId === BRAIN_DREAMING_JOB_ID ||
-    jobId.startsWith(MEMORY_DREAMING_JOB_ID_PREFIX)
-  );
-}
-
-async function reviveDeadLetteredSystemJob(input: {
-  deps: SchedulerDependencies;
-  jobId: string;
-  cron: string;
-  nowIso: string;
-}): Promise<boolean> {
-  if (!isTrustedSystemJobId(input.jobId)) return false;
-  if (revivedSystemJobIds.has(input.jobId)) return false;
-  const existing = await input.deps.opsRepository.getJobById(input.jobId);
-  if (!existing || existing.status !== 'dead_lettered') return false;
-  // A live lease means a worker may still be running this job. An EXPIRED
-  // lease must not block revival forever -- that is exactly the stuck state
-  // this recovery exists to clear -- and revival clears the lease fields.
-  const leaseExpiresMs = Date.parse(existing.lease_expires_at || '');
-  const leaseStillLive = Number.isFinite(leaseExpiresMs)
-    ? leaseExpiresMs > Date.parse(input.nowIso)
-    : Boolean(existing.lease_run_id);
-  if (leaseStillLive) return false;
-  const lastRunMs = Date.parse(
-    existing.last_run || existing.updated_at || existing.created_at || '',
-  );
-  const nowMs = Date.parse(input.nowIso);
-  if (
-    Number.isFinite(lastRunMs) &&
-    nowMs - lastRunMs < SYSTEM_JOB_REVIVE_COOLDOWN_MS
-  ) {
-    return false;
-  }
-  // Re-read immediately before writing: another scheduler process may have
-  // revived, paused, or leased this row since the checks above. This narrows
-  // the window; the write itself deliberately does NOT clear lease fields, so
-  // even if a worker leases the row in the remaining microseconds we cannot
-  // erase a live lease -- the destructive half of the race is removed rather
-  // than merely made unlikely. (A fully atomic transition would need a
-  // conditional repository update, tracked in #283 follow-up.)
-  const current = await input.deps.opsRepository.getJobById(input.jobId);
-  if (
-    !current ||
-    current.status !== 'dead_lettered' ||
-    current.lease_run_id ||
-    current.lease_expires_at
-  ) {
-    return false;
-  }
-  await input.deps.opsRepository.updateJob(input.jobId, {
-    status: 'active',
-    next_run: computeNextJobRun(
-      { schedule_type: 'cron', schedule_value: input.cron },
-      input.nowIso,
-    ),
-    pause_reason: null,
-    consecutive_failures: 0,
-  });
-  revivedSystemJobIds.add(input.jobId);
-  return true;
-}
-
 function embeddingBackfillEnabled(): boolean {
   return MEMORY_BACKFILL_ENABLED && MEMORY_EMBED_PROVIDER !== 'disabled';
 }
@@ -313,12 +224,6 @@ export async function registerSystemJobs(
   if (RUNTIME_MEMORY_DREAMING_ENABLED) {
     for (const { jid, group } of registrations) {
       const jobId = systemDreamingJobId({ folder: group.folder, jid });
-      await reviveDeadLetteredSystemJob({
-        deps,
-        jobId,
-        cron: MEMORY_DREAMING_CRON,
-        nowIso,
-      });
       const existing = await deps.opsRepository.getJobById(jobId);
       if (existing?.status === 'dead_lettered') {
         // Dead-lettered jobs are not revived here, but silent must still track
@@ -377,12 +282,6 @@ export async function registerSystemJobs(
   // lifecycle/notifications through the primary conversation when available.
   const primary = registrations[0];
   if (RUNTIME_MEMORY_DREAMING_ENABLED && primary) {
-    await reviveDeadLetteredSystemJob({
-      deps,
-      jobId: BRAIN_DREAMING_JOB_ID,
-      cron: MEMORY_DREAMING_CRON,
-      nowIso,
-    });
     const existing = await deps.opsRepository.getJobById(BRAIN_DREAMING_JOB_ID);
     if (existing?.status !== 'dead_lettered') {
       const computedNextRun = computeNextJobRun(
