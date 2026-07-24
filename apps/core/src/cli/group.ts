@@ -484,10 +484,19 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
       remainingRoutes,
     });
     if (desiredPrune.error) {
-      p.log.warn(
-        `Route removed, but the agent definition still exists in desired state for ${found.group.folder}: ${desiredPrune.error}. It will be recreated on the next reload.`,
+      // Stop before any further destructive step: the agent WILL be recreated
+      // on the next reload, so deleting its folder would leave a resurrected
+      // agent pointing at missing files, and reporting success would tell
+      // automation the removal persisted when it did not.
+      p.log.error(
+        `Removal did not persist: the agent definition still exists in desired state for ${found.group.folder} (${desiredPrune.error}). It will be recreated on the next reload.`,
       );
-    } else if (desiredPrune.pruned) {
+      p.log.info(
+        'Next action: fix the settings write, then rerun the removal. The agent folder was left untouched.',
+      );
+      return 1;
+    }
+    if (desiredPrune.pruned) {
       const accounts = desiredPrune.providerAccountsPruned;
       p.log.info(
         `Removed agent ${found.group.folder} from desired state${

@@ -186,8 +186,22 @@ export async function pruneDesiredStateAgent(input: {
       for (const [conversationId, conversation] of Object.entries(
         settings.conversations,
       )) {
-        if (conversation.providerAccount !== accountId) continue;
-        delete settings.conversations[conversationId];
+        if (conversation.providerAccount === accountId) {
+          delete settings.conversations[conversationId];
+          continue;
+        }
+        // A conversation primarily on another account can still hold this
+        // account in a secondary install; that reference would dangle once the
+        // account is deleted.
+        for (const [installKey, install] of Object.entries(
+          conversation.installedAgents,
+        )) {
+          if (install.providerAccountId !== accountId) continue;
+          delete conversation.installedAgents[installKey];
+        }
+        if (Object.keys(conversation.installedAgents).length === 0) {
+          delete settings.conversations[conversationId];
+        }
       }
       delete settings.providerAccounts[accountId];
       providerAccountsPruned += 1;

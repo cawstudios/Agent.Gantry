@@ -117,9 +117,14 @@ async function reviveDeadLetteredSystemJob(input: {
   if (revivedSystemJobIds.has(input.jobId)) return false;
   const existing = await input.deps.opsRepository.getJobById(input.jobId);
   if (!existing || existing.status !== 'dead_lettered') return false;
-  // An operator pause outranks revival, and a live lease means a worker may
-  // still be running this job.
-  if (existing.lease_run_id || existing.lease_expires_at) return false;
+  // A live lease means a worker may still be running this job. An EXPIRED
+  // lease must not block revival forever -- that is exactly the stuck state
+  // this recovery exists to clear -- and revival clears the lease fields.
+  const leaseExpiresMs = Date.parse(existing.lease_expires_at || '');
+  const leaseStillLive = Number.isFinite(leaseExpiresMs)
+    ? leaseExpiresMs > Date.parse(input.nowIso)
+    : Boolean(existing.lease_run_id);
+  if (leaseStillLive) return false;
   const lastRunMs = Date.parse(
     existing.last_run || existing.updated_at || existing.created_at || '',
   );
