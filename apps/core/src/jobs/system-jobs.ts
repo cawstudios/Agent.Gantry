@@ -87,11 +87,17 @@ const MEMORY_REVIEW_NOTIFICATION_LOOKUP_TIMEOUT_MS = 2_000;
  * burn model spend.
  */
 const SYSTEM_JOB_REVIVE_COOLDOWN_MS = 60 * 60 * 1000;
-let systemJobRevivalAttempted = false;
+/**
+ * Job ids already revived by this process. Tracked per job rather than with a
+ * single one-shot flag: a job still inside its cooldown on the first pass (or a
+ * route that only registers later) must remain eligible on a later sync, while
+ * an already-revived job is never revived twice.
+ */
+const revivedSystemJobIds = new Set<string>();
 
-/** Test seam: reset the once-per-process revival guard. */
+/** Test seam: clear the per-process revival record. */
 export function resetSystemJobRevivalForTests(): void {
-  systemJobRevivalAttempted = false;
+  revivedSystemJobIds.clear();
 }
 
 function isTrustedSystemJobId(jobId: string): boolean {
@@ -108,6 +114,7 @@ async function reviveDeadLetteredSystemJob(input: {
   nowIso: string;
 }): Promise<boolean> {
   if (!isTrustedSystemJobId(input.jobId)) return false;
+  if (revivedSystemJobIds.has(input.jobId)) return false;
   const existing = await input.deps.opsRepository.getJobById(input.jobId);
   if (!existing || existing.status !== 'dead_lettered') return false;
   // An operator pause outranks revival, and a live lease means a worker may
@@ -134,6 +141,7 @@ async function reviveDeadLetteredSystemJob(input: {
     lease_expires_at: null,
     consecutive_failures: 0,
   });
+  revivedSystemJobIds.add(input.jobId);
   return true;
 }
 
@@ -283,21 +291,15 @@ export async function registerSystemJobs(
   }
 
   const nowIso = currentIso();
-  // Revive dead-lettered system jobs once per process, before the
-  // registration paths below skip them.
-  const reviveSystemJobsThisPass = !systemJobRevivalAttempted;
-  systemJobRevivalAttempted = true;
   if (RUNTIME_MEMORY_DREAMING_ENABLED) {
     for (const { jid, group } of registrations) {
       const jobId = systemDreamingJobId({ folder: group.folder, jid });
-      if (reviveSystemJobsThisPass) {
-        await reviveDeadLetteredSystemJob({
-          deps,
-          jobId,
-          cron: MEMORY_DREAMING_CRON,
-          nowIso,
-        });
-      }
+      await reviveDeadLetteredSystemJob({
+        deps,
+        jobId,
+        cron: MEMORY_DREAMING_CRON,
+        nowIso,
+      });
       const existing = await deps.opsRepository.getJobById(jobId);
       if (existing?.status === 'dead_lettered') {
         // Dead-lettered jobs are not revived here, but silent must still track
@@ -356,14 +358,12 @@ export async function registerSystemJobs(
   // lifecycle/notifications through the primary conversation when available.
   const primary = registrations[0];
   if (RUNTIME_MEMORY_DREAMING_ENABLED && primary) {
-    if (reviveSystemJobsThisPass) {
-      await reviveDeadLetteredSystemJob({
-        deps,
-        jobId: BRAIN_DREAMING_JOB_ID,
-        cron: MEMORY_DREAMING_CRON,
-        nowIso,
-      });
-    }
+    await reviveDeadLetteredSystemJob({
+      deps,
+      jobId: BRAIN_DREAMING_JOB_ID,
+      cron: MEMORY_DREAMING_CRON,
+      nowIso,
+    });
     const existing = await deps.opsRepository.getJobById(BRAIN_DREAMING_JOB_ID);
     if (existing?.status !== 'dead_lettered') {
       const computedNextRun = computeNextJobRun(

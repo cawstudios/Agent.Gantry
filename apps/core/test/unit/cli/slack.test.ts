@@ -1227,4 +1227,66 @@ describe('cli slack helpers', () => {
     // Other agents are untouched.
     expect(loadRuntimeSettings(runtimeHome).agents.keeper).toBeDefined();
   });
+
+  it('never leaves a provider account pointing at the removed agent', () => {
+    const runtimeHome = makeRuntimeHome();
+    const settings = loadRuntimeSettings(runtimeHome);
+    settings.agents.doomed = {
+      name: 'Doomed',
+      folder: 'doomed',
+      bindings: {},
+      capabilities: [],
+      delegates: [],
+      sources: { skills: [], mcpServers: [], tools: [] },
+      accessPreset: 'full',
+    } as (typeof settings.agents)['doomed'];
+    settings.providerAccounts.doomed_account = {
+      provider: 'slack',
+      agentId: 'doomed',
+      label: 'doomed',
+      runtimeSecretRefs: {},
+    } as (typeof settings.providerAccounts)['doomed_account'];
+    settings.conversations.doomed_conversation = {
+      providerAccount: 'doomed_account',
+      externalId: 'C999',
+      kind: 'channel',
+      displayName: 'doomed',
+      senderPolicy: { allow: '*', mode: 'trigger' },
+      controlApprovers: [],
+      installedAgents: {
+        doomed: {
+          agentId: 'doomed',
+          providerAccountId: 'doomed_account',
+          status: 'active',
+          addedAt: '2026-01-01T00:00:00.000Z',
+          memoryScope: 'conversation',
+        },
+      },
+    } as (typeof settings.conversations)['doomed_conversation'];
+    saveRuntimeSettings(runtimeHome, settings);
+
+    return expect(
+      (async () => {
+        await pruneDesiredStateAgent({
+          runtimeHome,
+          folder: 'doomed',
+          remainingRoutes: 0,
+        });
+        const updated = loadRuntimeSettings(runtimeHome);
+        return {
+          agent: updated.agents.doomed,
+          account: updated.providerAccounts.doomed_account,
+          conversation: updated.conversations.doomed_conversation,
+          danglingAccounts: Object.values(updated.providerAccounts).filter(
+            (account) => account.agentId === 'doomed',
+          ).length,
+        };
+      })(),
+    ).resolves.toEqual({
+      agent: undefined,
+      account: undefined,
+      conversation: undefined,
+      danglingAccounts: 0,
+    });
+  });
 });

@@ -172,17 +172,23 @@ export async function pruneDesiredStateAgent(input: {
     }
     delete settings.agents[input.folder];
 
-    // Provider accounts serving only this agent would otherwise dangle and fail
-    // settings validation ("references unknown agent").
+    // A provider account still pointing at the removed agent is a dangling
+    // "references unknown agent" reference that makes the settings write fail,
+    // so none may survive. Settings validation already guarantees a
+    // conversation's installed agent owns its provider account, so an account
+    // belonging to this agent can only serve this agent's conversations --
+    // both go together.
     let providerAccountsPruned = 0;
     for (const [accountId, account] of Object.entries(
       settings.providerAccounts,
     )) {
       if (account.agentId !== input.folder) continue;
-      const stillUsed = Object.values(settings.conversations).some(
-        (conversation) => conversation.providerAccount === accountId,
-      );
-      if (stillUsed) continue;
+      for (const [conversationId, conversation] of Object.entries(
+        settings.conversations,
+      )) {
+        if (conversation.providerAccount !== accountId) continue;
+        delete settings.conversations[conversationId];
+      }
       delete settings.providerAccounts[accountId];
       providerAccountsPruned += 1;
     }
