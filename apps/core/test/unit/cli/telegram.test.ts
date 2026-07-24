@@ -1046,29 +1046,35 @@ describe('cli telegram helpers', () => {
     expect(result.found?.group.folder).toBe('multi_agent');
   });
 
-  it('reports ambiguity when a token is both a route JID and another agent folder', () => {
+  it('keeps exact route-JID precedence, with agent:<folder> addressing the other agent', () => {
     const collidingJid = 'tg:999';
-    const otherRouteKey = makeAgentThreadQueueKey('tg:123', 'agent:other');
-    const result = resolveGroupSelector(
-      {
-        [collidingJid]: {
-          name: 'Direct route',
-          folder: 'direct_route',
-          trigger: '',
-          added_at: '2026-04-24T00:00:00.000Z',
-        },
-        [otherRouteKey]: {
-          name: 'Other',
-          folder: collidingJid,
-          trigger: '',
-          added_at: '2026-04-24T00:00:00.000Z',
-        },
+    const otherRouteKey = makeAgentThreadQueueKey('tg:123', 'agent:tg:999');
+    const groups = {
+      [collidingJid]: {
+        name: 'Direct route',
+        folder: 'direct_route',
+        trigger: '',
+        added_at: '2026-04-24T00:00:00.000Z',
       },
-      collidingJid,
-    );
+      [otherRouteKey]: {
+        name: 'Other',
+        folder: collidingJid,
+        trigger: '',
+        added_at: '2026-04-24T00:00:00.000Z',
+      },
+    };
 
-    expect(result.found).toBeNull();
-    expect(result.error).toContain('ambiguous');
+    // Exact route key wins -- and stays addressable.
+    const byJid = resolveGroupSelector(groups, collidingJid);
+    expect(byJid.error).toBeUndefined();
+    expect(byJid.found?.jid).toBe(collidingJid);
+    expect(byJid.found?.group.folder).toBe('direct_route');
+
+    // The agent whose FOLDER collides is reachable via its canonical id.
+    const byAgentId = resolveGroupSelector(groups, `agent:${collidingJid}`);
+    expect(byAgentId.error).toBeUndefined();
+    expect(byAgentId.found?.jid).toBe(otherRouteKey);
+    expect(byAgentId.found?.group.folder).toBe(collidingJid);
   });
 
   it('does not flag a collision when the colliding folder is the same agent', () => {

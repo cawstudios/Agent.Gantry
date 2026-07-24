@@ -327,23 +327,13 @@ export function resolveGroupSelector(
     return resolveAgentIdRoute(groups, selector);
   }
 
+  // An exact route key keeps precedence even when it also matches another
+  // agent's folder: `agent:<folder>` above now gives the folder side its own
+  // unambiguous namespace, so there is always a way to address either one.
   const directJid = groups[selector]
     ? { jid: selector, group: groups[selector] }
     : null;
   if (directJid) {
-    // A token that is BOTH an exact route JID and a DIFFERENT agent's folder is
-    // ambiguous — do not silently prefer the JID. Compare agent identity (the
-    // folder), not route keys: one agent may legitimately own several routes.
-    const folderCollision = Object.entries(groups).find(
-      ([, group]) =>
-        group.folder === selector && group.folder !== directJid.group.folder,
-    );
-    if (folderCollision) {
-      return {
-        found: null,
-        error: `Selector "${selector}" is ambiguous (route JID "${selector}" and folder "${selector}" of agent "${folderCollision[1].name}"). Use the full route JID or the agent:<folder> id.`,
-      };
-    }
     return { found: directJid };
   }
 
