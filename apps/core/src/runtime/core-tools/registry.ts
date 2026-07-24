@@ -14,14 +14,8 @@ import {
 } from '../../shared/tool-execution-policy-service.js';
 import type { YoloModeSettings } from '../../shared/yolo-mode-policy.js';
 import { readWorkspaceMessageAttachment } from '../../platform/workspace-message-attachment.js';
-import {
-  permissionDecisionEventType,
-  permissionDecisionName,
-  permissionTelemetryContext,
-} from '../ipc-permission-telemetry.js';
 import { processMemoryRequest } from '../../memory/memory-ipc.js';
 import {
-  runDurablePermissionInteraction,
   runDurableQuestionInteraction,
   type DurableInteractionOperations,
 } from '../../application/interactions/durable-interaction-handler.js';
@@ -51,6 +45,7 @@ import type {
   McpCompatibleToolError,
   McpCompatibleToolResult,
 } from './contracts.js';
+import { coordinateCoreToolPermission } from './core-tool-permission-coordinator.js';
 
 export type {
   CoreToolDefinition,
@@ -103,9 +98,6 @@ export function inlineCoreToolsMountMcpInventory(): boolean {
   return MCP_INVENTORY_TOOL_NAMES.every((name) => mounted.has(name));
 }
 
-const LOCKED_ACCESS_PRESET_DENY_REASON =
-  'capability not provisioned: this agent runs with a locked access preset and cannot request new tools, skills, MCP servers, or permissions. Provision the capability before the run.';
-
 export interface CoreToolRunContext {
   sourceAgentFolder: string;
   conversationId: string;
@@ -128,6 +120,7 @@ export interface CoreToolRunContext {
   yoloMode?: YoloModeSettings;
   permissionMode: import('../../shared/permission-mode.js').PermissionMode;
   accessPreset?: 'full' | 'locked';
+  fixedImageRestricted?: boolean;
 }
 
 export interface CoreToolRegistryDeps extends CoreSendMessageDeps {
@@ -464,14 +457,6 @@ async function gateCoreTool(
     toolRules: deps.context.toolRules,
     successLedger: deps.context.toolSuccessLedger,
   });
-  if (precheck) {
-    const error = precheck.error ?? {
-      category: 'permission' as const,
-      isRetryable: false,
-      message: precheck.reason,
-    };
-    return errorResult(error.message, error.category, error.isRetryable);
-  }
   const decision = deps.evaluateToolPolicy({
     classifier: new ToolExecutionClassifier(),
     policy: new ToolExecutionPolicyService(),
@@ -487,10 +472,6 @@ async function gateCoreTool(
     allowedToolRules: deps.context.allowedToolRules ?? [],
     autonomousAllowedToolRules: deps.context.autonomousAllowedToolRules,
   });
-  if (decision.status === 'allow') return null;
-  if (deps.context.accessPreset === 'locked') {
-    return permissionDenied(LOCKED_ACCESS_PRESET_DENY_REASON);
-  }
   // Auto classifier omitted: only ineligible AgentDelegation reaches this seam.
   const request: PermissionApprovalRequest = {
     requestId: id('permission'),
@@ -506,7 +487,7 @@ async function gateCoreTool(
     toolName: gateName,
     displayName: gateName,
     description: 'Start or steer a delegated Gantry task.',
-    decisionReason: decision.reason,
+    decisionReason: precheck?.reason ?? decision.reason,
     closestRule: decision.closestRule,
     toolInput: args as Record<string, unknown>,
     suggestions: [
@@ -519,73 +500,22 @@ async function gateCoreTool(
     ],
     decisionOptions: ['allow_once', 'allow_persistent_rule', 'cancel'],
   };
-  const interaction = await runDurablePermissionInteraction({
+  const coordinatedDecision = await coordinateCoreToolPermission({
     request,
-    sourceAgentFolder: deps.context.sourceAgentFolder,
-    operations: deps.durability,
-    beforePrompt: async () => {
-      await deps.onPermissionPromptStarted?.(request);
-      await publishPermissionEvent(
-        deps,
-        request,
-        RUNTIME_EVENT_TYPES.PERMISSION_REQUESTED,
-        permissionTelemetryContext(request, {
-          sourceAgentFolder: deps.context.sourceAgentFolder,
-          decision: 'requested',
-        }),
-      );
-    },
-    prompt: async () =>
-      deps.requestPermissionApproval?.(request) ?? {
-        approved: false,
-        mode: 'cancel',
-        reason: 'approval surface unavailable',
-      },
-    afterDecision: async (permissionDecision) => {
-      await deps.onPermissionDecision?.(request, permissionDecision);
-      await publishPermissionEvent(
-        deps,
-        request,
-        permissionDecisionEventType(permissionDecision),
-        permissionTelemetryContext(request, {
-          sourceAgentFolder: deps.context.sourceAgentFolder,
-          decision: permissionDecisionName(permissionDecision),
-          decisionMode: permissionDecision.mode,
-          decidedBy: permissionDecision.decidedBy,
-        }),
-      );
-      if (permissionDecision.approved) {
-        await publishPermissionEvent(
-          deps,
-          request,
-          RUNTIME_EVENT_TYPES.PERMISSION_RESUMED,
-          permissionTelemetryContext(request, {
-            sourceAgentFolder: deps.context.sourceAgentFolder,
-            decision: 'resumed',
-            decisionMode: permissionDecision.mode,
-          }),
-        );
-      }
-      await publishPermissionEvent(
-        deps,
-        request,
-        RUNTIME_EVENT_TYPES.PERMISSION_FINAL_OUTCOME,
-        permissionTelemetryContext(request, {
-          sourceAgentFolder: deps.context.sourceAgentFolder,
-          decision: permissionDecisionName(permissionDecision),
-          approved: permissionDecision.approved,
-          decisionMode: permissionDecision.mode,
-        }),
-      );
-      await deps.onPermissionPromptFinished?.(request);
-    },
+    hardDenyReason: precheck?.reason,
+    reviewedRuleDecision: decision,
+    deps,
   });
-  if (!interaction.resolved) {
-    return permissionDenied('durable permission resolution failed');
+  if (!coordinatedDecision.approved && precheck?.error) {
+    return errorResult(
+      precheck.error.message,
+      precheck.error.category,
+      precheck.error.isRetryable,
+    );
   }
-  return interaction.decision.approved
+  return coordinatedDecision.approved
     ? null
-    : permissionDenied(interaction.decision.reason ?? 'request cancelled');
+    : permissionDenied(coordinatedDecision.reason ?? 'request cancelled');
 }
 
 function coreToolGateName(name: string): 'AgentDelegation' | null {
@@ -627,29 +557,6 @@ async function memoryResult(
       ? deps.formatMemorySearchResponse(response)
       : deps.formatMemoryWriteResponse(action, response),
   );
-}
-
-async function publishPermissionEvent(
-  deps: CoreToolRegistryDeps,
-  request: PermissionApprovalRequest,
-  eventType: (typeof RUNTIME_EVENT_TYPES)[keyof typeof RUNTIME_EVENT_TYPES],
-  payload: Record<string, unknown>,
-): Promise<void> {
-  if (!deps.publishRuntimeEvent || !request.appId) return;
-  await deps
-    .publishRuntimeEvent({
-      appId: request.appId as never,
-      agentId: request.agentId as never,
-      runId: request.runId as never,
-      jobId: request.jobId as never,
-      conversationId: request.targetJid as never,
-      threadId: request.threadId as never,
-      eventType,
-      actor: 'permission',
-      correlationId: request.requestId,
-      payload,
-    })
-    .catch(() => undefined);
 }
 
 function formatQuestionAnswers(

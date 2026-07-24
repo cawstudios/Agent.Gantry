@@ -238,12 +238,12 @@ vi.mock('@core/runtime/egress-gateway.js', () => ({
   ensureEgressGateway: (...args: unknown[]) => mockEnsureEgressGateway(...args),
 }));
 
-// DeepAgents shell/filesystem pre-spawn guard runs with its REAL implementation:
-// shell/filesystem authority that is not confined by an enforcing sandbox fails
-// closed with the enforcing-sandbox copy, while shell/filesystem authority under
-// `sandbox_runtime` is allowed (the runner projects the gated shell tool). The
-// per-test sandbox provider is driven by the runtime-settings mock + the passed
-// runnerSandboxProvider, so no guard mock seam is needed.
+// DeepAgents shell/filesystem projection runs with its REAL implementation.
+// Two-axis model (decision 0040): the sandbox provider does NOT gate shell or
+// filesystem tool projection — authorization is the control in both `direct`
+// and `sandbox_runtime` modes, so shell/filesystem authority is allowed under
+// either provider. The per-test sandbox provider is driven by the
+// runtime-settings mock + the passed runnerSandboxProvider.
 
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
@@ -288,7 +288,6 @@ import {
 } from '@core/config/index.js';
 import { getConfiguredModelProvidersForApp } from '@core/adapters/storage/postgres/runtime-store.js';
 import { DirectRunnerSandboxProvider } from '@core/adapters/sandbox/runner-sandbox-provider.js';
-import { DEEPAGENTS_ENFORCING_SANDBOX_REQUIRED_MESSAGE } from '@core/runtime/deepagents-shell-filesystem-guard.js';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import type { ConversationRoute } from '@core/domain/types.js';
@@ -327,6 +326,7 @@ import type {
 } from '@core/shared/runner-sandbox-provider.js';
 import type { RunAgentOptions } from '@core/runtime/agent-spawn-types.js';
 import { SANDBOX_RUNTIME_MODEL_GATEWAY_HOST } from '@core/runtime/agent-spawn-runtime-policy.js';
+import { permissionRunRestriction } from '@core/runtime/permission-decision-coordinator.js';
 import {
   processPermissionIpcRequest,
   processUserQuestionIpcRequest,
@@ -1128,18 +1128,27 @@ describe('agent-spawn timeout behavior', () => {
     } as never);
 
     const resultPromise = spawnTestAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    const restrictionKey = {
+      sourceAgentFolder: testGroup.folder,
+      responseKeyId: env.GANTRY_IPC_RESPONSE_KEY_ID,
+    };
+    expect(permissionRunRestriction(restrictionKey)).toEqual({
+      hideAuthorityTools: true,
+    });
     emitOutputMarker(fakeProc, { status: 'success', result: 'started' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
 
-    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
-      string,
-      string
-    >;
     expect(env.GANTRY_AGENT_ACCESS_PRESET).toBe('locked');
     expect(env.GANTRY_NO_PERMISSION_TOOLS).toBe('1');
+    expect(permissionRunRestriction(restrictionKey)).toBeUndefined();
   });
 
   it('projects the full access preset for a default agent', async () => {
@@ -4334,8 +4343,10 @@ describe('agent-spawn timeout behavior', () => {
     expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:18080/');
     expect(env.NODE_USE_ENV_PROXY).toBe('1');
     expect(env.HTTP_PROXY).not.toContain('aoc_');
+    // No shell rule requested, so the shell flag stays off; filesystem facades
+    // are always projected for a DeepAgents run (two-axis model — direct too).
     expect(env.GANTRY_DEEPAGENTS_SHELL_ENABLED).toBeUndefined();
-    expect(env.GANTRY_DEEPAGENTS_FILESYSTEM_ENABLED).toBeUndefined();
+    expect(env.GANTRY_DEEPAGENTS_FILESYSTEM_ENABLED).toBe('1');
     const runnerInput = JSON.parse(String(writeSpy.mock.calls[0]?.[0]));
     expect(runnerInput.toolNetworkEnv.HTTP_PROXY).toBe(
       'http://127.0.0.1:18080/',
@@ -4343,11 +4354,11 @@ describe('agent-spawn timeout behavior', () => {
     expect(runnerInput.modelCredentialEnv?.HTTP_PROXY).toBeUndefined();
   });
 
-  it('A9: blocks a deepagents shell run under direct mode with the enforcing-sandbox copy (FAIL CLOSED)', async () => {
-    // Default mocked runtime sandbox provider is 'direct' (non-enforcing), so a
-    // DeepAgents run requesting shell authority fails closed before spawn — no
-    // shell tool can be projected without an enforcing OS sandbox.
-    const result = await spawnTestAgent(
+  it('A9: allows a deepagents shell run under direct mode and projects GANTRY_DEEPAGENTS_SHELL_ENABLED (two-axis)', async () => {
+    // Default mocked runtime sandbox provider is 'direct'. Two-axis model
+    // (decision 0040): the sandbox provider does not gate shell projection —
+    // the spawn proceeds and the shell-enabled flag is projected.
+    const resultPromise = spawnTestAgent(
       testGroup,
       {
         ...testInput,
@@ -4356,25 +4367,24 @@ describe('agent-spawn timeout behavior', () => {
       },
       () => {},
       undefined,
-      {
-        executionAdapter: {
-          id: 'deepagents:langchain',
-          prepare: vi.fn(async () => {
-            throw new Error('should not prepare: guard must fire first');
-          }),
-        },
-      },
+      { executionAdapter: testDeepAgentsExecutionAdapter },
     );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
 
-    expect(result).toMatchObject({
-      status: 'error',
-      error: DEEPAGENTS_ENFORCING_SANDBOX_REQUIRED_MESSAGE,
-    });
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalled();
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.GANTRY_DEEPAGENTS_SHELL_ENABLED).toBe('1');
+    expect(env.GANTRY_DEEPAGENTS_FILESYSTEM_ENABLED).toBe('1');
   });
 
-  it('A9: blocks a deepagents filesystem run under direct mode with the enforcing-sandbox copy (FAIL CLOSED)', async () => {
-    const result = await spawnTestAgent(
+  it('A9: allows a deepagents filesystem run under direct mode (two-axis)', async () => {
+    const resultPromise = spawnTestAgent(
       testGroup,
       {
         ...testInput,
@@ -4383,21 +4393,20 @@ describe('agent-spawn timeout behavior', () => {
       },
       () => {},
       undefined,
-      {
-        executionAdapter: {
-          id: 'deepagents:langchain',
-          prepare: vi.fn(async () => {
-            throw new Error('should not prepare: guard must fire first');
-          }),
-        },
-      },
+      { executionAdapter: testDeepAgentsExecutionAdapter },
     );
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
 
-    expect(result).toMatchObject({
-      status: 'error',
-      error: DEEPAGENTS_ENFORCING_SANDBOX_REQUIRED_MESSAGE,
-    });
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalled();
+    const env = vi.mocked(spawn).mock.calls.at(-1)?.[2]?.env as Record<
+      string,
+      string
+    >;
+    expect(env.GANTRY_DEEPAGENTS_FILESYSTEM_ENABLED).toBe('1');
+    expect(env.GANTRY_DEEPAGENTS_SHELL_ENABLED).toBeUndefined();
   });
 
   it('A9: allows a deepagents shell run under sandbox_runtime and projects GANTRY_DEEPAGENTS_SHELL_ENABLED', async () => {

@@ -28,7 +28,6 @@ import {
 } from '../shared/memory-dreaming-timeout.js';
 import { resolveModelSelectionForWorkload } from '../shared/model-catalog.js';
 import type { PermissionMode } from '../shared/permission-mode.js';
-import { stripHostInjectedEnvPrefix } from '../shared/runtime-env-command.js';
 import * as yolo from '../shared/yolo-mode-policy.js';
 import type {
   PermissionApprovalDecision,
@@ -40,7 +39,9 @@ import {
   parsePermissionClassifierResponse,
   permissionClassifierSystemPrompt,
   serializePermissionClassifierToolInput,
+  type PermissionClassifierRiskLevel,
 } from './permission-classifier-prompt.js';
+import { coordinatePermissionClassifierRisk } from './permission-decision-coordinator.js';
 
 export {
   PERMISSION_CLASSIFIER_MAX_STRING_LENGTH,
@@ -76,7 +77,6 @@ export interface PermissionClassifierInput {
   approvedCapabilityIds: string[];
   recentlyApprovedExactToolShape?: boolean;
   recentlyDeniedExactToolShape?: boolean;
-  posture?: 'allow_leaning' | 'strict';
   autoModeModel?: string;
   memoryModelConfig: {
     extractor: string;
@@ -88,7 +88,7 @@ export interface PermissionClassifierInput {
 }
 
 export interface PermissionClassifierResult {
-  decision: 'allow' | 'ask';
+  risk_level: PermissionClassifierRiskLevel;
   reason: string;
   latencyMs: number;
   model?: string;
@@ -107,7 +107,8 @@ export interface PublishPermissionClassifierDecisionInput {
   actor: RuntimeEventPublishInput['actor'];
   intentSource: PermissionClassifierIntentSource;
   toolName: string;
-  decision: PermissionClassifierResult['decision'];
+  decision: PermissionClassifierPromptConsultResult['decision'];
+  risk_level: PermissionClassifierRiskLevel;
   reason: string;
   latencyMs: number;
   model?: string;
@@ -151,6 +152,7 @@ export interface PermissionClassifierPromptConsultInput {
   classifierConsult?: typeof consultPermissionClassifier;
 }
 export interface PermissionClassifierPromptConsultResult extends PermissionClassifierResult {
+  decision: 'allow' | 'ask';
   suggestions?: PermissionApprovalUpdate[];
   suggestionKey?: string;
   promotionHintCount?: number;
@@ -198,7 +200,7 @@ export async function consultPermissionClassifier(
           ...(modelSelection.modelProfile
             ? { modelProfile: modelSelection.modelProfile }
             : {}),
-          systemPrompt: permissionClassifierSystemPrompt(input.posture),
+          systemPrompt: permissionClassifierSystemPrompt(),
           prompt: classifierUserPayload(input),
           signal,
           timeoutMs: PERMISSION_CLASSIFIER_TIMEOUT_MS,
@@ -232,7 +234,7 @@ export async function consultPermissionClassifier(
   }
 
   return {
-    decision: verdict.decision,
+    risk_level: verdict.risk_level,
     reason: verdict.reason,
     latencyMs: Date.now() - startedAt,
     model: modelSelection.model,
@@ -275,7 +277,7 @@ export async function consultPermissionClassifierBeforePrompt(
       : shellInput?.cmd;
   const classifierToolInput = shellRequest
     ? {
-        command: stripClassifierHostInjectedEnvPrefix(shellCommandField),
+        command: shellCommandField,
       }
     : input.toolInput;
   const incompletePaths = [
@@ -302,19 +304,19 @@ export async function consultPermissionClassifierBeforePrompt(
           workspaceRoot: input.workspaceRoot,
           reviewedMcpReadBindings: input.reviewedMcpReadBindings,
         });
-  const result: PermissionClassifierResult = inputTruncated
+  const classifierResult: PermissionClassifierResult = inputTruncated
     ? {
-        decision: 'ask',
+        risk_level: 'high',
         reason:
           'Classifier skipped because its tool input view was incomplete; ask the user.',
         latencyMs: 0,
         failureCode: 'input_truncated',
       }
     : // prettier-ignore
-      yoloDenylistMatch ? { decision: 'ask', reason: `YOLO-mode denylist backstop matched "${yoloDenylistMatch.pattern}"; ask the user for explicit approval.`, latencyMs: 0 }
+      yoloDenylistMatch ? { risk_level: 'high', reason: `YOLO-mode denylist backstop matched "${yoloDenylistMatch.pattern}"; ask the user for explicit approval.`, latencyMs: 0 }
       : !deterministicGate?.allowed && input.permissionMode === 'auto_strict'
           ? {
-              decision: 'ask',
+              risk_level: 'high',
               reason:
                 deterministicGate?.reason ??
                 'Deterministic read-only proof was unavailable; ask the user.',
@@ -335,16 +337,20 @@ export async function consultPermissionClassifierBeforePrompt(
             recentlyApprovedExactToolShape:
               wasRecentlyApproved(promotionCounter),
             recentlyDeniedExactToolShape: wasRecentlyDenied(promotionCounter),
-            posture:
-              input.permissionMode === 'auto_strict'
-                ? 'strict'
-                : 'allow_leaning',
             autoModeModel: input.classifierConfig.autoModeModel,
             memoryModelConfig: {
               extractor: input.classifierConfig.memoryExtractorModel,
             },
             signal: input.signal,
           });
+  const result: PermissionClassifierPromptConsultResult = {
+    ...classifierResult,
+    decision: await coordinatePermissionClassifierRisk({
+      riskLevel: classifierResult.risk_level,
+      allow: () => 'allow' as const,
+      tail: async () => 'ask' as const,
+    }),
+  };
   if (yoloDenylistMatch && !inputTruncated) {
     // Contract: every denylist backstop match emits the dedicated audit
     // event, matching the SDK gate's emitYoloDenylistHit payload shape.
@@ -403,11 +409,6 @@ export async function consultPermissionClassifierBeforePrompt(
       ? { promotionHintCount: promotionCounter.allowCount }
       : {}),
   };
-}
-
-function stripClassifierHostInjectedEnvPrefix(command: unknown): unknown {
-  if (typeof command !== 'string') return command;
-  return stripHostInjectedEnvPrefix(command).command;
 }
 
 export async function permissionPromotionHintCount(input: {
@@ -581,6 +582,7 @@ export async function publishPermissionClassifierDecision(
       toolName: input.toolName,
       intentSource: input.intentSource,
       decision: input.decision,
+      riskLevel: input.risk_level,
       reason: input.reason,
       latencyMs: input.latencyMs,
       ...(input.model !== undefined ? { model: input.model } : {}),
@@ -605,7 +607,7 @@ function failedResult(
     'Permission classifier consultation failed',
   );
   return {
-    decision: 'ask',
+    risk_level: 'high',
     reason: `Classifier unavailable (${failureCode}); ask the user.`,
     latencyMs: Date.now() - startedAt,
     ...(model ? { model } : {}),

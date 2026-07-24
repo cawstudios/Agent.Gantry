@@ -52,6 +52,7 @@ export async function requestPermissionApproval(options: {
   };
   blockedPath?: string;
   toolInput?: unknown;
+  hostInjectedCommandPrefix?: string;
   toolUseID?: string;
   agentID?: string;
   suggestions?: unknown[];
@@ -83,6 +84,7 @@ async function requestPermissionApprovalInner(options: {
   };
   blockedPath?: string;
   toolInput?: unknown;
+  hostInjectedCommandPrefix?: string;
   toolUseID?: string;
   agentID?: string;
   suggestions?: unknown[];
@@ -139,6 +141,11 @@ async function requestPermissionApprovalInner(options: {
       ...(options.blockedPath ? { blockedPath: options.blockedPath } : {}),
       ...(isPlainObject(options.toolInput)
         ? { toolInput: options.toolInput }
+        : {}),
+      ...(options.hostInjectedCommandPrefix
+        ? {
+            hostInjectedCommandPrefix: options.hostInjectedCommandPrefix,
+          }
         : {}),
       ...(options.toolUseID ? { toolUseID: options.toolUseID } : {}),
       ...(options.agentID ? { agentID: options.agentID } : {}),

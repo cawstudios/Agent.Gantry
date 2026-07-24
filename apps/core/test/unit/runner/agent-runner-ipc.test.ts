@@ -36,6 +36,7 @@ interface RunnerRecord {
     closeExistsAtQueryStart?: boolean;
     streamEnded?: boolean;
     permissionRequest?: Record<string, unknown>;
+    permissionRequests?: Array<Record<string, unknown>>;
     permissionDecision?: Record<string, unknown>;
     permissionDecisions?: Record<string, Record<string, unknown>>;
     primeToolDecisions?: Record<string, Record<string, unknown>>;
@@ -251,6 +252,74 @@ async function waitForFile(dir, timeoutMs) {
   throw new Error('timed out waiting for IPC file in ' + dir);
 }
 
+const respondedPermissionRequestIds = new Set();
+let hostPermissionResponseCount = 0;
+
+async function respondToNextPermissionRequest() {
+  const requestDir = path.join(process.env.GANTRY_IPC_DIR, 'permission-requests');
+  const responseDir = path.join(process.env.GANTRY_IPC_DIR, 'permission-responses');
+  const deadline = Date.now() + 1000;
+  let request;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(requestDir)) {
+      const requestPath = fs.readdirSync(requestDir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => path.join(requestDir, file))
+        .find((file) => !respondedPermissionRequestIds.has(file));
+      if (requestPath) {
+        respondedPermissionRequestIds.add(requestPath);
+        request = JSON.parse(fs.readFileSync(requestPath, 'utf-8'));
+        break;
+      }
+    }
+    await delay(25);
+  }
+  if (!request) {
+    throw new Error('timed out waiting for coordinator permission request');
+  }
+  const approved = process.env.TEST_HOST_PERMISSION_DECISION === 'approve';
+  const responsePayload = {
+    requestId: request.requestId,
+    responseNonce: request.responseNonce,
+    approved,
+    ...(approved ? { mode: 'allow_once' } : {}),
+    decidedBy: 'permission_decision_coordinator',
+    reason: approved
+      ? 'Approved by the host permission coordinator.'
+      : 'Denied by the host permission coordinator.',
+    decisionClassification: approved ? 'user_temporary' : 'user_reject',
+  };
+  const signature = signPayload(responsePayload);
+  fs.mkdirSync(responseDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(responseDir, request.requestId + '.json'),
+    JSON.stringify({
+      ...responsePayload,
+      ...(signature ? { signature } : {}),
+    }),
+  );
+  return request;
+}
+
+async function canUseToolThroughHost(call, options, ...args) {
+  if (!process.env.TEST_HOST_PERMISSION_DECISION) {
+    return options.canUseTool(...args);
+  }
+  const responseLimit = Number(
+    process.env.TEST_HOST_PERMISSION_RESPONSE_COUNT || 'Infinity',
+  );
+  if (hostPermissionResponseCount >= responseLimit) {
+    return options.canUseTool(...args);
+  }
+  hostPermissionResponseCount += 1;
+  const responsePromise = respondToNextPermissionRequest();
+  const decision = await options.canUseTool(...args);
+  const request = await responsePromise;
+  call.permissionRequests ||= [];
+  call.permissionRequests.push(request);
+  return decision;
+}
+
 export async function* query({ prompt, options }) {
   const call = {
     promptKind: typeof prompt === 'string' ? 'string' : 'stream',
@@ -340,7 +409,13 @@ export async function* query({ prompt, options }) {
     const permissionToolName = process.env.TEST_PERMISSION_TOOL_NAME || 'Bash';
     const permissionInput = process.env.TEST_PERMISSION_SCOPE
       ? { scope: process.env.TEST_PERMISSION_SCOPE }
-      : { cmd: 'npm test', apiToken: 'secret-token' };
+      : {
+          cmd: process.env.TEST_PERMISSION_COMMAND || 'npm test',
+          apiToken: 'secret-token',
+          ...(process.env.TEST_PERMISSION_DANGEROUSLY_DISABLE_SANDBOX === '1'
+            ? { dangerouslyDisableSandbox: true }
+            : {}),
+        };
     const decisionPromise = options.canUseTool(
       permissionToolName,
       permissionInput,
@@ -412,7 +487,9 @@ export async function* query({ prompt, options }) {
       process.env.TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL === '1';
     const networkHost =
       process.env.TEST_SDK_NETWORK_HOST || 'registry.npmjs.org';
-    const toolDecision = await options.canUseTool(
+    const toolDecision = await canUseToolThroughHost(
+      call,
+      options,
       'Bash',
       { cmd: process.env.TEST_TOOL_USE_CMD || 'npm test --runInBand' },
       {
@@ -425,7 +502,9 @@ export async function* query({ prompt, options }) {
         toolUseID: 'toolu_bash_1',
       },
     );
-    const networkDecision = await options.canUseTool(
+    const networkDecision = await canUseToolThroughHost(
+      call,
+      options,
       'SandboxNetworkAccess',
       { host: networkHost },
       {
@@ -442,7 +521,9 @@ export async function* query({ prompt, options }) {
     );
     const secondNetworkDecision =
       process.env.TEST_SECOND_SDK_NETWORK_AFTER_TOOL === '1'
-        ? await options.canUseTool(
+        ? await canUseToolThroughHost(
+            call,
+            options,
             'SandboxNetworkAccess',
             { host: 'example.com' },
             {
@@ -506,7 +587,9 @@ export async function* query({ prompt, options }) {
 	        JSON.stringify([process.env.TEST_LIVE_TOOL_RULE]),
 	      );
 	    }
-	    call.permissionDecision = await options.canUseTool(
+	    call.permissionDecision = await canUseToolThroughHost(
+      call,
+      options,
       process.env.TEST_TOOL_USE_ONLY,
       { cmd: process.env.TEST_TOOL_USE_CMD || 'npm test' },
       {
@@ -906,14 +989,6 @@ describe('agent-runner IPC lifecycle', () => {
       expect(sdkEnv.GANTRY_MCP_SERVERS_JSON).toBeUndefined();
       expect(sdkEnv.GANTRY_MCP_ALLOWED_TOOLS_JSON).toBeUndefined();
       expect(sdkEnv.ENABLE_TOOL_SEARCH).toBe('false');
-      expect(call?.sandbox).toEqual(
-        expect.objectContaining({
-          network: expect.objectContaining({
-            allowLocalBinding: true,
-            httpProxyPort: 18080,
-          }),
-        }),
-      );
       const startupDiagnostics = readRunnerOutputs(result.stdout).flatMap(
         (output) =>
           Array.isArray(output.runtimeEvents) ? output.runtimeEvents : [],
@@ -970,25 +1045,6 @@ describe('agent-runner IPC lifecycle', () => {
       );
     },
     SLOW_RUNNER_IPC_TEST_TIMEOUT_MS,
-  );
-
-  it(
-    'fails closed when direct mode receives a non-loopback SDK sandbox proxy',
-    async () => {
-      const fixture = createRunnerFixture();
-
-      const result = await runRunner(fixture, baseInput(), {
-        GANTRY_EGRESS_PROXY_URL: 'http://gateway.example:18080/',
-        TEST_EXIT_AFTER_QUERY: '1',
-      });
-
-      expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain(
-        'GANTRY_EGRESS_PROXY_URL must identify the run-scoped loopback HTTP egress gateway.',
-      );
-      expect(fs.existsSync(fixture.recordPath)).toBe(false);
-    },
-    RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -1213,46 +1269,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'enables SDK filesystem sandboxing with protected deny-write paths',
-    async () => {
-      const fixture = createRunnerFixture();
-      const claudeConfigDir = path.join(fixture.root, 'claude-config');
-      const handoffPath = path.join(fixture.root, 'ipc', 'mcp-handoff.json');
-
-      const result = await runRunner(fixture, baseInput(), {
-        TEST_EXIT_AFTER_QUERY: '1',
-        GANTRY_PROTECTED_FILESYSTEM_PATHS_JSON: JSON.stringify([
-          claudeConfigDir,
-          handoffPath,
-        ]),
-      });
-
-      expect(result.exitCode, result.stderr).toBe(0);
-      const call = readRecord(fixture.recordPath).calls[0];
-      expect(call?.sandbox).toMatchObject({
-        enabled: true,
-        failIfUnavailable: true,
-        autoAllowBashIfSandboxed: false,
-        allowUnsandboxedCommands: false,
-        filesystem: {
-          denyWrite: expect.arrayContaining([
-            path.join(
-              fs.realpathSync.native(path.dirname(claudeConfigDir)),
-              path.basename(claudeConfigDir),
-            ),
-            path.join(
-              fs.realpathSync.native(path.dirname(handoffPath)),
-              path.basename(handoffPath),
-            ),
-          ]),
-        },
-      });
-    },
-    RUNNER_IPC_TEST_TIMEOUT_MS,
-  );
-
-  it(
-    'keeps reviewed local CLI credential paths readable but write-protected in the SDK sandbox',
+    'exposes reviewed local CLI credential paths via additionalDirectories',
     async () => {
       const fixture = createRunnerFixture();
       const protectedSettingsPath = path.join(
@@ -1284,40 +1301,12 @@ describe('agent-runner IPC lifecycle', () => {
 
       expect(result.exitCode, result.stderr).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
-      const sandboxFilesystem = call?.sandbox?.filesystem as
-        | { denyRead?: string[]; denyWrite?: string[] }
-        | undefined;
 
-      expect(sandboxFilesystem?.denyRead).toEqual(
-        expect.arrayContaining([
-          path.join(
-            fs.realpathSync.native(path.dirname(protectedSettingsPath)),
-            path.basename(protectedSettingsPath),
-          ),
-        ]),
-      );
-      expect(sandboxFilesystem?.denyRead).not.toEqual(
-        expect.arrayContaining([
-          path.join(
-            fs.realpathSync.native(path.dirname(localCliCredentialDir)),
-            path.basename(localCliCredentialDir),
-          ),
-        ]),
-      );
+      // Two-axis model (decision 0040): no SDK Seatbelt in direct mode, so the
+      // reviewed local CLI credential dir is exposed via additionalDirectories
+      // (readable); write protection is enforced by host-side authorization.
       expect(call?.additionalDirectories).toEqual(
         expect.arrayContaining([
-          path.join(
-            fs.realpathSync.native(path.dirname(localCliCredentialDir)),
-            path.basename(localCliCredentialDir),
-          ),
-        ]),
-      );
-      expect(sandboxFilesystem?.denyWrite).toEqual(
-        expect.arrayContaining([
-          path.join(
-            fs.realpathSync.native(path.dirname(runtimeProjectionDir)),
-            path.basename(runtimeProjectionDir),
-          ),
           path.join(
             fs.realpathSync.native(path.dirname(localCliCredentialDir)),
             path.basename(localCliCredentialDir),
@@ -1598,7 +1587,7 @@ describe('agent-runner IPC lifecycle', () => {
       expect(result.exitCode).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.tools).toContain('Skill');
-      expect(call?.allowedTools).toContain('Skill');
+      expect(call?.allowedTools).toBeUndefined();
       expect(call?.settings?.skillOverrides).toEqual(
         SDK_NATIVE_SKILL_OVERRIDES,
       );
@@ -1678,15 +1667,13 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.tools).toEqual(
         expect.arrayContaining(['Bash', 'Write', 'Edit']),
       );
-      expect(call?.allowedTools).not.toEqual(
-        expect.arrayContaining(['Bash', 'Write', 'Edit']),
-      );
+      expect(call?.allowedTools).toBeUndefined();
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'allows a tool from a live run permission rule without writing permission IPC',
+    'routes a matching live run permission rule through authenticated permission IPC',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -1697,6 +1684,7 @@ describe('agent-runner IPC lifecycle', () => {
           TEST_TOOL_USE_ONLY: 'Bash',
           TEST_TOOL_USE_CMD: 'npm test --runInBand',
           TEST_LIVE_TOOL_RULE: 'RunCommand(npm test *)',
+          TEST_HOST_PERMISSION_DECISION: 'approve',
         },
       );
 
@@ -1707,9 +1695,9 @@ describe('agent-runner IPC lifecycle', () => {
           behavior: 'allow',
         }),
       );
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -2340,6 +2328,43 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
+    'carries an authorized Chrome-shaped request without opening the SDK sandbox escape',
+    async () => {
+      const fixture = createRunnerFixture();
+      const command =
+        'open -a "Google Chrome" --args --headless --disable-gpu about:blank';
+
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_PERMISSION_DECISION: 'approve',
+        TEST_PERMISSION_COMMAND: command,
+        TEST_PERMISSION_DANGEROUSLY_DISABLE_SANDBOX: '1',
+        TEST_EXIT_AFTER_QUERY: '1',
+      });
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const call = readRecord(fixture.recordPath).calls[0];
+      expect(call?.permissionRequest).toEqual(
+        expect.objectContaining({
+          toolName: 'RunCommand',
+          toolInput: expect.objectContaining({
+            cmd: command,
+            dangerouslyDisableSandbox: true,
+          }),
+        }),
+      );
+      expect(call?.permissionDecision).toEqual({
+        behavior: 'allow',
+        updatedInput: {
+          cmd: `GODEBUG=netdns=go ${command}`,
+          apiToken: 'secret-token',
+          dangerouslyDisableSandbox: true,
+        },
+      });
+    },
+    RUNNER_IPC_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'synthesizes exact persistent permission suggestions for Gantry admin tools',
     async () => {
       const fixture = createRunnerFixture();
@@ -2507,7 +2532,7 @@ describe('agent-runner IPC lifecycle', () => {
   );
 
   it(
-    'scheduled jobs allow matching scoped RunCommand without writing permission IPC',
+    'scheduled jobs route matching scoped RunCommand through authenticated permission IPC',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -2519,6 +2544,8 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['RunCommand(npm test *)'],
         }),
         {
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          TEST_HOST_PERMISSION_DECISION: 'approve',
           TEST_TOOL_USE_ONLY: 'Bash',
           TEST_TOOL_USE_CMD: 'npm test --runInBand',
         },
@@ -2531,9 +2558,9 @@ describe('agent-runner IPC lifecycle', () => {
           behavior: 'allow',
         }),
       );
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -2587,6 +2614,8 @@ describe('agent-runner IPC lifecycle', () => {
           },
         }),
         {
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          TEST_HOST_PERMISSION_DECISION: 'approve',
           TEST_TOOL_USE_ONLY: 'Bash',
           TEST_TOOL_USE_CMD: 'acme records get budget',
         },
@@ -2613,33 +2642,27 @@ describe('agent-runner IPC lifecycle', () => {
         updatedInput: {
           cmd: `${trustPrefix} acme records get budget`,
         },
+        decisionClassification: 'user_temporary',
       });
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'allows SDK network prompts in direct mode without token or host review',
+    'routes direct-mode SDK network prompts through authenticated permission IPC',
     async () => {
       const fixture = createRunnerFixture();
 
-      const result = await runRunner(
-        fixture,
-        baseInput({
-          isScheduledJob: true,
-          jobId: 'job-1',
-          allowedTools: ['RunCommand(npm test *)'],
-        }),
-        {
-          TEST_SDK_NETWORK_AFTER_TOOL: '1',
-          TEST_TOOL_USE_CMD: 'npm test --runInBand',
-        },
-      );
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_HOST_PERMISSION_DECISION: 'approve',
+        TEST_SDK_NETWORK_AFTER_TOOL: '1',
+        TEST_TOOL_USE_CMD: 'npm test --runInBand',
+      });
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout).not.toContain('sdk_network_gate_');
       expect(result.stdout).not.toContain('"eventType":"sandbox.blocked"');
       const call = readRecord(fixture.recordPath).calls[0];
@@ -2651,52 +2674,51 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.permissionDecisions?.network).toEqual({
         behavior: 'allow',
         updatedInput: { host: 'registry.npmjs.org' },
+        decisionClassification: 'user_temporary',
       });
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+        expect.objectContaining({ toolName: 'SandboxNetworkAccess' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'allows repeated SDK network prompts without per-invocation state',
+    'routes every repeated SDK network prompt through authenticated permission IPC',
     async () => {
       const fixture = createRunnerFixture();
 
-      const result = await runRunner(
-        fixture,
-        baseInput({
-          isScheduledJob: true,
-          jobId: 'job-1',
-          allowedTools: ['RunCommand(npm test *)'],
-        }),
-        {
-          TEST_SDK_NETWORK_AFTER_TOOL: '1',
-          TEST_SECOND_SDK_NETWORK_AFTER_TOOL: '1',
-          TEST_TOOL_USE_CMD: 'npm test --runInBand',
-        },
-      );
+      const result = await runRunner(fixture, baseInput(), {
+        TEST_HOST_PERMISSION_DECISION: 'approve',
+        TEST_SDK_NETWORK_AFTER_TOOL: '1',
+        TEST_SECOND_SDK_NETWORK_AFTER_TOOL: '1',
+        TEST_TOOL_USE_CMD: 'npm test --runInBand',
+      });
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, result.stderr).toBe(0);
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.permissionDecisions?.network).toEqual({
         behavior: 'allow',
         updatedInput: { host: 'registry.npmjs.org' },
+        decisionClassification: 'user_temporary',
       });
       expect(call?.permissionDecisions?.network2).toEqual({
         behavior: 'allow',
         updatedInput: { host: 'example.com' },
+        decisionClassification: 'user_temporary',
       });
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+        expect.objectContaining({ toolName: 'SandboxNetworkAccess' }),
+        expect.objectContaining({ toolName: 'SandboxNetworkAccess' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'scheduled jobs allow parentless SDK network prompts with typed local CLI runtime access',
+    'scheduled jobs do not treat typed local CLI runtime access as worker-local network authority',
     async () => {
       const fixture = createRunnerFixture();
       const credentialDir = path.join(fixture.root, 'credentials', 'acme');
@@ -2729,6 +2751,9 @@ describe('agent-runner IPC lifecycle', () => {
           ],
         }),
         {
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          TEST_HOST_PERMISSION_DECISION: 'approve',
+          TEST_HOST_PERMISSION_RESPONSE_COUNT: '1',
           TEST_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_SDK_NETWORK_HOST: 'oauth2.googleapis.com',
@@ -2737,7 +2762,7 @@ describe('agent-runner IPC lifecycle', () => {
         },
       );
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout).not.toContain('sdk_network_gate_');
       const call = readRecord(fixture.recordPath).calls[0];
       const expectedCredentialDir = path.join(
@@ -2747,16 +2772,26 @@ describe('agent-runner IPC lifecycle', () => {
       expect(call?.additionalDirectories).toEqual(
         expect.arrayContaining([expectedCredentialDir]),
       );
-      expect(call?.permissionDecisions?.network).toEqual({
-        behavior: 'allow',
-        updatedInput: { host: 'oauth2.googleapis.com' },
-      });
+      // The pre-COORD worker-local runtime binding no longer grants network
+      // authority. This scheduled network prompt is denied unless the host
+      // coordinator gains a durable semantic-capability decision path.
+      expect(call?.permissionDecisions?.network).toEqual(
+        expect.objectContaining({
+          behavior: 'deny',
+          message: expect.stringContaining(
+            'Tool not on autonomous run allowlist: SandboxNetworkAccess',
+          ),
+        }),
+      );
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
 
   it(
-    'allows parentless SDK network prompts after a scheduled command without host binding',
+    'denies parentless scheduled SDK network prompts without host capability authority',
     async () => {
       const fixture = createRunnerFixture();
 
@@ -2768,6 +2803,9 @@ describe('agent-runner IPC lifecycle', () => {
           allowedTools: ['RunCommand(/opt/homebrew/bin/acme records get *)'],
         }),
         {
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          TEST_HOST_PERMISSION_DECISION: 'approve',
+          TEST_HOST_PERMISSION_RESPONSE_COUNT: '1',
           TEST_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_PARENTLESS_SDK_NETWORK_AFTER_TOOL: '1',
           TEST_TOOL_USE_CMD:
@@ -2775,7 +2813,7 @@ describe('agent-runner IPC lifecycle', () => {
         },
       );
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout).not.toContain('sdk_network_gate_');
       const call = readRecord(fixture.recordPath).calls[0];
       expect(call?.permissionDecisions?.tool).toEqual(
@@ -2783,13 +2821,20 @@ describe('agent-runner IPC lifecycle', () => {
           behavior: 'allow',
         }),
       );
-      expect(call?.permissionDecisions?.network).toEqual({
-        behavior: 'allow',
-        updatedInput: { host: 'registry.npmjs.org' },
-      });
-      expect(
-        fs.existsSync(path.join(fixture.ipcDir, 'permission-requests')),
-      ).toBe(false);
+      expect(call?.permissionDecisions?.network).toEqual(
+        expect.objectContaining({
+          behavior: 'deny',
+          message: expect.stringContaining(
+            'Tool not on autonomous run allowlist: SandboxNetworkAccess',
+          ),
+        }),
+      );
+      // The pre-COORD worker-local "without host binding" allow was dropped.
+      // The authenticated host approved the command, while the unprovisioned
+      // network request remains denied instead of being allowed in the worker.
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({ toolName: 'RunCommand' }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );
@@ -2940,6 +2985,8 @@ describe('agent-runner IPC lifecycle', () => {
           attachedMcpSourceIds: ['mcp:github'],
         }),
         {
+          GANTRY_AUTONOMOUS_PERMISSION_TIMEOUT_MS: '5000',
+          TEST_HOST_PERMISSION_DECISION: 'approve',
           GANTRY_MCP_ALLOWED_TOOLS_JSON: JSON.stringify([
             'mcp__github__search_repositories',
           ]),
@@ -2955,6 +3002,11 @@ describe('agent-runner IPC lifecycle', () => {
           behavior: 'allow',
         }),
       );
+      expect(call?.permissionRequests).toEqual([
+        expect.objectContaining({
+          toolName: 'mcp__github__search_repositories',
+        }),
+      ]);
     },
     RUNNER_IPC_TEST_TIMEOUT_MS,
   );

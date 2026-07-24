@@ -313,6 +313,8 @@ export async function startGantryRuntime(
         getPermissionRepository: () => storage.repositories.permissions,
         getPermissionPromotionRepository: () =>
           storage.repositories.permissionPromotions,
+        getPermissionDecisionMemoryRepository: () =>
+          storage.repositories.permissionDecisionMemory,
         settingsRepositories: storage.repositories,
         getOutboundDeliveryRepository: () =>
           storage.repositories.outboundDeliveries,

@@ -11,7 +11,7 @@ date: 2026-07-24
 The 2026-07-24 audit found (High) that `/llm/v1/*` has no concurrency
 admission: 120 near-16-MiB requests per minute can each hold multiple
 body-sized buffers and a provider socket for up to ten minutes
-(`control/server/routes/llm.ts`, `gantry-model-gateway*.ts`). Separately, the
+(`apps/core/src/control/server/routes/llm.ts`, `gantry-model-gateway*.ts`). Separately, the
 audit flagged that all rate limits are process-local while the control plane
 supports horizontal scaling — an architecture decision scoped to SPS-4.
 

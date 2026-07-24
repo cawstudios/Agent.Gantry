@@ -251,6 +251,11 @@ export interface RuntimeLiveTurnsSettings {
   enabled: boolean;
 }
 
+export interface RuntimeLlmAdmissionSettings {
+  globalMaxInFlight: number;
+  perAppKeyMaxInFlight: number;
+}
+
 export type RuntimeSandboxProvider = 'direct' | 'sandbox_runtime';
 
 export interface RuntimeSandboxSettings {
@@ -275,6 +280,7 @@ export interface RuntimeArtifactStoreSettings {
 export interface RuntimeProcessSettings {
   queue: RuntimeQueueSettings;
   liveTurns: RuntimeLiveTurnsSettings;
+  llmAdmission: RuntimeLlmAdmissionSettings;
   sandbox: RuntimeSandboxSettings;
   artifactStore: RuntimeArtifactStoreSettings;
   deploymentMode: RuntimeDeploymentMode;
@@ -305,6 +311,7 @@ export interface RuntimeBrowserSettings {
 export interface RuntimePermissionSettings {
   yoloMode: YoloModeSettings;
   egress: EgressSettings;
+  trustedRoots: string[];
   autoMode: {
     model?: string;
   };

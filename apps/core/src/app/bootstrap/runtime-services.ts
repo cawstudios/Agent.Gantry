@@ -113,7 +113,8 @@ type RuntimeDependencyRepositoryFactory = () =>
 type RuntimeStorageDep =
   | 'getAsyncTaskRepository'
   | 'getFileArtifactStore'
-  | 'getPermissionPromotionRepository';
+  | 'getPermissionPromotionRepository'
+  | 'getPermissionDecisionMemoryRepository';
 interface Deps extends Pick<IpcDeps, RuntimeStorageDep> {
   startSchedulerLoop: typeof startSchedulerLoop;
   startIpcWatcher: typeof startIpcWatcher;
@@ -472,6 +473,8 @@ export async function startRuntimeServices(
       getPermissionRepository: resolved.getPermissionRepository,
       getPermissionPromotionRepository:
         resolved.getPermissionPromotionRepository,
+      getPermissionDecisionMemoryRepository:
+        resolved.getPermissionDecisionMemoryRepository,
       publishRuntimeEvent: resolved.publishRuntimeEvent,
       getPermissionRuntimeSettings: getRuntimeSettingsForConfig,
       getPermissionMessageRepository: () => resolved.opsRepository,

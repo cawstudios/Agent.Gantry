@@ -21,11 +21,8 @@ import { SteeringDeliveryGate } from './steering-delivery-gate.js';
 import { log } from './logging.js';
 import { writeOutput } from './output.js';
 import {
-  buildSdkFilesystemSandbox,
   normalizeFilesystemSandboxPaths,
   readLocalCliCredentialDirectories,
-  readProtectedFilesystemSandboxPaths,
-  requireSdkSandboxEgressProxyPort,
 } from './filesystem-sandbox.js';
 import { createSafetyPreToolUseHook } from './protected-capability-hook.js';
 import {
@@ -249,22 +246,13 @@ export async function runQuery(
   const additionalDirectories = [
     ...new Set([...extraDirs, ...localCliCredentialDirectories]),
   ].sort();
-  const protectedFilesystemPaths = readProtectedFilesystemSandboxPaths();
-  const protectedFilesystemDenyReadPaths = protectedFilesystemPaths.denyRead;
-  const protectedFilesystemDenyWritePaths = [
-    ...protectedFilesystemPaths.denyWrite,
-    ...localCliCredentialDirectories,
-  ];
-  const sdkFilesystemSandbox =
-    process.env.GANTRY_SANDBOX_RUNTIME_PROXY === '1'
-      ? undefined
-      : buildSdkFilesystemSandbox(protectedFilesystemDenyWritePaths, {
-          denyReadPaths: protectedFilesystemDenyReadPaths,
-          denyWritePaths: protectedFilesystemDenyWritePaths,
-          httpProxyPort: requireSdkSandboxEgressProxyPort(
-            process.env.GANTRY_EGRESS_PROXY_URL,
-          ),
-        });
+  // Two-axis model (decision 0040): `direct` = authorization is the whole control
+  // (permission engine + classifier + host-side credential/protected-path rail);
+  // no inner SDK Seatbelt, so Chromium's Mach-port register (and the whole class)
+  // runs. `sandbox_runtime` confinement is the runner OS sandbox
+  // (runner-sandbox-provider), which is applied out-of-band — this SDK-level
+  // filesystem Seatbelt is never the confinement layer, so it is dropped.
+  const sdkFilesystemSandbox = undefined;
   const workspaceFolder = agentInput.workspaceFolder;
   const enabledSdkSkills = readClaudeSdkSkillNamesFromEnv();
   const isolatedSdkEnv: Record<string, string | undefined> = {
@@ -359,7 +347,6 @@ export async function runQuery(
       },
       skills: enabledSdkSkills,
       tools: [...capabilities.availableTools],
-      allowedTools: [...capabilities.allowedTools],
       disallowedTools: [...capabilities.disallowedTools],
       env: isolatedSdkEnv,
       // Without this the subprocess's own stderr is lost and startup failures

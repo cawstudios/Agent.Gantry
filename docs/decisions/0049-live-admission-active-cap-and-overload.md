@@ -26,7 +26,7 @@ distinct deliveries persist their canonical message/event but return an
 explicit internal `overloaded` outcome — no work item, no wakeup. Exact
 duplicates still return the existing item at capacity. Terminal retention,
 purge/archival, and per-conversation caps are deferred to SPS-4 (deferral
-D-0005).
+D-0010).
 
 ## Consequences
 

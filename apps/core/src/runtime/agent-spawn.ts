@@ -26,7 +26,6 @@ import {
 import { resolvePackageRootFromSourceDir } from '../platform/package-root.js';
 import {
   computeBrowserIpcAuthToken,
-  createIpcAuthEnvelope,
   computeMemoryIpcAuthToken,
   registerBrowserIpcAuthorization,
   revokeBrowserIpcAuthorization,
@@ -96,6 +95,7 @@ import {
   prepareAgentSpawn,
   prepareWorkerAuthorityProjection,
 } from './agent-spawn-preparation.js';
+import { setupPermissionRunRestriction } from './agent-spawn-permission-run-restriction.js';
 import { resolveSpawnExecutionAdapter } from './agent-spawn-execution-adapter.js';
 import {
   resolveAgentSpawnLogContext,
@@ -245,10 +245,8 @@ async function spawnAgentWithContext(
   let egressGateway:
     | Awaited<ReturnType<typeof ensureEgressGateway>>
     | undefined;
-  const ipcAuth = createIpcAuthEnvelope(group.folder, input.threadId, {
-    appId: input.appId || 'default',
-    agentId: input.agentId,
-  });
+  const { ipcAuth, unregisterPermissionRunRestriction } =
+    setupPermissionRunRestriction(group.folder, input, hideAuthorityTools);
   let hostCredentials: Awaited<ReturnType<typeof credentials>> | undefined;
   let preparedExecution:
     | Awaited<ReturnType<typeof executionAdapter.prepare>>
@@ -774,6 +772,7 @@ async function spawnAgentWithContext(
     });
     return output;
   } finally {
+    unregisterPermissionRunRestriction();
     cleanupRunnerTempDir(runnerTempDir, logger.warn.bind(logger));
     if (browserIpcEnabled) {
       revokeBrowserIpcAuthorization({

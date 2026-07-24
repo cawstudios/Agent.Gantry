@@ -559,6 +559,9 @@ maybeDescribe('permission decision durable IPC chain (Postgres)', () => {
     expect(classifierConsult).not.toHaveBeenCalled();
     expect(fs.existsSync(sideEffectPath)).toBe(false);
     expect(JSON.stringify(toolResult)).toContain('Permission denied');
+    expect(JSON.stringify(toolResult)).toContain(
+      'YOLO-mode denylist rule matched',
+    );
 
     const pending = await interactionRow(result.request.requestId);
     expect(pending).toMatchObject({
@@ -577,11 +580,13 @@ maybeDescribe('permission decision durable IPC chain (Postgres)', () => {
     expect(events.map((event) => event.eventType)).toEqual([
       RUNTIME_EVENT_TYPES.INTERACTION_PENDING,
       RUNTIME_EVENT_TYPES.PERMISSION_REQUESTED,
-      RUNTIME_EVENT_TYPES.PERMISSION_YOLO_DENYLIST_HIT,
-      RUNTIME_EVENT_TYPES.PERMISSION_CLASSIFIER_DECISION,
       RUNTIME_EVENT_TYPES.PERMISSION_CANCELLED,
       RUNTIME_EVENT_TYPES.PERMISSION_FINAL_OUTCOME,
     ]);
+    expect(events[2]?.payload).toMatchObject({
+      decision: 'cancelled',
+      decidedBy: 'hard_deny',
+    });
     expect(events.at(-1)?.payload).toMatchObject({ approved: false });
     expect(events.map((event) => event.eventType)).not.toContain(
       RUNTIME_EVENT_TYPES.PERMISSION_DENIED,

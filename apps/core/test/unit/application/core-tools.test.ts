@@ -390,6 +390,50 @@ describe('core tool registry', () => {
     });
   });
 
+  it('records inline permission and question interactions with the active run ID', async () => {
+    const record = vi.fn(async () => true);
+    const deps = registryDeps({
+      context: {
+        sourceAgentFolder: 'main_agent',
+        conversationId: 'conversation:test',
+        appId: 'default',
+        agentId: 'agent-1',
+        runId: 'run-active',
+        permissionMode: 'ask',
+      },
+      durability: {
+        record,
+        resolve: vi.fn(async () => true),
+      },
+      requestPermissionApproval: vi.fn(async () => ({
+        approved: true,
+        mode: 'allow_once',
+      })),
+    });
+    const registry = createCoreToolRegistry(deps);
+
+    await registry.execute('delegate_task', { objective: 'Investigate' });
+    await registry.execute('ask_user_question', {
+      questions: [
+        {
+          question: 'Continue?',
+          header: 'Continue',
+          options: [
+            { label: 'Yes', description: 'Continue.' },
+            { label: 'No', description: 'Stop.' },
+          ],
+        },
+      ],
+    });
+
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'permission', runId: 'run-active' }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'question', runId: 'run-active' }),
+    );
+  });
+
   it('returns the exact permission denial error and does not delegate', async () => {
     const backend = taskBackend();
     const deps = registryDeps({

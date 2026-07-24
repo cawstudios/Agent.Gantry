@@ -157,11 +157,19 @@ export interface PermissionApprovalRequest {
   };
   blockedPath?: string;
   toolInput?: Record<string, unknown>;
+  hostInjectedCommandPrefix?: string;
+  /** 16K-limit sanitize of the same input; the permission DECISION layers
+   *  (rails + effect-key) evaluate this fuller view, not the 500-char display
+   *  `toolInput`. Set alongside `toolInput` in ipc-parsing. */
+  classifierToolInput?: Record<string, unknown>;
   toolInputSanitized?: boolean;
   toolInputSanitizedPaths?: string[];
   semanticCapabilityDefinitions?: Record<string, SemanticCapabilityDefinition>;
   suggestions?: PermissionApprovalUpdate[];
   decisionOptions?: PermissionApprovalDecisionMode[];
+  /** Learned-root ask-once (PERM-2 Task G): the persistent-rule option means
+   *  "remember this folder", so it approves without a tool-rule suggestion. */
+  trustedRootLearn?: boolean;
   promotionHintCount?: number;
   interaction?: InteractionDescriptor;
   permissionBatch?: {

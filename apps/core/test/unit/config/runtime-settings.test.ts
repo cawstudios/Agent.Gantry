@@ -1229,6 +1229,7 @@ quoted_decimal: "0.5"
     expect(settings.permissions.egress).toEqual({
       denylist: [],
     });
+    expect(settings.permissions.trustedRoots).toEqual([]);
     expect(settings.permissions.autoMode).toEqual({});
 
     settings.permissions.yoloMode = {
@@ -1239,6 +1240,7 @@ quoted_decimal: "0.5"
     settings.permissions.egress = {
       denylist: ['api.linkedin.com', '*.blocked.example.com'],
     };
+    settings.permissions.trustedRoots = ['/opt/workdir'];
     settings.permissions.autoMode = { model: 'sonnet' };
 
     const yaml = renderRuntimeSettingsYaml(settings);
@@ -1246,12 +1248,25 @@ quoted_decimal: "0.5"
     expect(yaml).toContain('yolo_mode:');
     expect(yaml).toContain('egress:');
     expect(yaml).toContain('auto_mode:');
+    expect(yaml).toContain('trusted_roots: ["/opt/workdir"]');
     expect(yaml).toContain('model: sonnet');
     expect(yaml).toContain('npm run nuke');
     expect(yaml).toContain('api.linkedin.com');
 
     const parsed = parseRuntimeSettings(yaml);
     expect(parsed.permissions).toEqual(settings.permissions);
+  });
+
+  it('rejects non-canonical trusted roots', () => {
+    for (const root of ['relative/path', '/opt/workdir/../outside']) {
+      expect(() =>
+        parseRuntimeSettings(`permissions:
+  trusted_roots: ["${root}"]
+`),
+      ).toThrow(
+        'permissions.trusted_roots[0] must be a normalized absolute path',
+      );
+    }
   });
 
   it('rejects unsupported YOLO-mode permission keys', () => {

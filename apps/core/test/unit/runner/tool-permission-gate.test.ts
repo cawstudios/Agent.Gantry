@@ -78,6 +78,10 @@ function combinedConsoleOutput(): string {
 describe('createCanUseToolCallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    permissionMock.requestPermissionApproval.mockResolvedValue({
+      approved: true,
+      mode: 'allow_once',
+    });
     vi.spyOn(dns, 'lookup').mockResolvedValue([
       { address: '104.16.30.34', family: 4 },
     ]);
@@ -122,7 +126,7 @@ describe('createCanUseToolCallback', () => {
       behavior: 'allow',
       updatedInput: { host },
     });
-    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
     expect(dns.lookup).toHaveBeenCalledWith(host, {
       all: true,
       verbatim: true,
@@ -382,7 +386,7 @@ describe('createCanUseToolCallback', () => {
     );
   });
 
-  it('auto-allows a non-denylisted command matching the same allow rule', async () => {
+  it('routes a non-denylisted matching rule through the host coordinator', async () => {
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
@@ -416,10 +420,101 @@ describe('createCanUseToolCallback', () => {
         }),
       }),
     );
-    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
     expect(combinedConsoleOutput()).not.toContain(
       'permission.yolo_denylist_hit',
     );
+  });
+
+  it('keeps the runner prefix out of the permission request and adds it for execution', async () => {
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: false,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        chatJid: 'tg:test',
+        allowedTools: [],
+        toolNetworkEnv: {
+          HTTP_PROXY: 'http://127.0.0.1:18790/',
+        },
+        yoloMode: {
+          enabled: true,
+          denylist: [],
+          denylistPaths: [],
+        },
+      } as never,
+    });
+
+    const result = await canUseTool(
+      'Bash',
+      { command: 'curl https://example.test' },
+      makePermissionOptions() as never,
+    );
+    const hostInjectedCommandPrefix =
+      "GODEBUG=netdns=go HTTP_PROXY='http://127.0.0.1:18790/'";
+
+    const approvalRequest =
+      permissionMock.requestPermissionApproval.mock.calls[0]?.[0];
+    expect(approvalRequest).toMatchObject({
+      toolInput: { command: 'curl https://example.test' },
+    });
+    expect(approvalRequest).not.toHaveProperty('hostInjectedCommandPrefix');
+    expect(result).toEqual(
+      expect.objectContaining({
+        behavior: 'allow',
+        updatedInput: {
+          command: `${hostInjectedCommandPrefix} curl https://example.test`,
+        },
+      }),
+    );
+  });
+
+  it('does not silently allow a tool listed in allowedTools — the coordinator still decides', async () => {
+    // PERM-2 Task F: a rule on the agent's configured allowedTools must not
+    // mint a worker-side `allow` that skips the host coordinator. Even with a
+    // matching allowedTools rule, the operator's coordinator decision governs:
+    // deny it and the tool is denied.
+    permissionMock.requestPermissionApproval.mockResolvedValueOnce({
+      approved: false,
+      reason: 'operator denied',
+      decidedBy: 'user',
+    });
+    const canUseTool = makeCallback({
+      agentInput: {
+        runMode: 'normal',
+        isScheduledJob: false,
+        appId: 'default',
+        agentId: 'agent:test',
+        runId: 'run-1',
+        jobId: undefined,
+        chatJid: 'tg:test',
+        threadId: undefined,
+        allowedTools: ['RunCommand(npm test *)'],
+        yoloMode: { enabled: false, denylist: [], denylistPaths: [] },
+      } as never,
+      capabilities: {
+        allowedTools: ['RunCommand(npm test *)'],
+        alwaysAllowedTools: ['RunCommand(npm test *)'],
+        permissionMode: 'default',
+      } as never,
+    });
+
+    const result = await canUseTool(
+      'Bash',
+      { command: 'npm test --safe now' },
+      makePermissionOptions() as never,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('operator denied'),
+      }),
+    );
+    // The coordinator was consulted exactly once for this "pre-allowed" tool.
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
   it('denies wait-only Bash monitoring instead of asking for permission', async () => {
@@ -540,7 +635,7 @@ describe('createCanUseToolCallback', () => {
         }),
       }),
     );
-    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
   it('offers persistent access in autonomous job prompts with suggestions', async () => {
@@ -658,6 +753,10 @@ describe('createCanUseToolCallback', () => {
   });
 
   it('auto-denies un-provisioned tools for a locked agent without prompting', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValue({
+      approved: false,
+      reason: 'capability not provisioned: locked access preset',
+    });
     const canUseTool = makeCallback({
       capabilities: {
         allowedTools: [],
@@ -679,13 +778,14 @@ describe('createCanUseToolCallback', () => {
         message: expect.stringContaining('capability not provisioned'),
       }),
     );
-    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
-    expect(combinedConsoleOutput()).toContain(
-      'Permission auto-denied by locked access preset',
-    );
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
   it('auto-denies native Agent tools for a locked agent without prompting', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValue({
+      approved: false,
+      reason: 'capability not provisioned: locked access preset',
+    });
     const canUseTool = makeCallback({
       capabilities: {
         allowedTools: [],
@@ -707,7 +807,7 @@ describe('createCanUseToolCallback', () => {
         message: expect.stringContaining('capability not provisioned'),
       }),
     );
-    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 
   it('does not auto-allow native Agent without the Gantry wrapper path', async () => {
@@ -800,7 +900,11 @@ describe('createCanUseToolCallback', () => {
     expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
   });
 
-  it('still allows pre-provisioned tools for a locked agent', async () => {
+  it('lets locked authority beat a pre-provisioned rule', async () => {
+    permissionMock.requestPermissionApproval.mockResolvedValue({
+      approved: false,
+      reason: 'capability not provisioned: locked access preset',
+    });
     const canUseTool = makeCallback({
       agentInput: {
         runMode: 'normal',
@@ -831,7 +935,12 @@ describe('createCanUseToolCallback', () => {
       makePermissionOptions({ displayName: 'lookup' }) as never,
     );
 
-    expect(decision.behavior).toBe('allow');
-    expect(permissionMock.requestPermissionApproval).not.toHaveBeenCalled();
+    expect(decision).toEqual(
+      expect.objectContaining({
+        behavior: 'deny',
+        message: expect.stringContaining('locked access preset'),
+      }),
+    );
+    expect(permissionMock.requestPermissionApproval).toHaveBeenCalledTimes(1);
   });
 });

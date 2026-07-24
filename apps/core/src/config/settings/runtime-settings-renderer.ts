@@ -11,6 +11,8 @@ import {
   DEFAULT_BROWSER_USAGE_WINDOW_MS,
   DEFAULT_EMBED_DIMENSIONS,
   DEFAULT_EMBED_MODEL,
+  DEFAULT_LLM_GLOBAL_MAX_IN_FLIGHT,
+  DEFAULT_LLM_PER_APP_KEY_MAX_IN_FLIGHT,
   DEFAULT_MEMORY_BACKFILL_CRON,
   DEFAULT_MEMORY_BACKFILL_ENABLED,
   DEFAULT_MEMORY_BACKFILL_MAX_ITEMS_PER_RUN,
@@ -193,6 +195,9 @@ function renderPermissionSettingsYaml(
     '  egress:',
     `    denylist: ${JSON.stringify(permissions.egress.denylist)}`,
   );
+  if (permissions.trustedRoots.length > 0) {
+    lines.push(`  trusted_roots: ${JSON.stringify(permissions.trustedRoots)}`);
+  }
   if (permissions.autoMode.model) {
     lines.push(
       '  auto_mode:',
@@ -567,6 +572,10 @@ function isDefaultRuntime(runtime: RuntimeSettings['runtime']): boolean {
     runtime.queue.baseRetryMs === 5000 &&
     runtime.queue.drainDeadlineMs === 120000 &&
     runtime.liveTurns.enabled === true &&
+    runtime.llmAdmission.globalMaxInFlight ===
+      DEFAULT_LLM_GLOBAL_MAX_IN_FLIGHT &&
+    runtime.llmAdmission.perAppKeyMaxInFlight ===
+      DEFAULT_LLM_PER_APP_KEY_MAX_IN_FLIGHT &&
     runtime.sandbox.provider === 'direct' &&
     runtime.sandbox.resourceLimits.cpuSeconds === 0 &&
     runtime.sandbox.resourceLimits.memoryMb === 0 &&
@@ -597,6 +606,7 @@ function isDefaultPermissionSettings(
     permissions.yoloMode.denylist.length === 0 &&
     permissions.yoloMode.denylistPaths.length === 0 &&
     permissions.egress.denylist.length === 0 &&
+    permissions.trustedRoots.length === 0 &&
     permissions.autoMode.model === undefined
   );
 }
@@ -660,6 +670,9 @@ function renderRuntimeProcessYaml(
     `    drain_deadline_ms: ${runtime.queue.drainDeadlineMs}`,
     '  live_turns:',
     `    enabled: ${runtime.liveTurns.enabled ? 'true' : 'false'}`,
+    '  llm_admission:',
+    `    global_max_in_flight: ${runtime.llmAdmission.globalMaxInFlight}`,
+    `    per_app_key_max_in_flight: ${runtime.llmAdmission.perAppKeyMaxInFlight}`,
     '  sandbox:',
     `    provider: ${quoteYamlString(runtime.sandbox.provider)}`,
     '    resource_limits:',

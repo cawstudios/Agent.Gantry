@@ -9,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   vector,
@@ -63,6 +64,48 @@ export const permissionPromotionCountersPostgres = pgTable(
       columns: [table.appId, table.agentFolder, table.suggestionKey],
       name: 'permission_promotion_counters_pk',
     }),
+  }),
+);
+
+export const permissionDecisionMemoryPostgres = pgTable(
+  'permission_decision_memory',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    agentFolder: text('agent_folder').notNull(),
+    kind: text('kind').notNull(),
+    lookupIdentity: text('lookup_identity').notNull(),
+    effectHash: text('effect_hash'),
+    decision: text('decision'),
+    reason: text('reason').notNull(),
+    canonicalRoot: text('canonical_root'),
+    principal: text('principal'),
+    effectSchemaVersion: integer('effect_schema_version').notNull(),
+    railVersion: integer('rail_version').notNull(),
+    provenance: text('provenance').notNull(),
+    createdAt: timestamp('created_at', {
+      withTimezone: true,
+      mode: 'string',
+    }).notNull(),
+    expiresAt: timestamp('expires_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
+    revokedAt: timestamp('revoked_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
+  },
+  (table) => ({
+    lookupUq: unique('permission_decision_memory_lookup_uq').on(
+      table.appId,
+      table.agentFolder,
+      table.kind,
+      table.lookupIdentity,
+    ),
+    activeIdx: index('permission_decision_memory_active_idx')
+      .on(table.appId, table.agentFolder, table.kind, table.lookupIdentity)
+      .where(sql`revoked_at IS NULL`),
   }),
 );
 

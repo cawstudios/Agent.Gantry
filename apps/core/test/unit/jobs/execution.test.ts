@@ -565,6 +565,8 @@ describe('jobs/execution', () => {
         }),
       }),
     );
+    // Autonomous not-on-allowlist denial: the RUN is a dead-end (failed); the
+    // JOB still pauses for setup (asserted above) and notifies the admin.
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
       'failed',
@@ -641,6 +643,7 @@ describe('jobs/execution', () => {
         lease_run_id: null,
       }),
     );
+    // Autonomous dead-end: run failed, job paused for setup (asserted above).
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
       'failed',
@@ -1828,6 +1831,9 @@ describe('jobs/execution', () => {
         next_run: null,
       }),
     );
+    // Readiness preflight surfaces the missing requirement as an autonomous
+    // not-on-allowlist denial: no approver, so the run is a dead-end (failed);
+    // the job still pauses for setup (asserted above).
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
       'failed',
@@ -2099,7 +2105,7 @@ describe('jobs/execution', () => {
     );
   });
 
-  it('keeps explicit tool denial as terminal error', async () => {
+  it('pauses the run (not terminal error) on an explicit tool denial', async () => {
     const job = makeJob({
       access_requirements: [{ target: { kind: 'tool_rule', rule: 'Browser' } }],
     });
@@ -2113,12 +2119,15 @@ describe('jobs/execution', () => {
           {
             eventType: 'job.tool_activity',
             payload: {
+              // Attended (resumable) denial: no autonomous-allowlist phrase, so
+              // the run pauses for an approver rather than failing as a
+              // dead-end.
               phase: 'permission_wait',
               tool: 'Bash',
               ok: false,
-              reason: 'Tool not on autonomous run allowlist: RunCommand.',
+              reason: 'Awaiting approval to run Bash.',
               recovery_action:
-                'request_access {"target":{"kind":"run_command","argvPattern":"npm test *"},"temporaryOnly":false,"reason":"This autonomous run requires RunCommand(npm test *) access."}',
+                'request_access {"target":{"kind":"run_command","argvPattern":"npm test *"},"temporaryOnly":false,"reason":"This run requires RunCommand(npm test *) access."}',
             },
           },
           {
@@ -2127,7 +2136,7 @@ describe('jobs/execution', () => {
               phase: 'permission_denied',
               tool: 'Bash',
               ok: false,
-              reason: 'Autonomous permission approval is disabled.',
+              reason: 'Denied by approver.',
             },
           },
         ],
@@ -2152,13 +2161,13 @@ describe('jobs/execution', () => {
 
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
-      'failed',
+      'paused',
       'blocked',
       expect.stringContaining('Permission denied for Bash'),
     );
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
-      'failed',
+      'paused',
       'blocked',
       expect.not.stringContaining('post-run usage'),
     );
@@ -2244,7 +2253,7 @@ describe('jobs/execution', () => {
     );
     expect(opsRepository.completeJobRun).toHaveBeenCalledWith(
       expect.any(String),
-      'failed',
+      'paused',
       null,
       expect.stringContaining('Claude Code returned an error result'),
     );
