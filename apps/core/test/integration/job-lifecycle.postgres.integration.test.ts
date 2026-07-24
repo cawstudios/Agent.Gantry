@@ -180,7 +180,10 @@ maybeDescribe('job lifecycle (Postgres)', () => {
 
   it('projects one latest non-session run for a 500-job listing in one query', async () => {
     const jobs = Array.from({ length: 500 }, (_, index) =>
-      makeJob(`job:integration:latest-run:${index}`),
+      makeJob(`job:integration:latest-run:${index}`, {
+        status: 'paused',
+        next_run: null,
+      }),
     );
     await Promise.all(jobs.map((job) => runtime.ops.upsertJob(job)));
 

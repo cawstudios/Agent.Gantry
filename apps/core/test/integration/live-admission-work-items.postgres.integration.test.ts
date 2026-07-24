@@ -545,14 +545,16 @@ maybeDescribe('live admission work items (Postgres)', () => {
       'admission-lock-due-2',
     ];
     for (const [index, id] of ids.entries()) {
-      await liveTurns.enqueueLiveAdmissionWorkItem({
-        id,
-        ...base,
-        messageId: `message:tg:live-admission:${id}`,
-        messageCursor: `2026-06-16T00:00:10.000Z::${id}`,
-        idempotencyKey: `telegram:delivery:${id}`,
-        now: toIso(Date.parse(createdAt) + index),
-      });
+      await expect(
+        liveTurns.enqueueLiveAdmissionWorkItem({
+          id,
+          ...base,
+          messageId: `message:tg:live-admission:${id}`,
+          messageCursor: `2026-06-16T00:00:10.000Z::${id}`,
+          idempotencyKey: `telegram:delivery:${id}`,
+          now: toIso(Date.parse(createdAt) + index),
+        }),
+      ).resolves.toMatchObject({ outcome: 'enqueued', item: { id } });
     }
     await runtime.service.pool.query(
       `UPDATE ${quotePostgresIdentifier(
@@ -576,14 +578,16 @@ maybeDescribe('live admission work items (Postgres)', () => {
         `WITH queued AS (
            SELECT id, created_at
            FROM ${tableName}
-           WHERE state = 'queued'
+           WHERE app_id = $3
+             AND state = 'queued'
            ORDER BY created_at ASC, id ASC
            LIMIT $2
          ),
          due_deferred AS (
            SELECT id, created_at
            FROM ${tableName}
-           WHERE state = 'deferred'
+           WHERE app_id = $3
+             AND state = 'deferred'
              AND defer_until <= $1
            ORDER BY defer_until ASC, created_at ASC, id ASC
            LIMIT $2
@@ -604,7 +608,7 @@ maybeDescribe('live admission work items (Postgres)', () => {
          ORDER BY candidates.created_at ASC, candidates.id ASC
          LIMIT $2
          FOR UPDATE SKIP LOCKED`,
-        [now, 1],
+        [now, 1, base.appId],
       );
       expect(first.rows.map((row) => row.id)).toEqual([
         'admission-lock-queued',
