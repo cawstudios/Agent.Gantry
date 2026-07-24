@@ -21,6 +21,7 @@ import { listSlackRecentChats } from '@core/cli/slack-chat-discovery.js';
 import { makeAgentThreadQueueKey } from '@core/shared/thread-queue-key.js';
 import {
   pruneAgentSenderPolicyOverride,
+  pruneDesiredStateAgent,
   resolveGroupSelector,
 } from '@core/cli/group-helpers.js';
 
@@ -1182,5 +1183,48 @@ describe('cli slack helpers', () => {
       expect.objectContaining({ agent: 'researcher' }),
     ]);
     expect(updated.agents.main_agent.bindings).toEqual({});
+  });
+
+  it('removes the agent from desired state once its last route is gone', async () => {
+    const runtimeHome = makeRuntimeHome();
+    const settings = loadRuntimeSettings(runtimeHome);
+    settings.agents.doomed = {
+      name: 'Doomed',
+      folder: 'doomed',
+      bindings: {},
+      capabilities: [],
+      delegates: [],
+      sources: { skills: [], mcpServers: [], tools: [] },
+      accessPreset: 'full',
+    } as (typeof settings.agents)['doomed'];
+    settings.agents.keeper = {
+      ...settings.agents.doomed,
+      name: 'Keeper',
+      folder: 'keeper',
+    };
+    saveRuntimeSettings(runtimeHome, settings);
+
+    // Still bound elsewhere -> the definition must survive.
+    await expect(
+      pruneDesiredStateAgent({
+        runtimeHome,
+        folder: 'doomed',
+        remainingRoutes: 1,
+      }),
+    ).resolves.toEqual({ pruned: false, providerAccountsPruned: 0 });
+    expect(loadRuntimeSettings(runtimeHome).agents.doomed).toBeDefined();
+
+    // Last route gone -> definition removed, so reconcile cannot resurrect it.
+    await expect(
+      pruneDesiredStateAgent({
+        runtimeHome,
+        folder: 'doomed',
+        remainingRoutes: 0,
+      }),
+    ).resolves.toEqual({ pruned: true, providerAccountsPruned: 0 });
+    expect(loadRuntimeSettings(runtimeHome).agents.doomed).toBeUndefined();
+
+    // Other agents are untouched.
+    expect(loadRuntimeSettings(runtimeHome).agents.keeper).toBeDefined();
   });
 });

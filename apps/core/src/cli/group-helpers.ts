@@ -140,6 +140,68 @@ export async function pruneAgentSenderPolicyOverride(
   }
 }
 
+/**
+ * Remove an agent's definition from desired state once its LAST route is gone.
+ *
+ * Route deletion alone is not durable: desired-state reconciliation re-imports
+ * every `settings.agents` entry at startup and on each settings change, so an
+ * agent whose definition survives is recreated -- along with its routes and
+ * system jobs -- on the next reload. Callers must invoke this after removing a
+ * route so removal actually persists.
+ *
+ * No-ops while the agent still owns other routes: removing one route of a
+ * multi-route agent must not delete the agent.
+ */
+export async function pruneDesiredStateAgent(input: {
+  runtimeHome: string;
+  folder: string;
+  remainingRoutes: number;
+}): Promise<{
+  pruned: boolean;
+  providerAccountsPruned: number;
+  error?: string;
+}> {
+  if (input.remainingRoutes > 0) {
+    return { pruned: false, providerAccountsPruned: 0 };
+  }
+  try {
+    const settings = loadRuntimeSettings(input.runtimeHome);
+    const previousSettings = structuredClone(settings);
+    if (!settings.agents[input.folder]) {
+      return { pruned: false, providerAccountsPruned: 0 };
+    }
+    delete settings.agents[input.folder];
+
+    // Provider accounts serving only this agent would otherwise dangle and fail
+    // settings validation ("references unknown agent").
+    let providerAccountsPruned = 0;
+    for (const [accountId, account] of Object.entries(
+      settings.providerAccounts,
+    )) {
+      if (account.agentId !== input.folder) continue;
+      const stillUsed = Object.values(settings.conversations).some(
+        (conversation) => conversation.providerAccount === accountId,
+      );
+      if (stillUsed) continue;
+      delete settings.providerAccounts[accountId];
+      providerAccountsPruned += 1;
+    }
+
+    await writeDesiredRuntimeSettings({
+      runtimeHome: input.runtimeHome,
+      settings,
+      previousSettings,
+    });
+    return { pruned: true, providerAccountsPruned };
+  } catch (err) {
+    return {
+      pruned: false,
+      providerAccountsPruned: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function syncConfiguredConversationBinding(input: {
   runtimeHome: string;
   agentId: string;

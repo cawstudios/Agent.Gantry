@@ -47,6 +47,7 @@ import {
   loadDatabase,
   normalizeGroupAddSelector,
   pruneAgentSenderPolicyOverride,
+  pruneDesiredStateAgent,
   resolveGroupSelector,
   seedTelegramControlApproverForAgent,
   usage,
@@ -467,6 +468,35 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
     } else if (policyPrune.pruned) {
       p.log.info(
         `Removed sender policy override for folder ${found.group.folder}.`,
+      );
+    }
+
+    // Deleting the route is not durable on its own: desired-state
+    // reconciliation re-imports every settings.agents entry on reload/restart,
+    // so an agent whose definition survives comes back with its routes and
+    // system jobs. Drop the definition once its last route is gone.
+    const remainingRoutes = Object.entries(
+      await db.getAllConversationRoutes(),
+    ).filter(([, group]) => group.folder === found.group.folder).length;
+    const desiredPrune = await pruneDesiredStateAgent({
+      runtimeHome,
+      folder: found.group.folder,
+      remainingRoutes,
+    });
+    if (desiredPrune.error) {
+      p.log.warn(
+        `Route removed, but the agent definition still exists in desired state for ${found.group.folder}: ${desiredPrune.error}. It will be recreated on the next reload.`,
+      );
+    } else if (desiredPrune.pruned) {
+      const accounts = desiredPrune.providerAccountsPruned;
+      p.log.info(
+        `Removed agent ${found.group.folder} from desired state${
+          accounts > 0 ? ` (and ${accounts} orphaned provider account(s))` : ''
+        }.`,
+      );
+    } else if (remainingRoutes > 0) {
+      p.log.info(
+        `Agent ${found.group.folder} kept in desired state: ${remainingRoutes} route(s) still bound.`,
       );
     }
 
