@@ -496,6 +496,18 @@ async function runRemove(runtimeHome: string, args: string[]): Promise<number> {
       );
       return 1;
     }
+    if (desiredPrune.keptForDelegates?.length) {
+      // The agent stays in desired state because other agents delegate to it,
+      // so its files must stay too: deleting them would leave delegation and
+      // reconciliation pointing at a missing folder.
+      p.log.warn(
+        `Route removed, but agent ${found.group.folder} is retained in desired state: still referenced as a delegate by ${desiredPrune.keptForDelegates.join(', ')}.`,
+      );
+      p.log.info(
+        'Next action: remove those delegate references first if you want the agent fully deleted. The agent folder was left untouched.',
+      );
+      return 0;
+    }
     if (desiredPrune.pruned) {
       const accounts = desiredPrune.providerAccountsPruned;
       p.log.info(
